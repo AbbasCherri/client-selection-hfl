@@ -10,7 +10,8 @@ def download_dataset():
         repo_id="AbbasABC/HFL-Dataset",
         repo_type="dataset",
         local_dir=local_dir,
-        ignore_patterns=[".git*", "README.md"]
+        ignore_patterns=[".git*", "README.md"],
+        max_workers=1
     )
     print("Hugging Face dataset download complete.")
 
