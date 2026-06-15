@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from models import MultiModalFusionModel, FocalLoss
+from torch.utils.data import DataLoader, Dataset
 from data_loader import MultiModalDataset
 from simulation import IoTClient, UAVAggregator, ClientSelectionCoordinator, HFLOrchestrator
 
