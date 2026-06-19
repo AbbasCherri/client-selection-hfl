@@ -5,6 +5,7 @@ from huggingface_hub import snapshot_download
 def download_dataset():
     local_dir = os.path.abspath("./data")
     print(f"Downloading AbbasABC/HFL-Dataset from Hugging Face to {local_dir}...")
+    dataset_revision = os.getenv("HF_DATASET_REVISION", "6cf97c900445e080e61cb45e1aa72515d3ff1de8")
     
     # Xet is the current fast path for Hub downloads. Enable high-performance mode
     # and keep the cache local so repeated attempts can reuse already-fetched chunks.
@@ -22,6 +23,8 @@ def download_dataset():
     os.environ["HF_HUB_CACHE"] = cache_dir
     os.environ["HF_XET_CACHE"] = os.path.join(cache_dir, "xet")
     os.environ.setdefault("HF_XET_NUM_CONCURRENT_RANGE_GETS", "64")
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_UPDATE_CHECK", "1")
 
     hf_token = os.getenv("HF_TOKEN")
     if not hf_token:
@@ -33,6 +36,7 @@ def download_dataset():
     snapshot_download(
         repo_id="AbbasABC/HFL-Dataset",
         repo_type="dataset",
+        revision=dataset_revision,
         local_dir=local_dir,
         ignore_patterns=[".git*", "README.md"],
         max_workers=max_workers,
