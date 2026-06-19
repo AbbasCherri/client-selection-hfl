@@ -2,13 +2,25 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
+has_sudo=false
+if command -v sudo >/dev/null 2>&1; then
+    if sudo -n true >/dev/null 2>&1; then
+        has_sudo=true
+    fi
+fi
+
 echo "=== Setting up HFL Simulation Environment on GCP VM ==="
 
-# Update package lists
-sudo apt-get update -y
+# Update package lists and install Python system packages only when sudo is available.
+if [ "$has_sudo" = true ]; then
+    sudo apt-get update -y
 
-# Install Python3 venv if not present
-sudo apt-get install -y python3-venv python3-pip
+    # Install Python3 venv if not present
+    sudo apt-get install -y python3-venv python3-pip
+else
+    echo "sudo is not available; skipping apt-based system setup."
+    echo "Python 3, pip, and venv must already be installed on this machine."
+fi
 
 # Create virtual environment if it doesn't exist
 if [ ! -d ".venv" ]; then
