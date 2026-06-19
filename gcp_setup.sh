@@ -42,6 +42,9 @@ echo "Installing Python dependencies (PyTorch, torchvision, pandas, scikit-learn
 export HF_XET_HIGH_PERFORMANCE=1
 export HF_XET_NUM_CONCURRENT_RANGE_GETS=${HF_XET_NUM_CONCURRENT_RANGE_GETS:-64}
 export HF_MAX_WORKERS=${HF_MAX_WORKERS:-4}
+export HF_DATASET_REVISION=${HF_DATASET_REVISION:-6cf97c900445e080e61cb45e1aa72515d3ff1de8}
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+export HF_HUB_DISABLE_UPDATE_CHECK=1
 
 # Freeze requirements
 echo "Freezing dependencies..."
