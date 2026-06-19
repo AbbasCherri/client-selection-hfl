@@ -11,11 +11,12 @@ def get_flat_fusion_weights(model):
     to use for client weight anomaly/similarity analysis.
     This saves CPU memory and accelerates operations.
     """
-    weights = []
-    for name, param in model.named_parameters():
-        if 'fusion_fc' in name:
-            weights.append(param.data.view(-1))
-    return torch.cat(weights).cpu().numpy()
+    with torch.no_grad():
+        weights = []
+        for name, param in model.named_parameters():
+            if 'fusion_fc' in name:
+                weights.append(param.detach().view(-1))
+        return torch.cat(weights).cpu().numpy()
 
 class RandomProjection:
     """
@@ -45,12 +46,15 @@ class IoTClient:
         self.indices = indices
         self.num_samples = len(indices)
         
-        # Setup PyTorch DataLoader
+        # Setup PyTorch DataLoader with multi-worker I/O for CPU parallelism
         self.train_loader = DataLoader(
             Subset(dataset, indices),
-            batch_size=32,
+            batch_size=64,
             shuffle=True,
-            drop_last=False
+            drop_last=False,
+            num_workers=2,
+            pin_memory=False,
+            persistent_workers=True
         )
 
         # Hardware and channel characteristics (Heterogeneous & Dynamic)
@@ -122,7 +126,11 @@ class IoTClient:
         Performs local model training.
         Returns the flat weight update (delta) and sample count.
         """
-        model = copy.deepcopy(global_model).to(self.device)
+        # Reuse a pre-allocated model instead of deepcopy every round
+        if not hasattr(self, '_local_model'):
+            self._local_model = copy.deepcopy(global_model)
+        self._local_model.load_state_dict(global_model.state_dict())
+        model = self._local_model.to(self.device)
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -135,7 +143,7 @@ class IoTClient:
                 features = features.to(self.device)
                 labels = labels.to(self.device)
                 
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 outputs = model(imgs, features)
                 loss = loss_fn(outputs, labels)
                 loss.backward()
