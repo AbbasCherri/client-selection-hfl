@@ -4,19 +4,25 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
+from torch.nn.utils import parameters_to_vector
 
-def get_flat_fusion_weights(model):
+def get_fusion_params(model):
+    """
+    Returns the fusion-head parameters in model order for fast vectorization.
+    """
+    return [param for name, param in model.named_parameters() if 'fusion_fc' in name]
+
+
+def get_flat_fusion_weights(model, fusion_params=None):
     """
     Extracts and flattens only the fusion head parameters of the model
     to use for client weight anomaly/similarity analysis.
     This saves CPU memory and accelerates operations.
     """
     with torch.no_grad():
-        weights = []
-        for name, param in model.named_parameters():
-            if 'fusion_fc' in name:
-                weights.append(param.detach().view(-1))
-        return torch.cat(weights).cpu().numpy()
+        if fusion_params is None:
+            fusion_params = get_fusion_params(model)
+        return parameters_to_vector(fusion_params).detach().cpu().numpy()
 
 class RandomProjection:
     """
@@ -40,22 +46,27 @@ class IoTClient:
         self.client_id = client_id
         self.coords = coords  # (latitude, longitude)
         self.device = device
+        self.loader_workers = int(os.getenv("HFL_DATALOADER_WORKERS", "0"))
         
         # Local dataset
         self.dataset = dataset
         self.indices = indices
         self.num_samples = len(indices)
         
-        # Setup PyTorch DataLoader with multi-worker I/O for CPU parallelism
-        self.train_loader = DataLoader(
-            Subset(dataset, indices),
-            batch_size=64,
-            shuffle=True,
-            drop_last=False,
-            num_workers=2,
-            pin_memory=False,
-            persistent_workers=True
-        )
+        # Keep data loading conservative by default; spawning workers per client
+        # gets expensive very quickly when many clients are active.
+        loader_kwargs = {
+            "batch_size": 64,
+            "shuffle": True,
+            "drop_last": False,
+            "num_workers": self.loader_workers,
+            "pin_memory": self.device == "cuda",
+        }
+        if self.loader_workers > 0:
+            loader_kwargs["persistent_workers"] = True
+            loader_kwargs["prefetch_factor"] = 2
+
+        self.train_loader = DataLoader(Subset(dataset, indices), **loader_kwargs)
 
         # Hardware and channel characteristics (Heterogeneous & Dynamic)
         self.battery = np.random.uniform(0.3, 1.0)
@@ -134,7 +145,10 @@ class IoTClient:
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-        initial_weights = get_flat_fusion_weights(model)
+        if not hasattr(self, '_fusion_params'):
+            self._fusion_params = get_fusion_params(model)
+
+        initial_weights = get_flat_fusion_weights(model, self._fusion_params)
 
         # Run training loop for local epochs
         for epoch in range(epochs):
@@ -149,7 +163,7 @@ class IoTClient:
                 loss.backward()
                 optimizer.step()
 
-        trained_weights = get_flat_fusion_weights(model)
+        trained_weights = get_flat_fusion_weights(model, self._fusion_params)
         
         # Calculate update vector (delta)
         delta_w = trained_weights - initial_weights
@@ -384,7 +398,8 @@ class HFLOrchestrator:
         self.device = device
         
         # Dimensions for random projection of weight updates
-        self.flat_dim = len(get_flat_fusion_weights(global_model))
+        self.fusion_params = get_fusion_params(global_model)
+        self.flat_dim = len(get_flat_fusion_weights(global_model, self.fusion_params))
         self.proj_dim = 10
         self.projector = RandomProjection(self.flat_dim, self.proj_dim)
         
@@ -402,7 +417,7 @@ class HFLOrchestrator:
         all_preds = []
         all_targets = []
         
-        with torch.no_grad():
+        with torch.inference_mode():
             for imgs, features, labels in self.test_loader:
                 imgs = imgs.to(self.device)
                 features = features.to(self.device)
@@ -456,8 +471,9 @@ class HFLOrchestrator:
         )
         
         # Reset current round state
+        selected_client_ids = {client.client_id for client in selected_clients}
         for client in self.clients:
-            client.is_active = (client in selected_clients)
+            client.is_active = (client.client_id in selected_client_ids)
             if hasattr(client, 'local_model_state'):
                 delattr(client, 'local_model_state')
                 
@@ -489,6 +505,8 @@ class HFLOrchestrator:
                 client_latencies[client.client_id] = actual_time
                 # Add to communication cost (0.02 MB per upload)
                 self.total_comm_cost += 0.02
+
+        successful_client_ids = {client.client_id for client in successful_clients}
                 
         # 3. Update Client Reputations
         if len(successful_clients) > 0:
@@ -548,7 +566,7 @@ class HFLOrchestrator:
                 
         # Update success history for selected clients that failed (dropouts)
         for client in selected_clients:
-            if client not in successful_clients:
+            if client.client_id not in successful_client_ids:
                 if not hasattr(client, 'success_history'):
                     client.success_history = []
                 client.success_history.append(0)
@@ -608,7 +626,7 @@ class HFLOrchestrator:
             
         # 6. Update Client and UAV states for the next round (decay battery, fluctuate SNR, etc.)
         for client in self.clients:
-            client.update_hardware_state(is_selected=(client in selected_clients))
+            client.update_hardware_state(is_selected=(client.client_id in selected_client_ids))
             
         for uav in self.uavs:
             uav.update_state()

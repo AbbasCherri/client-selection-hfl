@@ -141,6 +141,17 @@ def save_comparison_plots(df_results, plot_dir, N, rounds):
 
 def main():
     args = parse_args()
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+
+    if not os.path.isabs(args.csv_path):
+        args.csv_path = os.path.abspath(os.path.join(repo_root, args.csv_path))
+    if not os.path.isabs(args.data_dir):
+        args.data_dir = os.path.abspath(os.path.join(repo_root, args.data_dir))
+    if not os.path.isabs(args.output_dir):
+        args.output_dir = os.path.abspath(os.path.join(repo_root, args.output_dir))
+    if not os.path.isabs(args.plot_dir):
+        args.plot_dir = os.path.abspath(os.path.join(repo_root, args.plot_dir))
+
     setup_directories(args.output_dir, args.plot_dir)
     
     # Set seed
@@ -170,15 +181,16 @@ def main():
         sub_size = int(len(df_meta) * args.subsample)
         print(f"Subsampling dataset from {len(df_meta)} down to {sub_size} buildings ({args.subsample*100}%)...")
         df_meta = df_meta.sample(n=sub_size, random_state=args.seed).reset_index(drop=True)
-        # Re-save subsampled CSV temporarily or pass directly
-        sub_csv_path = "./data/subsampled_metadata.csv"
+        # Save the temporary subsampled CSV next to the source metadata so the
+        # workflow is independent of the current working directory.
+        sub_csv_path = os.path.join(os.path.dirname(args.csv_path), "subsampled_metadata.csv")
         df_meta.to_csv(sub_csv_path, index=False)
         csv_path_to_use = sub_csv_path
     else:
         csv_path_to_use = args.csv_path
 
     # Partition dataset into train/test and clients
-    full_dataset, client_train_indices, client_test_indices, global_test_indices = get_hfl_data_partitions(
+    full_dataset, client_train_indices, client_test_indices, global_test_indices, client_coords = get_hfl_data_partitions(
         csv_path=csv_path_to_use,
         data_dir=args.data_dir,
         N=args.N,
@@ -209,6 +221,12 @@ def main():
     methods = ["proposed", "random", "battery_only", "utility_only", "fedcs"]
     all_round_records = []
 
+    # Reuse client definitions across methods; only the model state is reset.
+    client_specs = [
+        (client_id, client_coords[client_id], client_train_indices[client_id])
+        for client_id in range(args.N)
+    ]
+
     # Run simulation for each selection scheme
     for method in methods:
         print(f"\n==================================================")
@@ -220,12 +238,7 @@ def main():
         
         # Initialize clients with the exact same initial state for each method
         clients = []
-        for client_id in range(args.N):
-            indices = client_train_indices[client_id]
-            # Locate client coordinate as mean building coordinate in cluster
-            client_df = df_meta.iloc[indices]
-            coords = (client_df['latitude'].mean(), client_df['longitude'].mean())
-            
+        for client_id, coords, indices in client_specs:
             client = IoTClient(
                 client_id=client_id,
                 coords=coords,
