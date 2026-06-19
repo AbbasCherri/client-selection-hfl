@@ -46,11 +46,7 @@ export HF_DATASET_REVISION=${HF_DATASET_REVISION:-6cf97c900445e080e61cb45e1aa725
 export HF_HUB_DISABLE_UPDATE_CHECK=1
 
 # Freeze requirements
-echo "Freezing dependencies..."
+echo "Freezing requirements..."
 .venv/bin/pip freeze > requirements.txt
-
-# Run the download script
-echo "Running the data download script..."
-.venv/bin/python download_data.py
 
 echo "=== Setup completed successfully! ==="
