@@ -18,6 +18,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="HFL Client Selection Simulation Runner")
     parser.add_argument("--csv_path", type=str, default="./data/Final_Dataset/training_dataset_with_city.csv", help="Path to CSV metadata file")
     parser.add_argument("--data_dir", type=str, default="./data", help="Directory where image files reside")
+    parser.add_argument("--download_data", action="store_true", help="Download the dataset if the CSV is missing")
     parser.add_argument("--N", type=int, default=70, help="Number of IoT clients (default 70)")
     parser.add_argument("--U", type=int, default=3, help="Number of UAV edge aggregators (default 3)")
     parser.add_argument("--rounds", type=int, default=30, help="Number of HFL rounds (default 30)")
@@ -149,11 +150,16 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running simulation on device: {device}")
 
-    # Check for data presence, trigger download if not exists
+    # Check for data presence; downloading is opt-in to avoid unexpected network usage.
     if not os.path.exists(args.csv_path):
-        print("Dataset CSV not found locally. Downloading from Hugging Face...")
-        from download_data import download_dataset
-        download_dataset()
+        if args.download_data:
+            print("Dataset CSV not found locally. Downloading from Hugging Face...")
+            from download_data import download_dataset
+            download_dataset()
+        else:
+            raise FileNotFoundError(
+                f"Dataset CSV not found at {args.csv_path}. Place the dataset locally or rerun with --download_data."
+            )
 
     # Load dataset
     print(f"Loading metadata from {args.csv_path}...")
