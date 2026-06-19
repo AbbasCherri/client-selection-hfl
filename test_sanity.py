@@ -1,3 +1,25 @@
+import os
+import sys
+from pathlib import Path
+
+
+def _bootstrap_repo_venv():
+    repo_root = Path(__file__).resolve().parent
+    venv_root = repo_root / ".venv"
+    if not venv_root.exists():
+        return
+
+    candidates = [
+        venv_root / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages",
+        venv_root / "lib64" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages",
+    ]
+    for site_packages in candidates:
+        if site_packages.exists() and str(site_packages) not in sys.path:
+            sys.path.insert(0, str(site_packages))
+
+
+_bootstrap_repo_venv()
+
 import unittest
 import torch
 import numpy as np
