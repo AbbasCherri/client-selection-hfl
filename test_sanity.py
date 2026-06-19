@@ -112,6 +112,7 @@ class TestHFLSanity(unittest.TestCase):
             client.battery = 0.9
             client.snr = 20.0
             client.base_compute_time = 100.0
+            client.latency_history = [100.0]
             clients.append(client)
 
         # 4. Setup UAVs

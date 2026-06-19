@@ -300,7 +300,14 @@ class ClientSelectionCoordinator:
                 eligible_clients.append(client)
 
         if not eligible_clients:
-            return [], {}
+            # Fallback: if the strict gate removes everyone, relax to the best
+            # available clients so the round can still make progress.
+            ranked_clients = sorted(
+                self.clients,
+                key=lambda c: (c.battery, c.snr, c.num_samples),
+                reverse=True,
+            )
+            eligible_clients = ranked_clients[: max(1, min(len(ranked_clients), len(self.uavs) or 1))]
 
         # 2. Priority scoring and UCB Exploration
         scores = {}
@@ -382,6 +389,17 @@ class ClientSelectionCoordinator:
                 
                 # Increment client selection count
                 client.selection_count += 1
+
+        if not selected_clients and sorted_clients and self.uavs:
+            # Emergency fallback: assign the top-ranked client to the nearest UAV
+            # even if the communication gate was too strict. This keeps the
+            # simulation from stalling with zero-participation rounds.
+            client = sorted_clients[0]
+            target_uav = min(self.uavs, key=lambda u: self.haversine(client.coords, u.coords))
+            target_uav.assigned_clients.append(client)
+            selected_clients.append(client)
+            assignment[client.client_id] = target_uav.uav_id
+            client.selection_count += 1
                 
         return selected_clients, assignment
 
