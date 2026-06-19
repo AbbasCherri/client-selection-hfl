@@ -9,9 +9,9 @@ def download_dataset():
     # and keep the cache local so repeated attempts can reuse already-fetched chunks.
     os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 
-    # Use an aggressive worker count by default; network-bound dataset downloads
-    # on GCP usually benefit from more concurrent requests.
-    default_workers = min(32, max(8, (os.cpu_count() or 8) * 2))
+    # Keep repository metadata fan-out modest to avoid Hub rate limits.
+    # Xet handles the heavy data transfer path separately.
+    default_workers = int(os.getenv("HF_MAX_WORKERS", "4"))
     max_workers = int(os.getenv("HF_MAX_WORKERS", str(default_workers)))
     
     # Point HF cache inside the data dir to avoid doubling disk usage
@@ -20,7 +20,7 @@ def download_dataset():
     os.environ["HF_HOME"] = cache_dir
     os.environ["HF_HUB_CACHE"] = cache_dir
     os.environ["HF_XET_CACHE"] = os.path.join(cache_dir, "xet")
-    os.environ.setdefault("HF_XET_NUM_CONCURRENT_RANGE_GETS", "32")
+    os.environ.setdefault("HF_XET_NUM_CONCURRENT_RANGE_GETS", "64")
     
     # Download files using snapshot_download
     snapshot_download(
