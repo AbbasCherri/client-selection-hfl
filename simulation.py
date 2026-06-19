@@ -615,14 +615,18 @@ class HFLOrchestrator:
             total_weighted_samples = sum(u.reputation * uav_updates[u][1] for u in active_uavs)
             
             global_state = self.global_model.state_dict()
-            # Reset global state dictionary
-            for key in global_state.keys():
-                global_state[key] = torch.zeros_like(global_state[key])
+            # Reset only floating-point tensors. Integer buffers must stay as
+            # integer tensors to avoid casting errors during aggregation.
+            float_keys = []
+            for key, tensor in global_state.items():
+                if torch.is_floating_point(tensor):
+                    global_state[key] = torch.zeros_like(tensor)
+                    float_keys.append(key)
                 
             for uav in active_uavs:
                 edge_state, total_samples = uav_updates[uav]
                 weight = (uav.reputation * total_samples) / (total_weighted_samples + 1e-8)
-                for key in global_state.keys():
+                for key in float_keys:
                     global_state[key] += edge_state[key].to(global_state[key].device) * weight
                     
             self.global_model.load_state_dict(global_state)
