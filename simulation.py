@@ -217,9 +217,13 @@ class UAVAggregator:
             
         aggregated_state = copy.deepcopy(global_model.state_dict())
         
-        # Zero out the state dictionary
-        for key in aggregated_state.keys():
-            aggregated_state[key] = torch.zeros_like(aggregated_state[key])
+        # Zero out only floating-point tensors. Integer buffers (for example,
+        # BatchNorm counters) should be preserved as-is to avoid dtype errors.
+        float_keys = []
+        for key, tensor in aggregated_state.items():
+            if torch.is_floating_point(tensor):
+                aggregated_state[key] = torch.zeros_like(tensor)
+                float_keys.append(key)
             
         total_samples = sum(c.num_samples for c in success_clients)
         
@@ -227,8 +231,7 @@ class UAVAggregator:
         for client in success_clients:
             weight = client.num_samples / total_samples
             client_state = client.local_model_state
-            for key in aggregated_state.keys():
-                # Cast to float to avoid type mismatches
+            for key in float_keys:
                 aggregated_state[key] += client_state[key].to(aggregated_state[key].device) * weight
                 
         return aggregated_state, total_samples

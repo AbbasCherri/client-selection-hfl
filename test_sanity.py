@@ -90,8 +90,8 @@ class TestHFLSanity(unittest.TestCase):
         class MockDataset(MultiModalDataset):
             def __getitem__(self, idx):
                 img_tensor = torch.randn(3, 128, 128)
-                features_tensor = torch.tensor(self.features[idx])
-                label_tensor = torch.tensor(self.labels[idx])
+                features_tensor = self.features[idx].clone().detach()
+                label_tensor = self.labels[idx].clone().detach()
                 return img_tensor, features_tensor, label_tensor
 
         full_dataset = MockDataset(df_dummy, data_dir="")
