@@ -40,8 +40,8 @@ echo "Installing Python dependencies (PyTorch, torchvision, pandas, scikit-learn
 
 # Allow the download script to use a higher default download parallelism on GCP.
 export HF_XET_HIGH_PERFORMANCE=1
-export HF_XET_NUM_CONCURRENT_RANGE_GETS=${HF_XET_NUM_CONCURRENT_RANGE_GETS:-32}
-export HF_MAX_WORKERS=${HF_MAX_WORKERS:-32}
+export HF_XET_NUM_CONCURRENT_RANGE_GETS=${HF_XET_NUM_CONCURRENT_RANGE_GETS:-64}
+export HF_MAX_WORKERS=${HF_MAX_WORKERS:-4}
 
 # Freeze requirements
 echo "Freezing dependencies..."
