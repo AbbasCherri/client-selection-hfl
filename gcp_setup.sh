@@ -45,13 +45,18 @@ echo "Installing Python dependencies (NumPy, pandas, PyTorch, torchvision, sciki
 .venv/bin/pip install \
     numpy \
     pandas \
-    torch \
-    torchvision \
     scikit-learn \
     matplotlib \
     pillow \
     "huggingface-hub>=0.32.0" \
     hf_xet
+
+# Install CPU-only PyTorch wheels to keep the VM setup fast and avoid pulling
+# unnecessary CUDA runtimes on instances without GPUs.
+.venv/bin/pip install \
+    torch \
+    torchvision \
+    --index-url https://download.pytorch.org/whl/cpu
 
 # Allow the download script to use a higher default download parallelism on GCP.
 export HF_XET_HIGH_PERFORMANCE=1
