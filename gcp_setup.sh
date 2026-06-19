@@ -30,13 +30,28 @@ else
     echo "Virtual environment .venv already exists."
 fi
 
+# Bootstrap pip if the venv was created without it.
+if [ ! -x ".venv/bin/pip" ]; then
+    echo "Bootstrapping pip in .venv..."
+    .venv/bin/python -m ensurepip --upgrade
+fi
+
 # Upgrade pip
 echo "Upgrading pip..."
-.venv/bin/pip install --upgrade pip
+.venv/bin/pip install --upgrade pip setuptools wheel
 
-# Install dependencies
-echo "Installing Python dependencies (PyTorch, torchvision, pandas, scikit-learn, etc.)..."
-.venv/bin/pip install torch torchvision pandas scikit-learn "huggingface-hub>=0.32.0" hf_xet matplotlib tifffile pillow
+# Install project dependencies required by the Python imports in this repo.
+echo "Installing Python dependencies (NumPy, pandas, PyTorch, torchvision, scikit-learn, matplotlib, Pillow, and Hugging Face tooling)..."
+.venv/bin/pip install \
+    numpy \
+    pandas \
+    torch \
+    torchvision \
+    scikit-learn \
+    matplotlib \
+    pillow \
+    "huggingface-hub>=0.32.0" \
+    hf_xet
 
 # Allow the download script to use a higher default download parallelism on GCP.
 export HF_XET_HIGH_PERFORMANCE=1
