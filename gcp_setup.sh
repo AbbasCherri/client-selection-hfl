@@ -24,11 +24,12 @@ echo "Upgrading pip..."
 
 # Install dependencies
 echo "Installing Python dependencies (PyTorch, torchvision, pandas, scikit-learn, etc.)..."
-.venv/bin/pip install torch torchvision pandas scikit-learn huggingface-hub matplotlib tifffile pillow hf_transfer
+.venv/bin/pip install torch torchvision pandas scikit-learn "huggingface-hub>=0.32.0" hf_xet matplotlib tifffile pillow
 
 # Allow the download script to use a higher default download parallelism on GCP.
-export HF_HUB_ENABLE_HF_TRANSFER=1
-export HF_MAX_WORKERS=${HF_MAX_WORKERS:-16}
+export HF_XET_HIGH_PERFORMANCE=1
+export HF_XET_NUM_CONCURRENT_RANGE_GETS=${HF_XET_NUM_CONCURRENT_RANGE_GETS:-32}
+export HF_MAX_WORKERS=${HF_MAX_WORKERS:-32}
 
 # Freeze requirements
 echo "Freezing dependencies..."

@@ -5,9 +5,9 @@ def download_dataset():
     local_dir = os.path.abspath("./data")
     print(f"Downloading AbbasABC/HFL-Dataset from Hugging Face to {local_dir}...")
     
-    # Prefer the accelerated transfer backend for large dataset snapshots.
-    # It is optional, so keep the script working even if the extra package is absent.
-    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+    # Xet is the current fast path for Hub downloads. Enable high-performance mode
+    # and keep the cache local so repeated attempts can reuse already-fetched chunks.
+    os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 
     # Use an aggressive worker count by default; network-bound dataset downloads
     # on GCP usually benefit from more concurrent requests.
@@ -17,7 +17,10 @@ def download_dataset():
     # Point HF cache inside the data dir to avoid doubling disk usage
     cache_dir = os.path.join(local_dir, ".hf_cache")
     os.makedirs(cache_dir, exist_ok=True)
+    os.environ["HF_HOME"] = cache_dir
     os.environ["HF_HUB_CACHE"] = cache_dir
+    os.environ["HF_XET_CACHE"] = os.path.join(cache_dir, "xet")
+    os.environ.setdefault("HF_XET_NUM_CONCURRENT_RANGE_GETS", "32")
     
     # Download files using snapshot_download
     snapshot_download(
@@ -25,7 +28,6 @@ def download_dataset():
         repo_type="dataset",
         local_dir=local_dir,
         ignore_patterns=[".git*", "README.md"],
-        local_dir_use_symlinks=False,
         max_workers=max_workers,
         resume_download=True
     )
