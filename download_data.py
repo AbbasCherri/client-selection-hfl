@@ -1,4 +1,5 @@
 import os
+import getpass
 from huggingface_hub import snapshot_download
 
 def download_dataset():
@@ -21,6 +22,12 @@ def download_dataset():
     os.environ["HF_HUB_CACHE"] = cache_dir
     os.environ["HF_XET_CACHE"] = os.path.join(cache_dir, "xet")
     os.environ.setdefault("HF_XET_NUM_CONCURRENT_RANGE_GETS", "64")
+
+    hf_token = os.getenv("HF_TOKEN")
+    if not hf_token:
+        hf_token = getpass.getpass("Enter your Hugging Face access token: ").strip()
+    if not hf_token:
+        raise RuntimeError("A Hugging Face access token is required to download this dataset.")
     
     # Download files using snapshot_download
     snapshot_download(
@@ -29,7 +36,8 @@ def download_dataset():
         local_dir=local_dir,
         ignore_patterns=[".git*", "README.md"],
         max_workers=max_workers,
-        resume_download=True
+        resume_download=True,
+        token=hf_token
     )
     print("Hugging Face dataset download complete.")
 
