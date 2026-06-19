@@ -24,7 +24,11 @@ echo "Upgrading pip..."
 
 # Install dependencies
 echo "Installing Python dependencies (PyTorch, torchvision, pandas, scikit-learn, etc.)..."
-.venv/bin/pip install torch torchvision pandas scikit-learn huggingface-hub matplotlib tifffile pillow
+.venv/bin/pip install torch torchvision pandas scikit-learn huggingface-hub matplotlib tifffile pillow hf_transfer
+
+# Allow the download script to use a higher default download parallelism on GCP.
+export HF_HUB_ENABLE_HF_TRANSFER=1
+export HF_MAX_WORKERS=${HF_MAX_WORKERS:-16}
 
 # Freeze requirements
 echo "Freezing dependencies..."

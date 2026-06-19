@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import torch
+import torchvision.transforms.functional as TF
 from torch.utils.data import Dataset, Subset
 from PIL import Image
 from sklearn.cluster import KMeans
@@ -48,14 +49,13 @@ class MultiModalDataset(Dataset):
             # Fallback if image load fails (e.g. missing file)
             img = Image.new('RGB', (128, 128), (0, 0, 0))
 
-        # Basic transform: convert to PyTorch tensor and normalize to [0, 1]
+        # Convert to tensor: TF.to_tensor handles /255, HWC->CHW in a single
+        # zero-copy operation, avoiding 3 intermediate numpy array allocations.
         if self.transform:
             img_tensor = self.transform(img)
         else:
             img_resized = img.resize((128, 128))
-            img_np = np.array(img_resized).astype(np.float32) / 255.0
-            img_np = img_np.transpose(2, 0, 1)  # HWC to CHW
-            img_tensor = torch.tensor(img_np)
+            img_tensor = TF.to_tensor(img_resized)
 
         features_tensor = torch.tensor(self.features[idx])
         label_tensor = torch.tensor(self.labels[idx])
