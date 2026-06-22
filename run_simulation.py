@@ -269,7 +269,7 @@ def main():
             epicenter  = epicenter,
             clients    = clients,
             uavs       = uavs,
-            R_comm     = 500.0,        # metres – matches paper Table II
+            R_comm     = 50000.0,      # metres – 50 km covers Noto Peninsula area
             B_min_iot  = 0.2,
             B_min_uav  = 0.3,
             T_max      = 300.0,
