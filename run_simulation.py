@@ -176,7 +176,7 @@ def main():
 
     # Resolve relative paths to absolute (important when running via shell scripts)
     def _abs(p):
-        return os.abspath(p) if p else p
+        return os.path.abspath(p) if p else p
 
     args.data_dir   = _abs(args.data_dir)
     args.output_dir = _abs(args.output_dir)
