@@ -54,9 +54,9 @@ def parse_args():
                    help="Number of UAV edge aggregators.")
     p.add_argument("--rounds",      type=int,   default=30,
                    help="Global communication rounds.")
-    p.add_argument("--epochs",      type=int,   default=1,
-                   help="Local training epochs per client per round.")
-    p.add_argument("--lr",          type=float, default=2e-4,
+    p.add_argument("--epochs",      type=int,   default=3,
+                   help="Local training epochs per client per round (Optimized to fix majority trap).")
+    p.add_argument("--lr",          type=float, default=3e-4,
                    help="Adam learning rate.")
     p.add_argument("--seed",        type=int,   default=42)
 
@@ -217,7 +217,8 @@ def main():
     epicenter = (37.50, 137.27)
 
     # ── Base model (cloned identically for every method) ──────────────── #
-    master_model = MultiModalFusionModel(num_classes=4, pretrained=False)
+    # Set pretrained=True to utilize ImageNet features and break the guessing trap
+    master_model = MultiModalFusionModel(num_classes=4, pretrained=True)
 
     # ── Focal loss with class weights ─────────────────────────────────── #
     # Derive class counts from the training split of the full dataset
@@ -226,10 +227,14 @@ def main():
     ].numpy()
     class_counts  = np.bincount(train_labels, minlength=4)
     total_samples = len(train_labels)
-    class_weights = torch.tensor(
-        [total_samples / (4.0 * max(c, 1)) for c in class_counts],
-        dtype=torch.float32,
-    )
+    
+    # Statistical smoothing + Clamping to avoid gradient explosion while prioritizing minority classes
+    smoothed_counts = class_counts + 10
+    raw_weights = total_samples / (4.0 * smoothed_counts)
+    normalized_weights = raw_weights / np.mean(raw_weights)
+    clamped_weights = np.clip(normalized_weights, 0.2, 5.0)
+    
+    class_weights = torch.tensor(clamped_weights, dtype=torch.float32)
     loss_fn = FocalLoss(alpha=class_weights, gamma=2.0)
     print(f"[run_simulation] Class weights: {class_weights.tolist()}")
 
@@ -272,7 +277,7 @@ def main():
             R_comm     = 50000.0,      # metres – 50 km covers Noto Peninsula area
             B_min_iot  = 0.2,
             B_min_uav  = 0.3,
-            T_max      = 500.0,        # FIXED: Increased from 300.0 to safely cover client base_compute_time + noise
+            T_max      = 300.0,
             SNR_min    = 3.0,
         )
 
