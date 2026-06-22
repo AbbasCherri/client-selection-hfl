@@ -138,12 +138,6 @@ def _stream_metadata_df(
     """
     Stream the HF dataset and return a lightweight metadata DataFrame
     containing only the columns needed for partitioning + training.
-
-    Columns returned:
-        latitude, longitude,
-        MMI_original, MMI_shape, PGA, PGV, SA_0_3, SA_1_0, SA_3_0,
-        damage_val, chip_path  (kept for compatibility; actual images come
-                                 from the GSI tile API)
     """
     try:
         from datasets import load_dataset  # type: ignore
@@ -164,13 +158,10 @@ def _stream_metadata_df(
         trust_remote_code=False,
     )
 
-    # Collect rows into a list; only keep columns we need to stay memory-light
     needed = set(FEATURE_COLS) | {"damage_val", "chip_path"}
     rows = []
     for row in ds:
-        # Keep only needed keys; some HF datasets have dozens of columns
         filtered = {k: row[k] for k in needed if k in row}
-        # Fallback for column name variations
         if "damage_val" not in filtered and "label" in row:
             filtered["damage_val"] = row["label"]
         if "chip_path" not in filtered:
@@ -179,6 +170,11 @@ def _stream_metadata_df(
 
     df = pd.DataFrame(rows)
     logger.info("Streamed %d rows from HuggingFace.", len(df))
+
+    # ── CRITICAL FIX: Strip non-target placeholders (9, 99) from cross-entropy pipeline ──
+    if "damage_val" in df.columns:
+        df = df[df["damage_val"].isin([0, 1])].reset_index(drop=True)
+        logger.info("Filtered invalid labels (9, 99). Remaining clean rows: %d", len(df))
 
     # Subsample deterministically
     if subsample < 1.0:
@@ -197,25 +193,7 @@ def _stream_metadata_df(
 class MultiModalDataset(Dataset):
     """
     Fuses aerial building imagery with structured seismic and location features.
-
-    Images are fetched on-demand from the Japan GSI tile API (with local disk
-    cache) using the building's lat/lon coordinates.  This removes any
-    dependency on pre-downloaded image archives.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Must contain FEATURE_COLS, `damage_val`, and optionally `chip_path`.
-    data_dir : str
-        Root directory for locally-downloaded images (legacy / optional).
-        When a `chip_path` points to an existing file under `data_dir` the
-        file is loaded directly; otherwise the GSI tile API is used.
-    transform : callable, optional
-        torchvision transform applied to the PIL image before conversion.
-    use_gsi : bool
-        If True (default) missing local images are fetched from the GSI API.
     """
-
     def __init__(self, df: pd.DataFrame, data_dir: str = "./data",
                  transform=None, use_gsi: bool = True):
         self.df        = df.reset_index(drop=True)
@@ -223,13 +201,11 @@ class MultiModalDataset(Dataset):
         self.transform = transform
         self.use_gsi   = use_gsi
 
-        # Pre-compute tensors for structured features and labels
         feat_arr        = self.df[FEATURE_COLS].values.astype(np.float32)
         self.features   = torch.from_numpy(feat_arr)
         self.labels     = torch.from_numpy(self.df["damage_val"].values.astype(np.int64))
         self.chip_paths = self.df["chip_path"].values
 
-        # Keep raw lat/lon for GSI tile fetching (before scaling)
         self.latitudes  = self.df["latitude"].values.astype(np.float64)
         self.longitudes = self.df["longitude"].values.astype(np.float64)
 
@@ -247,13 +223,7 @@ class MultiModalDataset(Dataset):
 
         return img_tensor, self.features[idx], self.labels[idx]
 
-    # ------------------------------------------------------------------
-    # Image loading helpers
-    # ------------------------------------------------------------------
-
     def _load_image(self, idx: int) -> Image.Image:
-        """Try local file first, then GSI tile, then return black dummy."""
-        # 1. Try resolving a local file path
         chip_path = str(self.chip_paths[idx])
         if chip_path:
             local_path = self._resolve_local_path(chip_path)
@@ -264,22 +234,17 @@ class MultiModalDataset(Dataset):
                 except Exception:
                     pass
 
-        # 2. Fetch from GSI tile API using lat/lon
         if self.use_gsi:
             lat = float(self.latitudes[idx])
             lon = float(self.longitudes[idx])
-            # Sanity-check coordinates (Noto Peninsula area)
             if 35.0 <= lat <= 40.0 and 135.0 <= lon <= 140.0:
                 return _get_building_chip(lat, lon)
 
-        # 3. Black fallback
         return Image.new("RGB", (CHIP_PX, CHIP_PX), (0, 0, 0))
 
     def _resolve_local_path(self, chip_path: str) -> str | None:
-        """Return an absolute path if the chip file can be found locally."""
         if os.path.isabs(chip_path) and os.path.isfile(chip_path):
             return chip_path
-        # Strip leading '../' prefix used in the original CSV
         stripped = chip_path.lstrip("./")
         if stripped.startswith("../"):
             stripped = stripped[3:]
@@ -290,7 +255,7 @@ class MultiModalDataset(Dataset):
 
 
 # ---------------------------------------------------------------------------
-# Partition cache helpers (unchanged from original)
+# Partition cache helpers
 # ---------------------------------------------------------------------------
 
 def _partition_cache_path(cache_root: str, cache_key_str: str) -> str:
@@ -329,27 +294,6 @@ def get_hfl_data_partitions(
 ):
     """
     Build the full MultiModalDataset and per-client index partitions.
-
-    When `csv_path` is provided and exists the CSV is loaded from disk
-    (legacy behaviour).  Otherwise the HuggingFace dataset is streamed.
-
-    Parameters
-    ----------
-    csv_path    : Path to a local CSV file (optional).
-    data_dir    : Root directory for locally-cached image chips (optional).
-    N           : Number of IoT client partitions.
-    train_ratio : Fraction of each client's data used for training.
-    random_seed : RNG seed for reproducibility.
-    subsample   : Fraction of total rows to keep (applied when streaming).
-    hf_token    : HuggingFace access token (required for private repos).
-
-    Returns
-    -------
-    full_dataset         : MultiModalDataset over all rows.
-    client_train_indices : dict[int, list[int]]
-    client_test_indices  : dict[int, list[int]]
-    global_test_indices  : list[int]
-    client_coords        : dict[int, tuple[float, float]]
     """
     # ------------------------------------------------------------------ #
     # 1. Load raw metadata                                                #
@@ -357,7 +301,11 @@ def get_hfl_data_partitions(
     if csv_path and os.path.isfile(csv_path):
         logger.info("Loading metadata from local CSV: %s", csv_path)
         df = pd.read_csv(csv_path).fillna(0)
-        # Optionally subsample for faster CPU simulation
+        
+        # ── CRITICAL FIX: Clean local CSV targets as well to prevent out-of-bounds errors ──
+        if "damage_val" in df.columns:
+            df = df[df["damage_val"].isin([0, 1])].reset_index(drop=True)
+            
         if subsample < 1.0:
             n = max(1, int(len(df) * subsample))
             df = df.sample(n=n, random_state=random_seed).reset_index(drop=True)
@@ -377,7 +325,6 @@ def get_hfl_data_partitions(
     # ------------------------------------------------------------------ #
     # 2. Feature scaling                                                  #
     # ------------------------------------------------------------------ #
-    # Save raw coordinates for geographic partitioning before scaling
     raw_lat = df["latitude"].values.copy()
     raw_lon = df["longitude"].values.copy()
 
