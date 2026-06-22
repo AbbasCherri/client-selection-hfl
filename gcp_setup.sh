@@ -1,72 +1,76 @@
 #!/bin/bash
-# Exit immediately if a command exits with a non-zero status
+# gcp_setup.sh
+# Sets up the Python virtual environment on a GCP VM (or any Linux host).
+# Installs all dependencies needed for streaming-based HFL simulation.
 set -e
 
 has_sudo=false
-if command -v sudo >/dev/null 2>&1; then
-    if sudo -n true >/dev/null 2>&1; then
-        has_sudo=true
-    fi
+if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    has_sudo=true
 fi
 
-echo "=== Setting up HFL Simulation Environment on GCP VM ==="
+echo "=== HFL Simulation Environment Setup ==="
 
-# Update package lists and install Python system packages only when sudo is available.
 if [ "$has_sudo" = true ]; then
     sudo apt-get update -y
-
-    # Install Python3 venv if not present
     sudo apt-get install -y python3-venv python3-pip
 else
-    echo "sudo is not available; skipping apt-based system setup."
-    echo "Python 3, pip, and venv must already be installed on this machine."
+    echo "sudo unavailable – skipping apt setup; python3/venv must already be installed."
 fi
 
-# Create virtual environment if it doesn't exist
+# Create virtual environment
 if [ ! -d ".venv" ]; then
-    echo "Creating virtual environment .venv..."
+    echo "Creating virtual environment .venv …"
     python3 -m venv .venv
 else
     echo "Virtual environment .venv already exists."
 fi
 
-# Bootstrap pip if the venv was created without it.
+# Bootstrap pip if needed
 if [ ! -x ".venv/bin/pip" ]; then
-    echo "Bootstrapping pip in .venv..."
     .venv/bin/python -m ensurepip --upgrade
 fi
 
-# Upgrade pip
-echo "Upgrading pip..."
+echo "Upgrading pip / setuptools / wheel …"
 .venv/bin/pip install --upgrade pip setuptools wheel
 
-# Install project dependencies required by the Python imports in this repo.
-echo "Installing Python dependencies (NumPy, pandas, PyTorch, torchvision, scikit-learn, matplotlib, Pillow, and Hugging Face tooling)..."
+# Core scientific stack
+echo "Installing scientific stack …"
 .venv/bin/pip install \
     numpy \
     pandas \
     scikit-learn \
     matplotlib \
     pillow \
+    requests \
+    tqdm
+
+# HuggingFace tooling – 'datasets' is required for streaming mode
+echo "Installing HuggingFace tooling …"
+.venv/bin/pip install \
     "huggingface-hub>=0.32.0" \
+    "datasets>=2.14.0" \
     hf_xet
 
-# Install CPU-only PyTorch wheels to keep the VM setup fast and avoid pulling
-# unnecessary CUDA runtimes on instances without GPUs.
+# CPU-only PyTorch (avoids pulling large CUDA runtimes on CPU-only VMs)
+echo "Installing PyTorch (CPU) …"
 .venv/bin/pip install \
     torch \
     torchvision \
     --index-url https://download.pytorch.org/whl/cpu
 
-# Allow the download script to use a higher default download parallelism on GCP.
+# Environment variables for faster HF streaming
 export HF_XET_HIGH_PERFORMANCE=1
-export HF_XET_NUM_CONCURRENT_RANGE_GETS=${HF_XET_NUM_CONCURRENT_RANGE_GETS:-64}
-export HF_MAX_WORKERS=${HF_MAX_WORKERS:-4}
-export HF_DATASET_REVISION=${HF_DATASET_REVISION:-6cf97c900445e080e61cb45e1aa72515d3ff1de8}
+export HF_XET_NUM_CONCURRENT_RANGE_GETS="${HF_XET_NUM_CONCURRENT_RANGE_GETS:-64}"
+export HF_MAX_WORKERS="${HF_MAX_WORKERS:-4}"
+export HF_DATASET_REVISION="${HF_DATASET_REVISION:-6cf97c900445e080e61cb45e1aa72515d3ff1de8}"
 export HF_HUB_DISABLE_UPDATE_CHECK=1
 
 # Freeze requirements
-echo "Freezing requirements..."
+echo "Freezing requirements …"
 .venv/bin/pip freeze > requirements.txt
 
-echo "=== Setup completed successfully! ==="
+echo ""
+echo "=== Setup complete ==="
+echo "Activate the environment with:  source .venv/bin/activate"
+echo "Run simulations with:           bash run_all_simulations.sh"
