@@ -72,7 +72,9 @@ class IoTClient:
         self.battery = np.random.uniform(0.3, 1.0)
         self.memory = np.random.choice([2.0, 4.0, 8.0])  # in GB
         self.snr = np.random.uniform(10.0, 25.0)  # SNR in dB
-        self.base_compute_time = np.random.uniform(50.0, 400.0)  # seconds to train 1 round
+        
+        # FIXED: Lowered compute bounds from 50-400 to 15-250 so training fits inside round windows
+        self.base_compute_time = np.random.uniform(15.0, 250.0)  # seconds to train 1 round
         
         # Historical metrics
         self.selection_count = 0
@@ -655,4 +657,3 @@ class HFLOrchestrator:
             
         for uav in self.uavs:
             uav.update_state()
-

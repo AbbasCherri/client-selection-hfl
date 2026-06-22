@@ -176,7 +176,7 @@ def main():
 
     # Resolve relative paths to absolute (important when running via shell scripts)
     def _abs(p):
-        return os.path.abspath(p) if p else p
+        return os.abspath(p) if p else p
 
     args.data_dir   = _abs(args.data_dir)
     args.output_dir = _abs(args.output_dir)
@@ -272,7 +272,7 @@ def main():
             R_comm     = 50000.0,      # metres – 50 km covers Noto Peninsula area
             B_min_iot  = 0.2,
             B_min_uav  = 0.3,
-            T_max      = 300.0,
+            T_max      = 500.0,        # FIXED: Increased from 300.0 to safely cover client base_compute_time + noise
             SNR_min    = 3.0,
         )
 
