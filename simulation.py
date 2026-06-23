@@ -56,10 +56,16 @@ class IoTClient:
         
         # Keep data loading conservative by default; spawning workers per client
         # gets expensive very quickly when many clients are active.
+        # Adaptive batch size: EfficientNet's BatchNorm layers require >= 2 samples
+        # per batch in train() mode. Clients with small shards (common after K-Means
+        # spatial clustering on a 5% subsample) would crash with batch_size=64 and
+        # a shard of e.g. 1-3 samples. We clamp batch_size to [2, 64] and use
+        # drop_last=True so the final partial batch never falls below 2 samples.
+        effective_batch = max(2, min(64, len(indices) // 2)) if len(indices) >= 2 else 2
         loader_kwargs = {
-            "batch_size": 64,
+            "batch_size": effective_batch,
             "shuffle": True,
-            "drop_last": False,
+            "drop_last": len(indices) > effective_batch,   # only drop when there's >1 batch
             "num_workers": self.loader_workers,
             "pin_memory": self.device == "cuda",
         }
@@ -137,20 +143,27 @@ class IoTClient:
         """
         Performs local model training with entropy balancing to break the majority guessing trap.
         """
-        # Reuse a pre-allocated local model to avoid deepcopy overhead every round.
-        # We must move to device BEFORE load_state_dict so the parameter tensors
-        # live on the correct device when we later call get_flat_fusion_weights.
+        # Reuse a pre-allocated model instead of deepcopy every round
         if not hasattr(self, '_local_model'):
-            self._local_model = copy.deepcopy(global_model).to(self.device)
-        # Load from CPU global model; map to local device
-        self._local_model.load_state_dict(
-            {k: v.to(self.device) for k, v in global_model.state_dict().items()}
-        )
-        model = self._local_model
-        model.train()
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+            self._local_model = copy.deepcopy(global_model)
+        self._local_model.load_state_dict(global_model.state_dict())
+        model = self._local_model.to(self.device)
 
-        # Re-fetch fusion param references after each load_state_dict call
+        # Set full model to train mode, then revert the frozen backbone to eval.
+        # The frozen EfficientNet layers have BatchNorm2d which requires batch_size >= 2
+        # in train() mode.  Keeping them in eval() mode makes them use their stored
+        # running_mean/running_var (stable), so small client batches never crash.
+        model.train()
+        if hasattr(model, 'image_branch') and hasattr(model.image_branch, 'backbone'):
+            model.image_branch.backbone.eval()
+
+        # Only pass parameters that require grad to the optimizer — frozen backbone
+        # params have requires_grad=False and must be excluded.
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        optimizer = torch.optim.Adam(trainable_params, lr=lr)
+
+        # Re-fetch fusion param references each call — load_state_dict updates tensors
+        # in-place so the list stays consistent, but refreshing is cheap and safe.
         self._fusion_params = get_fusion_params(model)
 
         initial_weights = get_flat_fusion_weights(model, self._fusion_params)
@@ -170,15 +183,15 @@ class IoTClient:
                 
                 # Entropy regularization: gently discourage overconfident majority-class
                 # predictions. Coefficient 0.01 is intentionally small — the focal loss
-                # already down-weights easy examples; too-large entropy bonus destabilises
-                # training when a client has only one class in its shard.
+                # already handles class imbalance; a large entropy bonus (0.1) fights the
+                # focal loss and destabilises training on single-class client shards.
                 probs = F.softmax(outputs, dim=1)
                 entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1).mean()
                 loss = base_loss - 0.01 * entropy
                 
                 loss.backward()
                 # Gradient clipping prevents exploding updates on tiny minority-class shards
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
                 optimizer.step()
 
         trained_weights = get_flat_fusion_weights(model, self._fusion_params)
@@ -525,7 +538,14 @@ class HFLOrchestrator:
             # Simulate random network health failure before training (3% chance of dropout)
             if np.random.rand() < 0.03:
                 continue
-                
+
+            # Skip clients whose shard is too small for BatchNorm to function.
+            # EfficientNet-B0 BatchNorm2d requires >= 2 samples per batch in train mode.
+            if client.num_samples < 2:
+                print(f"  [WARN] Client {client.client_id} has only {client.num_samples} "
+                      f"sample(s) — skipping to avoid BatchNorm crash.")
+                continue
+
             # Perform local training with corrected hyperparameters
             try:
                 delta_w, actual_time = client.train_local(
@@ -535,7 +555,10 @@ class HFLOrchestrator:
                     epochs=epochs
                 )
             except Exception as e:
-                # If training failed, skip
+                # Log the exception — silent swallowing masked all training failures
+                # and caused the global model to never update (frozen metrics).
+                print(f"  [ERROR] Client {client.client_id} train_local failed: "
+                      f"{type(e).__name__}: {e}")
                 continue
             
             # Check if client training completed within round limit T_max (dropout if too slow)

@@ -171,10 +171,11 @@ def _stream_metadata_df(
     df = pd.DataFrame(rows)
     logger.info("Streamed %d rows from HuggingFace.", len(df))
 
-    # Strip non-target placeholders (9, 99) — keep only valid 4-class labels [0, 1, 2, 3]
+    # Strip non-target sentinel values (9, 99) while keeping all 4 valid damage classes.
+    # Previous code incorrectly used isin([0, 1]), discarding classes 2 and 3 entirely.
     if "damage_val" in df.columns:
         df = df[df["damage_val"].isin([0, 1, 2, 3])].reset_index(drop=True)
-        logger.info("Filtered invalid labels (9, 99). Remaining clean rows: %d", len(df))
+        logger.info("Filtered invalid labels. Remaining clean rows: %d", len(df))
 
     # Subsample deterministically
     if subsample < 1.0:
@@ -302,7 +303,7 @@ def get_hfl_data_partitions(
         logger.info("Loading metadata from local CSV: %s", csv_path)
         df = pd.read_csv(csv_path).fillna(0)
         
-        # Clean local CSV targets — keep only valid 4-class labels [0, 1, 2, 3]
+        # Keep all 4 valid damage classes; strip sentinel values (9, 99) only.
         if "damage_val" in df.columns:
             df = df[df["damage_val"].isin([0, 1, 2, 3])].reset_index(drop=True)
             

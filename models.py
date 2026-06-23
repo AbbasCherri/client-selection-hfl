@@ -11,6 +11,17 @@ class ImageBranch(nn.Module):
         super().__init__()
         if pretrained:
             self.backbone = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
+            # Freeze the convolutional feature extractor so that FL clients only
+            # fine-tune the lightweight classification head.  Training all ~4M
+            # EfficientNet parameters on tiny per-client shards (often < 100 samples)
+            # causes catastrophic overfitting; the global FedAvg of such overfitted
+            # models averages out to noise and the global model never improves.
+            # The last conv block (features[-1]) is left trainable so the backbone
+            # can still adapt its high-level representations to aerial disaster imagery.
+            for name, param in self.backbone.named_parameters():
+                # Freeze all blocks except the final conv block ("features.8")
+                if not name.startswith("features.8"):
+                    param.requires_grad = False
         else:
             self.backbone = efficientnet_b0(weights=None)
         
