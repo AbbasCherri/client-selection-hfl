@@ -137,16 +137,21 @@ class IoTClient:
         """
         Performs local model training with entropy balancing to break the majority guessing trap.
         """
-        # Reuse a pre-allocated model instead of deepcopy every round
+        # Reuse a pre-allocated local model to avoid deepcopy overhead every round.
+        # We must move to device BEFORE load_state_dict so the parameter tensors
+        # live on the correct device when we later call get_flat_fusion_weights.
         if not hasattr(self, '_local_model'):
-            self._local_model = copy.deepcopy(global_model)
-        self._local_model.load_state_dict(global_model.state_dict())
-        model = self._local_model.to(self.device)
+            self._local_model = copy.deepcopy(global_model).to(self.device)
+        # Load from CPU global model; map to local device
+        self._local_model.load_state_dict(
+            {k: v.to(self.device) for k, v in global_model.state_dict().items()}
+        )
+        model = self._local_model
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-        if not hasattr(self, '_fusion_params'):
-            self._fusion_params = get_fusion_params(model)
+        # Re-fetch fusion param references after each load_state_dict call
+        self._fusion_params = get_fusion_params(model)
 
         initial_weights = get_flat_fusion_weights(model, self._fusion_params)
 
@@ -163,14 +168,17 @@ class IoTClient:
                 # Base Focal Loss
                 base_loss = loss_fn(outputs, labels)
                 
-                # Confidence penalty via entropy regularization to handle client-side class starvation
+                # Entropy regularization: gently discourage overconfident majority-class
+                # predictions. Coefficient 0.01 is intentionally small — the focal loss
+                # already down-weights easy examples; too-large entropy bonus destabilises
+                # training when a client has only one class in its shard.
                 probs = F.softmax(outputs, dim=1)
                 entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1).mean()
-                
-                # Maximize entropy slightly to preserve sensitivity to minority labels
-                loss = base_loss - 0.1 * entropy
+                loss = base_loss - 0.01 * entropy
                 
                 loss.backward()
+                # Gradient clipping prevents exploding updates on tiny minority-class shards
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
         trained_weights = get_flat_fusion_weights(model, self._fusion_params)
