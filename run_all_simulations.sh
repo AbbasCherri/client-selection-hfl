@@ -25,7 +25,7 @@ DATA_DIR="${DATA_DIR:-./data}"
 OUTPUT_DIR="${OUTPUT_DIR:-./results}"
 PLOT_DIR="${PLOT_DIR:-./plots}"
 ROUNDS="${ROUNDS:-30}"
-SUBSAMPLE="${SUBSAMPLE:-0.05}"
+SUBSAMPLE="${SUBSAMPLE:-1.0}"
 
 # Determine Python interpreter (prefer .venv if present)
 if [ -x ".venv/bin/python" ]; then

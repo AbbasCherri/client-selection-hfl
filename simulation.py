@@ -76,10 +76,16 @@ class IoTClient:
 
         subset = Subset(dataset, indices)
 
-        # Per-sample weights from inverse class frequency within this shard
+        # Per-sample weights from inverse class frequency within this shard.
+        # np.where evaluates BOTH branches before selecting, so naively writing
+        # np.where(counts > 0, 1.0 / counts, 0.0) still performs the division
+        # for zero-count classes and emits a RuntimeWarning.  Use np.errstate to
+        # suppress the spurious warning; the zero-count slots are replaced by 0.0
+        # before any weight is ever used.
         shard_labels = dataset.labels[indices].numpy()
         class_counts = np.bincount(shard_labels, minlength=4)
-        class_weights_arr = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            class_weights_arr = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
         sample_weights = torch.tensor(
             [class_weights_arr[int(lbl)] for lbl in shard_labels], dtype=torch.float32
         )
