@@ -54,18 +54,45 @@ class IoTClient:
         self.indices = indices
         self.num_samples = len(indices)
         
-        # Keep data loading conservative by default; spawning workers per client
-        # gets expensive very quickly when many clients are active.
-        # Adaptive batch size: EfficientNet's BatchNorm layers require >= 2 samples
-        # per batch in train() mode. Clients with small shards (common after K-Means
-        # spatial clustering on a 5% subsample) would crash with batch_size=64 and
-        # a shard of e.g. 1-3 samples. We clamp batch_size to [2, 64] and use
-        # drop_last=True so the final partial batch never falls below 2 samples.
-        effective_batch = max(2, min(64, len(indices) // 2)) if len(indices) >= 2 else 2
+        # BALANCED SAMPLING — the root cause of the frozen metrics.
+        #
+        # With ~97% class-0 data and non-IID geographic sharding, most client
+        # shards are almost entirely class 0. A standard DataLoader shows the
+        # model class-0 batches on every step → loss is already near-minimal →
+        # gradients are near-zero → model never moves → metrics freeze.
+        #
+        # Focal Loss alone cannot fix this: it down-weights easy (class-0) examples
+        # but if a batch contains 64 class-0 samples and 0 class-1 samples, there
+        # are literally no class-1 gradients to learn from.
+        #
+        # WeightedRandomSampler assigns each sample a weight inversely proportional
+        # to its class count within this shard, so every sampled batch is balanced
+        # across whichever classes the shard contains, guaranteeing minority-class
+        # gradient signal in every optimizer step.
+        #
+        # Adaptive batch size: EfficientNet BatchNorm requires >= 2 samples per
+        # batch in train() mode. Clamp to [2, 32] and drop the last partial batch.
+        effective_batch = max(2, min(32, len(indices) // 2)) if len(indices) >= 2 else 2
+
+        subset = Subset(dataset, indices)
+
+        # Per-sample weights from inverse class frequency within this shard
+        shard_labels = dataset.labels[indices].numpy()
+        class_counts = np.bincount(shard_labels, minlength=4)
+        class_weights_arr = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
+        sample_weights = torch.tensor(
+            [class_weights_arr[int(lbl)] for lbl in shard_labels], dtype=torch.float32
+        )
+        sampler = torch.utils.data.WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(sample_weights),
+            replacement=True,   # required for WeightedRandomSampler
+        )
+
         loader_kwargs = {
             "batch_size": effective_batch,
-            "shuffle": True,
-            "drop_last": len(indices) > effective_batch,   # only drop when there's >1 batch
+            "sampler": sampler,       # mutually exclusive with shuffle=True
+            "drop_last": len(indices) > effective_batch,
             "num_workers": self.loader_workers,
             "pin_memory": self.device == "cuda",
         }
@@ -73,7 +100,8 @@ class IoTClient:
             loader_kwargs["persistent_workers"] = True
             loader_kwargs["prefetch_factor"] = 2
 
-        self.train_loader = DataLoader(Subset(dataset, indices), **loader_kwargs)
+        self.train_loader = DataLoader(subset, **loader_kwargs)
+
 
         # Hardware and channel characteristics (Heterogeneous & Dynamic)
         self.battery = np.random.uniform(0.3, 1.0)

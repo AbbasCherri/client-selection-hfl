@@ -196,7 +196,9 @@ class MultiModalDataset(Dataset):
     Fuses aerial building imagery with structured seismic and location features.
     """
     def __init__(self, df: pd.DataFrame, data_dir: str = "./data",
-                 transform=None, use_gsi: bool = True):
+                 transform=None, use_gsi: bool = True,
+                 raw_lat: np.ndarray | None = None,
+                 raw_lon: np.ndarray | None = None):
         self.df        = df.reset_index(drop=True)
         self.data_dir  = data_dir
         self.transform = transform
@@ -207,8 +209,17 @@ class MultiModalDataset(Dataset):
         self.labels     = torch.from_numpy(self.df["damage_val"].values.astype(np.int64))
         self.chip_paths = self.df["chip_path"].values
 
-        self.latitudes  = self.df["latitude"].values.astype(np.float64)
-        self.longitudes = self.df["longitude"].values.astype(np.float64)
+        # Use real (unscaled) lat/lon for GSI tile lookups if provided.
+        # If FEATURE_COLS were StandardScaled, df["latitude"] would be a z-score
+        # (≈ 0.0 ± 1.0) rather than a real degree — the GSI fetcher would request
+        # tiles at impossible coordinates and return black chips, removing all
+        # image gradient signal from training.
+        if raw_lat is not None and raw_lon is not None:
+            self.latitudes  = raw_lat.astype(np.float64)
+            self.longitudes = raw_lon.astype(np.float64)
+        else:
+            self.latitudes  = self.df["latitude"].values.astype(np.float64)
+            self.longitudes = self.df["longitude"].values.astype(np.float64)
 
     def __len__(self):
         return len(self.df)
@@ -326,11 +337,26 @@ def get_hfl_data_partitions(
     # ------------------------------------------------------------------ #
     # 2. Feature scaling                                                  #
     # ------------------------------------------------------------------ #
+    # Save real lat/lon BEFORE any scaling — _load_image uses these for
+    # GSI tile lookups and they must remain in degrees, not z-scores.
     raw_lat = df["latitude"].values.copy()
     raw_lon = df["longitude"].values.copy()
 
+    # Scale only the non-coordinate seismic columns.  Scaling lat/lon
+    # along with the seismic features would push them into z-score space
+    # (e.g. lat ≈ 0.0 ± 1.0) which makes the GSI tile fetcher request
+    # tiles for impossible coordinates and return black 128×128 chips for
+    # every building — eliminating all image gradient signal entirely.
+    SEISMIC_COLS = ["MMI_original", "MMI_shape", "PGA", "PGV",
+                    "SA_0_3", "SA_1_0", "SA_3_0"]
+    # Normalise lat/lon to [0,1] range so they remain meaningful as inputs
+    # while being on a similar scale to the scaled seismic features.
+    for col in ["latitude", "longitude"]:
+        col_min, col_max = df[col].min(), df[col].max()
+        df[col] = (df[col] - col_min) / (col_max - col_min + 1e-8)
+
     scaler = StandardScaler()
-    df[FEATURE_COLS] = scaler.fit_transform(df[FEATURE_COLS])
+    df[SEISMIC_COLS] = scaler.fit_transform(df[SEISMIC_COLS])
 
     # ------------------------------------------------------------------ #
     # 3. Partition cache                                                   #
@@ -397,7 +423,13 @@ def get_hfl_data_partitions(
     # ------------------------------------------------------------------ #
     # 5. Build dataset                                                    #
     # ------------------------------------------------------------------ #
-    full_dataset = MultiModalDataset(df, data_dir=data_dir, use_gsi=True)
+    full_dataset = MultiModalDataset(
+        df,
+        data_dir=data_dir,
+        use_gsi=True,
+        raw_lat=raw_lat,
+        raw_lon=raw_lon,
+    )
     logger.info(
         "Data partitioning complete. Total samples: %d, clients: %d.",
         len(df), N,
