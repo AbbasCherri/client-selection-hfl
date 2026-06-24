@@ -1,7 +1,10 @@
 """
 run_simulation.py – HFL simulation runner with streaming data support.
 
-Usage (streaming from HuggingFace, no local dataset required):
+Usage (streaming from HuggingFace, full dataset, 100 rounds — matches paper):
+    python run_simulation.py --N 70
+
+Usage (quick smoke-test with 5% subsample):
     python run_simulation.py --N 70 --rounds 30 --subsample 0.05
 
 Usage (local CSV if already downloaded):
@@ -40,9 +43,9 @@ def parse_args():
                         "Omit to stream from HuggingFace.")
     p.add_argument("--data_dir",    type=str,   default="./data",
                    help="Root directory for local image chips (optional).")
-    p.add_argument("--subsample",   type=float, default=0.05,
+    p.add_argument("--subsample",   type=float, default=1.0,
                    help="Fraction of the dataset to use (0 < x ≤ 1). "
-                        "Default 0.05 → ~6 400 buildings, fast on CPU.")
+                        "Default 1.0 → full 128k-building dataset (matches paper).")
     p.add_argument("--hf_token",    type=str,   default=None,
                    help="HuggingFace access token. "
                         "Falls back to the HF_TOKEN environment variable.")
@@ -52,8 +55,8 @@ def parse_args():
                    help="Number of IoT clients (paper: 14/35/70/140).")
     p.add_argument("--U",           type=int,   default=3,
                    help="Number of UAV edge aggregators.")
-    p.add_argument("--rounds",      type=int,   default=30,
-                   help="Global communication rounds.")
+    p.add_argument("--rounds",      type=int,   default=100,
+                   help="Global communication rounds (paper: 100).")
     p.add_argument("--epochs",      type=int,   default=3,
                    help="Local training epochs per client per round (Optimized to fix majority trap).")
     p.add_argument("--lr",          type=float, default=3e-4,
