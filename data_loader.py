@@ -204,6 +204,16 @@ class MultiModalDataset(Dataset):
         self.transform = transform
         self.use_gsi   = use_gsi
 
+        # Diagnostics: track how many image loads fall back to a black chip.
+        # An all-black image carries zero signal; the aerial image is the only
+        # discriminative modality here (the seismic features are near-constant
+        # across the affected region), so a high black-chip rate means the model
+        # has nothing to learn from and will collapse to the majority class —
+        # producing the exact "accuracy/F1 frozen while comm/fairness move"
+        # symptom. These counters let the runner warn the user explicitly.
+        self.black_chip_count = 0
+        self.total_image_loads = 0
+
         feat_arr        = self.df[FEATURE_COLS].values.astype(np.float32)
         self.features   = torch.from_numpy(feat_arr)
         self.labels     = torch.from_numpy(self.df["damage_val"].values.astype(np.int64))
@@ -236,6 +246,7 @@ class MultiModalDataset(Dataset):
         return img_tensor, self.features[idx], self.labels[idx]
 
     def _load_image(self, idx: int) -> Image.Image:
+        self.total_image_loads += 1
         chip_path = str(self.chip_paths[idx])
         if chip_path:
             local_path = self._resolve_local_path(chip_path)
@@ -250,9 +261,21 @@ class MultiModalDataset(Dataset):
             lat = float(self.latitudes[idx])
             lon = float(self.longitudes[idx])
             if 35.0 <= lat <= 40.0 and 135.0 <= lon <= 140.0:
-                return _get_building_chip(lat, lon)
+                chip = _get_building_chip(lat, lon)
+                # _get_building_chip returns a black chip on any fetch error.
+                # Detect that so the runner can report a high failure rate.
+                if not chip.getbbox():
+                    self.black_chip_count += 1
+                return chip
 
+        self.black_chip_count += 1
         return Image.new("RGB", (CHIP_PX, CHIP_PX), (0, 0, 0))
+
+    def black_chip_rate(self) -> float:
+        """Fraction of image loads so far that returned an all-black chip."""
+        if self.total_image_loads == 0:
+            return 0.0
+        return self.black_chip_count / self.total_image_loads
 
     def _resolve_local_path(self, chip_path: str) -> str | None:
         if os.path.isabs(chip_path) and os.path.isfile(chip_path):
