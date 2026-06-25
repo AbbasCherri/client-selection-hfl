@@ -127,6 +127,33 @@ def _get_building_chip(lat: float, lon: float, zoom: int = GSI_ZOOM, size: int =
 
 
 # ---------------------------------------------------------------------------
+# Label handling
+# ---------------------------------------------------------------------------
+
+# Raw damage_val encoding → contiguous class index used by the model.
+#   0  Survived            → 0
+#   1  Collapsed           → 1
+#   9  Obstructed view     → 2
+#   99 Missing/inconsistent → 3
+# (Values 2 and 3 never appear in the raw data.)
+DAMAGE_LABEL_MAP = {0: 0, 1: 1, 9: 2, 99: 3}
+
+
+def _remap_damage_labels(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Map the raw damage_val codes {0,1,9,99} onto contiguous class indices
+    {0,1,2,3} and drop any row whose code is outside that known set. Returns a
+    new index-reset DataFrame. Operating on the mapped column (rather than the
+    old isin([0,1,2,3]) filter) keeps the Obstructed-view (9) and
+    Missing/inconsistent (99) classes instead of silently discarding them.
+    """
+    mapped = df["damage_val"].map(DAMAGE_LABEL_MAP)
+    df = df.loc[mapped.notna()].copy()
+    df["damage_val"] = mapped.loc[mapped.notna()].astype(int).values
+    return df.reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
 # HuggingFace streaming helpers
 # ---------------------------------------------------------------------------
 
@@ -171,11 +198,16 @@ def _stream_metadata_df(
     df = pd.DataFrame(rows)
     logger.info("Streamed %d rows from HuggingFace.", len(df))
 
-    # Strip non-target sentinel values (9, 99) while keeping all 4 valid damage classes.
-    # Previous code incorrectly used isin([0, 1]), discarding classes 2 and 3 entirely.
+    # The raw dataset encodes the four damage classes as {0, 1, 9, 99}, NOT
+    # {0, 1, 2, 3}: 9 = "Obstructed view", 99 = "Missing/inconsistent". Values 2
+    # and 3 never occur. Remap the high sentinels to contiguous class indices so
+    # all four classes are usable. The previous isin([0,1,2,3]) filter silently
+    # dropped every 9/99 row (~16% of the data), collapsing the stated 4-class
+    # task to a 2-class one.
     if "damage_val" in df.columns:
-        df = df[df["damage_val"].isin([0, 1, 2, 3])].reset_index(drop=True)
-        logger.info("Filtered invalid labels. Remaining clean rows: %d", len(df))
+        df = _remap_damage_labels(df)
+        logger.info("Remapped damage labels. Rows: %d, distribution: %s",
+                    len(df), df["damage_val"].value_counts().sort_index().to_dict())
 
     # Subsample deterministically
     if subsample < 1.0:
@@ -337,10 +369,10 @@ def get_hfl_data_partitions(
         logger.info("Loading metadata from local CSV: %s", csv_path)
         df = pd.read_csv(csv_path).fillna(0)
         
-        # Keep all 4 valid damage classes; strip sentinel values (9, 99) only.
+        # Remap {0,1,9,99} → {0,1,2,3} (9/99 are real classes, not sentinels).
         if "damage_val" in df.columns:
-            df = df[df["damage_val"].isin([0, 1, 2, 3])].reset_index(drop=True)
-            
+            df = _remap_damage_labels(df)
+
         if subsample < 1.0:
             n = max(1, int(len(df) * subsample))
             df = df.sample(n=n, random_state=random_seed).reset_index(drop=True)
