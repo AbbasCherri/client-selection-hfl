@@ -9,6 +9,15 @@ class ImageBranch(nn.Module):
     """
     def __init__(self, pretrained=False, embedding_dim=128):
         super().__init__()
+        self.pretrained = pretrained
+        # ImageNet normalization stats. The torchvision pretrained EfficientNet-B0
+        # was trained on images normalized with these mean/std. Feeding it raw
+        # [0,1] tensors (as TF.to_tensor produces) pushes every image far off the
+        # backbone's training distribution, collapsing the embeddings toward a
+        # near-constant vector and starving the classifier of image signal.
+        # Registered as buffers so they move with .to(device) and are saved/loaded.
+        self.register_buffer("img_mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer("img_std",  torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
         if pretrained:
             self.backbone = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
             # Freeze the convolutional feature extractor so that FL clients only
@@ -38,6 +47,10 @@ class ImageBranch(nn.Module):
         )
 
     def forward(self, x):
+        # Apply ImageNet normalization when using a pretrained backbone so the
+        # frozen feature extractor receives inputs in its expected distribution.
+        if self.pretrained:
+            x = (x - self.img_mean) / self.img_std
         features = self.backbone(x)
         embedding = self.fc(features)
         return embedding

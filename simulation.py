@@ -482,6 +482,18 @@ class HFLOrchestrator:
         self.loss_fn = loss_fn
         self.test_loader = test_loader
         self.device = device
+
+        # Number of output classes, read from the model head rather than hard-coded.
+        # The dataset only contains a subset of damage labels (e.g. 2 of 4), so
+        # hard-coding 4 averaged macro-F1 over always-empty classes, understating it.
+        try:
+            self.num_classes = global_model.fusion_fc[-1].out_features
+        except (AttributeError, IndexError):
+            self.num_classes = 4
+        # Populated by evaluate(): distribution of predicted classes on the test
+        # set. A degenerate (single-value) distribution is the signature of the
+        # majority-class collapse that freezes accuracy/F1 across rounds.
+        self.last_pred_distribution = None
         
         # Dimensions for random projection of weight updates
         self.fusion_params = get_fusion_params(global_model)
@@ -515,23 +527,33 @@ class HFLOrchestrator:
                 
         all_preds = np.array(all_preds)
         all_targets = np.array(all_targets)
-        
+
         # Accuracy
         accuracy = np.mean(all_preds == all_targets)
-        
-        # Macro F1
+
+        # Record the predicted-class distribution. If the model has collapsed to a
+        # single class (the cause of frozen accuracy/F1 under extreme imbalance with
+        # no usable image signal), this distribution puts ~100% mass on one class.
+        self.last_pred_distribution = np.bincount(
+            all_preds, minlength=self.num_classes
+        ) / max(1, len(all_preds))
+
+        # Macro F1 computed only over classes that actually appear in the test
+        # targets. Averaging over always-absent classes (e.g. classes 2 and 3 when the
+        # dataset only contains 0 and 1) silently halves the reported macro-F1.
+        present_classes = np.unique(all_targets)
         f1_scores = []
-        for c in range(4):  # 4 classes
+        for c in present_classes:
             tp = np.sum((all_preds == c) & (all_targets == c))
             fp = np.sum((all_preds == c) & (all_targets != c))
             fn = np.sum((all_preds != c) & (all_targets == c))
-            
+
             precision = tp / (tp + fp + 1e-5)
             recall = tp / (tp + fn + 1e-5)
             f1 = 2.0 * (precision * recall) / (precision + recall + 1e-5)
             f1_scores.append(f1)
-            
-        macro_f1 = np.mean(f1_scores)
+
+        macro_f1 = float(np.mean(f1_scores)) if f1_scores else 0.0
         return accuracy, macro_f1
 
     def get_jains_fairness(self):

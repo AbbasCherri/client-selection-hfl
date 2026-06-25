@@ -219,21 +219,31 @@ def main():
     # ── Epicentre (Noto Peninsula 2024 earthquake) ─────────────────────── #
     epicenter = (37.50, 137.27)
 
+    # ── Determine the actual number of classes present in the data ─────── #
+    # The dataset only contains a subset of the nominal 4 damage labels (in the
+    # released data, only classes 0 and 1 appear). Building a 4-output model and
+    # averaging macro-F1 over the always-empty classes both wastes capacity and
+    # understates F1, so size the head to the classes that actually occur.
+    present_labels = np.unique(full_dataset.labels.numpy())
+    num_classes = int(present_labels.max()) + 1
+    print(f"[run_simulation] Damage classes present: {present_labels.tolist()} "
+          f"→ model output dim {num_classes}")
+
     # ── Base model (cloned identically for every method) ──────────────── #
     # Set pretrained=True to utilize ImageNet features and break the guessing trap
-    master_model = MultiModalFusionModel(num_classes=4, pretrained=True)
+    master_model = MultiModalFusionModel(num_classes=num_classes, pretrained=True)
 
     # ── Focal loss with class weights ─────────────────────────────────── #
     # Derive class counts from the training split of the full dataset
     train_labels = full_dataset.labels[
         [i for idxs in client_train_indices.values() for i in idxs]
     ].numpy()
-    class_counts  = np.bincount(train_labels, minlength=4)
+    class_counts  = np.bincount(train_labels, minlength=num_classes)
     total_samples = len(train_labels)
-    
+
     # Statistical smoothing + Clamping to avoid gradient explosion while prioritizing minority classes
     smoothed_counts = class_counts + 10
-    raw_weights = total_samples / (4.0 * smoothed_counts)
+    raw_weights = total_samples / (num_classes * smoothed_counts)
     normalized_weights = raw_weights / np.mean(raw_weights)
     clamped_weights = np.clip(normalized_weights, 0.2, 5.0)
     
@@ -301,12 +311,41 @@ def main():
             accuracy, macro_f1 = orchestrator.evaluate()
             fairness            = orchestrator.get_jains_fairness()
 
+            # Predicted-class distribution makes the majority-class collapse
+            # visible: if one entry is ~1.0 the model predicts a single class for
+            # every test sample, which is exactly why accuracy/F1 stay frozen.
+            pred_dist = orchestrator.last_pred_distribution
+            pred_str = "[" + " ".join(f"{p:.2f}" for p in pred_dist) + "]"
+
             print(
                 f"  Round {r:02d} | "
                 f"Acc {accuracy:.4f} | F1 {macro_f1:.4f} | "
                 f"Fair {fairness:.4f} | "
-                f"Comm {orchestrator.total_comm_cost:.2f} MB"
+                f"Comm {orchestrator.total_comm_cost:.2f} MB | "
+                f"Pred {pred_str}"
             )
+
+            # One-time warnings on the first round of the first method: surface
+            # the two root causes of frozen metrics so they are not silent.
+            if r == 1 and method == methods[0]:
+                black_rate = full_dataset.black_chip_rate()
+                if black_rate > 0.5:
+                    print(
+                        f"  [WARN] {black_rate*100:.0f}% of aerial chips loaded as "
+                        f"BLACK (GSI tile fetch failing). The aerial image is the "
+                        f"only discriminative modality — with blank images the model "
+                        f"cannot learn and accuracy/F1 will stay frozen at the "
+                        f"majority-class rate. Check the VM's outbound network access "
+                        f"to {os.getenv('HFL_TILE_HOST', 'cyberjapandata.gsi.go.jp')} "
+                        f"or pre-download chips into --data_dir."
+                    )
+                if pred_dist is not None and np.max(pred_dist) > 0.98:
+                    print(
+                        f"  [WARN] Model predicts a single class for "
+                        f"{np.max(pred_dist)*100:.0f}% of test samples (majority-class "
+                        f"collapse). Frozen accuracy/F1 are expected until the model "
+                        f"receives usable signal."
+                    )
             all_records.append({
                 "method":    method,
                 "round":     r,
