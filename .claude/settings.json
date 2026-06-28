@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import numpy, scipy, pandas, pytest; print\\('numpy', numpy.__version__, 'pytest', pytest.__version__\\)\")",
+      "Bash(python3 -c \"import numpy; print\\('numpy', numpy.__version__\\)\")",
+      "Bash(python3 -c \"import scipy; print\\('scipy', scipy.__version__\\)\")",
+      "Bash(python3 -c \"import pandas; print\\('pandas', pandas.__version__\\)\")",
+      "Bash(python3 -c \"import pyarrow; print\\('pyarrow', pyarrow.__version__\\)\")",
+      "Bash(python3 -c \"import matplotlib; print\\('matplotlib', matplotlib.__version__\\)\")",
+      "Bash(python3 -m pip install -q pytest)",
+      "Bash(python3 -c \"import pytest; print\\('pytest', pytest.__version__\\)\")",
+      "Bash(python3 -m pytest tests/test_fitness.py tests/test_assignment.py -q)",
+      "Bash(python3 -m pytest -q)",
+      "Bash(PYTHONPATH=src python3 -m uavbench smoke)",
+      "Bash(PYTHONPATH=src python3 -m uavbench run --config configs/smoke.yaml)",
+      "Bash(PYTHONPATH=src python3 -m uavbench analyze --config configs/smoke.yaml)",
+      "Bash(PYTHONPATH=src python3 -m uavbench plot --config configs/smoke.yaml)",
+      "Bash(chmod +x run_tier1.sh)",
+      "Bash(CONFIG=configs/smoke.yaml WORKERS=4 ./run_tier1.sh)"
+    ]
+  }
+}
