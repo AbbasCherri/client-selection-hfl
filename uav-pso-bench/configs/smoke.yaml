@@ -1,0 +1,58 @@
+# Fast end-to-end smoke config. Tiny instances, few seeds, finishes in minutes on CPU.
+name: smoke
+
+# Hardware / parallelism (see HARDWARE.md)
+n_workers: 8
+results_dir: results/smoke
+
+# Reproducibility: separate seed streams for instance generation vs optimizer stochasticity
+instance_seed: 1234
+optimizer_seed: 9876
+n_seeds: 5            # independent runs per (method, scenario)
+
+# Problem / scenario grid
+scenarios:
+  - distribution: uniform
+    N: 40            # devices
+    K: 4             # hover positions / UAVs
+  - distribution: clustered
+    N: 40
+    K: 4
+
+# Search box (meters, projected). z is the altitude flight envelope.
+area:
+  x: [0.0, 1000.0]
+  y: [0.0, 1000.0]
+  z: [20.0, 120.0]
+
+# Value model
+value:
+  beta_mode: pinned  # utility-only, history-free placement benchmark
+  t: 0
+  T_decay: 20
+
+# Shared problem constants
+problem:
+  R_comm: 500.0
+  B_min_uav: 0.2
+  capacity: 15       # per-position device capacity
+  uav_battery: 1.0
+  prev_mode: stale   # previous layout is displaced -> repositioning can pay off
+
+# Fitness weights
+fitness:
+  w1: 0.6
+  w2: 0.3
+  w3: 0.1
+
+# Evaluation budget shared by all metaheuristics (P * G_max)
+budget:
+  P: 100
+  G_max: 30          # reduced from 200 for the smoke run
+
+methods:
+  - pso
+  - ga
+  - centroid
+  - static
+  - random
