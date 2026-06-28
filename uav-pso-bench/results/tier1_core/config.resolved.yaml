@@ -1,0 +1,49 @@
+name: tier1_core
+n_workers: 4
+results_dir: results/tier1_core
+instance_seed: 1234
+optimizer_seed: 9876
+n_seeds: 30
+scenarios:
+- distribution: uniform
+  N: 250
+  K: 10
+- distribution: clustered
+  N: 250
+  K: 10
+- distribution: epicenter_biased
+  N: 250
+  K: 10
+area:
+  x:
+  - 0.0
+  - 5000.0
+  y:
+  - 0.0
+  - 5000.0
+  z:
+  - 20.0
+  - 120.0
+value:
+  beta_mode: pinned
+  t: 0
+  T_decay: 20
+problem:
+  R_comm: 500.0
+  B_min_uav: 0.2
+  capacity: 30
+  uav_battery: 1.0
+  prev_mode: stale
+fitness:
+  w1: 0.6
+  w2: 0.3
+  w3: 0.1
+budget:
+  P: 100
+  G_max: 200
+methods:
+- pso
+- ga
+- centroid
+- static
+- random
