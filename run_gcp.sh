@@ -75,10 +75,17 @@ shutdown_vm() {
     else
         echo "[$(date)] ERROR: script exited with code $exit_code. Stopping VM anyway." | tee -a "$LOG_FILE"
     fi
-    gcloud compute instances stop "$INSTANCE_NAME" \
-        --zone="$ZONE" \
-        --project="$PROJECT_ID" \
-        --quiet >> "$LOG_FILE" 2>&1 || true
+    # Attempt self-stop via gcloud (requires the VM to have the 'compute' API scope).
+    # If it fails (insufficient scope), fall back to `sudo shutdown` which always works.
+    if gcloud compute instances stop "$INSTANCE_NAME" \
+           --zone="$ZONE" \
+           --project="$PROJECT_ID" \
+           --quiet >> "$LOG_FILE" 2>&1; then
+        echo "[$(date)] gcloud stop issued." | tee -a "$LOG_FILE"
+    else
+        echo "[$(date)] gcloud stop failed (scope issue) — using sudo shutdown instead." | tee -a "$LOG_FILE"
+        sudo shutdown -h now >> "$LOG_FILE" 2>&1 || true
+    fi
 }
 trap shutdown_vm EXIT
 
@@ -103,7 +110,7 @@ echo "[$(date)] Methods: pso ga centroid random static no_uav" | tee -a "$LOG_FI
 echo "[$(date)] 36 jobs total on 12 workers"                | tee -a "$LOG_FILE"
 
 cd "$SCRIPT_DIR"
-uavbench run_sweep --config "$SWEEP_CFG" >> "$LOG_FILE" 2>&1
+python3 -m uavbench run_sweep --config "$SWEEP_CFG" >> "$LOG_FILE" 2>&1
 
 echo "[$(date)] Sweep done." | tee -a "$LOG_FILE"
 
