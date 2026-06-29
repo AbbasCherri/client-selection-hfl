@@ -20,7 +20,6 @@ torchvision>=0.15.0
 # HuggingFace – 'datasets' required for real dataset streaming
 huggingface_hub>=0.32.0
 datasets>=2.14.0
-hf_xet>=1.0.0
 
 # Utilities
 filelock>=3.12.0
