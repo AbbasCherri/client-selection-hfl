@@ -19,7 +19,8 @@
       "Bash(CONFIG=configs/smoke.yaml WORKERS=4 ./run_tier1.sh)",
       "Bash(python3 -)",
       "Bash(python3 -m pytest tests/uavbench/ -q)",
-      "Bash(python3 -m uavbench smoke_tier2)"
+      "Bash(python3 -m uavbench smoke_tier2)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

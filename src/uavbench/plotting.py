@@ -110,3 +110,61 @@ def plot_tier2(results_dir: Path) -> list[Path]:
         paths.append(out)
 
     return paths
+
+
+def plot_sweep(results_dir: Path) -> list[Path]:
+    """Generate scalability sweep figures: accuracy/macro-F1 vs N, per method."""
+    df = _read_table(results_dir / "sweep_rounds.parquet")
+    # Use the final FL round per (N, method) as the headline value.
+    final = df.groupby(["N", "method"]).last().reset_index()
+    paths: list[Path] = []
+
+    for metric, ylabel in [
+        ("accuracy", "Final Accuracy"),
+        ("macro_f1", "Final Macro F1"),
+        ("coverage_pct", "Final Coverage (%)"),
+    ]:
+        if metric not in final.columns:
+            continue
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for method in sorted(final["method"].unique()):
+            sub = final[final["method"] == method].sort_values("N")
+            style = "--" if method == "no_uav" else "-"
+            ax.plot(sub["N"], sub[metric], label=method, linewidth=1.8,
+                    marker="o", markersize=5, linestyle=style)
+        ax.set_xlabel("Number of Clients (N)")
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"Scalability Sweep: {ylabel} vs N")
+        ax.legend(frameon=False, fontsize=8)
+        fig.tight_layout()
+        out = results_dir / f"sweep_{metric}.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        paths.append(out)
+
+    # Heatmap: accuracy[method × N]
+    try:
+        pivot = final.pivot(index="method", columns="N", values="accuracy")
+        fig, ax = plt.subplots(figsize=(9, 4))
+        im = ax.imshow(pivot.values, aspect="auto", cmap="RdYlGn", vmin=0, vmax=1)
+        ax.set_xticks(range(len(pivot.columns)))
+        ax.set_xticklabels(pivot.columns)
+        ax.set_yticks(range(len(pivot.index)))
+        ax.set_yticklabels(pivot.index)
+        ax.set_xlabel("N (clients)")
+        ax.set_title("Final Accuracy — method × N")
+        plt.colorbar(im, ax=ax, label="Accuracy")
+        for i in range(len(pivot.index)):
+            for j in range(len(pivot.columns)):
+                ax.text(j, i, f"{pivot.values[i, j]:.2f}", ha="center", va="center",
+                        fontsize=7, color="black")
+        fig.tight_layout()
+        out = results_dir / "sweep_heatmap_accuracy.png"
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        paths.append(out)
+    except Exception:
+        pass
+
+    return paths

@@ -12,13 +12,14 @@ import numpy as np
 import pandas as pd
 
 from .fl.federated import run_tier2
-from .plotting import analyze_dir, plot_dir, plot_tier2
+from .fl.sweep import run_sweep
+from .plotting import analyze_dir, plot_dir, plot_sweep, plot_tier2
 from .runner import load_config, run_experiment
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("uavbench")
 
-# Repo root (uav-pso-bench/) relative to this file: src/uavbench/cli.py -> ../../..
+# Repo root relative to this file: src/uavbench/cli.py -> ../..
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -83,7 +84,6 @@ def cmd_smoke(args: argparse.Namespace) -> None:
     figs = plot_dir(out["results_dir"])
     _print_headline(summary)
 
-    # Evals/sec micro-benchmark from the metaheuristic runs, and a projection.
     meta = runs[runs["method"].isin(["pso", "ga"])]
     total_evals = float(meta["eval_count"].sum())
     total_time = float(meta["wall_time_s"].sum())
@@ -91,7 +91,6 @@ def cmd_smoke(args: argparse.Namespace) -> None:
     logger.info("Smoke finished in %.1fs; %d figures written", elapsed, len(figs))
     logger.info("Metaheuristic throughput: %.0f fitness evals/sec (single-core)", eps)
 
-    # Project a full tier1_core run (3 scenarios x 30 seeds x {pso,ga} at P*G_max).
     proj_budget = 100 * 200
     proj_runs = 3 * 30 * 2
     proj_evals = proj_runs * proj_budget
@@ -135,23 +134,47 @@ def cmd_smoke_tier2(args: argparse.Namespace) -> None:
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
 
+def cmd_run_sweep(args: argparse.Namespace) -> None:
+    cfg = load_config(_find_config(args.config))
+    out = run_sweep(cfg)
+    df = out["rounds"]
+
+    print("\n=== Sweep summary (final round, mean across N) ===")
+    summary = (
+        df.groupby(["method", "N"])
+        .last()[["accuracy", "macro_f1", "coverage_pct"]]
+        .reset_index()
+        .pivot_table(index="method", columns="N", values="accuracy")
+    )
+    with pd.option_context("display.max_rows", None, "display.width", 200):
+        print(summary.round(3).to_string())
+
+    try:
+        figs = plot_sweep(out["results_dir"])
+        logger.info("%d sweep figures written", len(figs))
+    except Exception as exc:
+        logger.warning("Sweep plotting skipped: %s", exc)
+
+    print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="uavbench", description="PSO UAV-placement benchmark")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_run = sub.add_parser("run", help="run an experiment grid from a config")
+    p_run = sub.add_parser("run", help="run a Tier-1 experiment grid from a config")
     p_run.add_argument("--config", required=True)
     p_run.set_defaults(func=cmd_run)
 
-    p_an = sub.add_parser("analyze", help="summarize saved runs into a table")
+    p_an = sub.add_parser("analyze", help="summarize saved Tier-1 runs into a table")
     p_an.add_argument("--config", required=True)
     p_an.set_defaults(func=cmd_analyze)
 
-    p_pl = sub.add_parser("plot", help="generate convergence figures from saved traces")
+    p_pl = sub.add_parser("plot", help="generate Tier-1 convergence figures")
     p_pl.add_argument("--config", required=True)
     p_pl.set_defaults(func=cmd_plot)
 
-    p_sm = sub.add_parser("smoke", help="fast end-to-end run (table + figure + projection)")
+    p_sm = sub.add_parser("smoke", help="fast Tier-1 end-to-end run (table + figure + projection)")
     p_sm.set_defaults(func=cmd_smoke)
 
     p_t2 = sub.add_parser("run_tier2", help="run Tier-2 FL benchmark from a config")
@@ -160,6 +183,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_s2 = sub.add_parser("smoke_tier2", help="fast Tier-2 smoke run (synthetic, no HF token)")
     p_s2.set_defaults(func=cmd_smoke_tier2)
+
+    p_sw = sub.add_parser("run_sweep", help="N-scalability sweep (N=30..250, all methods, 8-core parallel)")
+    p_sw.add_argument("--config", default="configs/tier2_sweep.yaml")
+    p_sw.set_defaults(func=cmd_run_sweep)
 
     p_cl = sub.add_parser("clean", help="remove results (of a config, or all)")
     p_cl.add_argument("--config", default=None)

@@ -1,0 +1,52 @@
+# Tier-2 scalability sweep: N=30..250, with and without UAV positioning.
+# Requires HF_TOKEN for real dataset streaming.
+# Runtime estimate: ~4-8 hours on n1-standard-8 (8 vCPUs, 8 parallel workers).
+#
+# Methods:
+#   With positioning  — pso, ga, centroid, random, static
+#   Without positioning — no_uav (all clients participate every round, no UAV filter)
+name: tier2_sweep
+results_dir: results/tier2_sweep
+
+n_workers: 12         # use all 12 vCPUs; each worker pins to 1 PyTorch thread
+optimizer_seed: 9876
+
+data:
+  source: real        # requires HF_TOKEN env var
+  subsample: 0.10     # 10% of ~128k rows ≈ 12,800 samples; more signal at larger N
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+
+fl:
+  K: 5                # UAVs — scales better with N up to 250
+  R_comm: 20000.0     # 20 km comm range across Noto Peninsula
+  capacity: 60        # max clients per UAV; headroom at N=250
+  n_rounds: 30
+  n_local_epochs: 2
+  lr: 5.0e-4
+  batch_size: 32
+  target_accuracy: 0.70
+
+budget:
+  P: 50
+  G_max: 100
+
+# N-scalability sweep values
+N_values:
+  - 30
+  - 50
+  - 100
+  - 150
+  - 200
+  - 250
+
+# With positioning (UAV coverage filters which clients train)
+# + Without positioning (no_uav = all clients participate every round)
+methods:
+  - pso        # with positioning
+  - ga         # with positioning
+  - centroid   # with positioning
+  - random     # with positioning
+  - static     # with positioning (stale layout — baseline floor)
+  - no_uav     # without positioning — upper-bound FL baseline
