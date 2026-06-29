@@ -54,8 +54,6 @@ export OPENBLAS_NUM_THREADS=1
 # Throttle HuggingFace parallel fetchers during the sequential pre-fetch phase
 # to avoid 429 rate limits. Workers never call HF — only the pre-fetch does.
 export HF_MAX_WORKERS=2
-export HF_XET_HIGH_PERFORMANCE=1
-export HF_XET_NUM_CONCURRENT_RANGE_GETS=8
 export HF_HUB_DISABLE_UPDATE_CHECK=1
 export HF_DATASET_REVISION="6cf97c900445e080e61cb45e1aa72515d3ff1de8"
 

@@ -55,8 +55,12 @@ echo "Installing scientific stack …"
 echo "Installing HuggingFace tooling …"
 .venv/bin/pip install \
     "huggingface_hub>=0.32.0" \
-    "datasets>=2.14.0" \
-    hf_xet
+    "datasets>=2.14.0"
+
+# hf_xet does a full recursive tree walk of the dataset on every access,
+# causing 429/504 errors on large repos. Our loader uses streaming=True
+# which bypasses xet entirely — remove it if already installed.
+.venv/bin/pip uninstall -y hf_xet 2>/dev/null || true
 
 # CPU-only PyTorch (avoids large CUDA runtimes on CPU-only VMs)
 echo "Installing PyTorch (CPU) …"
