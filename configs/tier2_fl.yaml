@@ -1,0 +1,38 @@
+# Tier-2 full config: real HFL dataset, 30 rounds, all placement methods.
+# Requires HF_TOKEN environment variable for dataset streaming.
+# Estimated runtime: ~30-60 min on n1-standard-8 (CPU), dominated by FL training.
+name: tier2_fl
+results_dir: results/tier2_fl
+
+n_workers: 1          # sequential — one complete method run at a time
+optimizer_seed: 9876
+
+data:
+  source: real        # streams from HuggingFace (set HF_TOKEN before running)
+  N_clients: 70       # matches the existing HFL simulation experiments
+  subsample: 0.05     # 5% of 128k = ~6400 rows
+  seed: 42
+  data_dir: ./data
+  # csv_path: ./data/dataset.csv   # uncomment to use a local CSV instead of streaming
+  feature_batch_size: 32           # batch size for one-time ResNet-18 forward pass
+
+fl:
+  K: 3
+  R_comm: 20000.0     # 20 km — varies coverage meaningfully across the Noto Peninsula
+  capacity: 30
+  n_rounds: 30
+  n_local_epochs: 2
+  lr: 5.0e-4
+  batch_size: 32
+  target_accuracy: 0.70
+
+budget:
+  P: 50               # lighter than Tier-1: placement quality vs. FL cost trade-off
+  G_max: 100
+
+methods:
+  - pso
+  - ga
+  - centroid
+  - static
+  - random
