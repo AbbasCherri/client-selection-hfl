@@ -123,12 +123,32 @@ def fedavg(updates: list[tuple[dict, int]]) -> dict[str, torch.Tensor]:
     """Sample-weighted FedAvg of (state_dict, n_samples) pairs."""
     total = sum(n for _, n in updates)
     if total == 0:
-        return updates[0][0]
+        return {k: v.clone() for k, v in updates[0][0].items()}
     agg: dict[str, torch.Tensor] = {}
     for sd, n in updates:
         w = n / total
         for k, v in sd.items():
             agg[k] = agg.get(k, torch.zeros_like(v)) + w * v.float()
+    return agg
+
+
+def reputation_fedavg(
+    updates: list[tuple[dict[str, torch.Tensor], int, float]],
+) -> dict[str, torch.Tensor]:
+    """Reputation-and-sample-weighted FedAvg (paper §IV-D).
+
+    Weight for client n  =  reputation_n × n_samples_n.
+    Falls back to uniform sample-count weighting if all reputations collapse to zero.
+    """
+    weights = [max(rep, 0.0) * n for _, n, rep in updates]
+    total_w = sum(weights)
+    if total_w < 1e-10:
+        return fedavg([(sd, n) for sd, n, _ in updates])
+    agg: dict[str, torch.Tensor] = {}
+    for (sd, _n, _rep), w in zip(updates, weights):
+        w_norm = w / total_w
+        for k, v in sd.items():
+            agg[k] = agg.get(k, torch.zeros_like(v)) + w_norm * v.float()
     return agg
 
 

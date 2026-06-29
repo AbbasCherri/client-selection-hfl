@@ -17,7 +17,12 @@ from .seeding import kmeanspp_centers
 
 
 def constriction_factor(phi: float) -> float:
-    """chi = 2 / |2 - phi - sqrt(phi^2 - 4 phi)|  (Clerc & Kennedy)."""
+    """chi = 2 / |2 - phi - sqrt(phi^2 - 4*phi)|  (Clerc & Kennedy 2002).
+
+    Requires phi > 4 for the discriminant to be positive.
+    """
+    if phi <= 4.0:
+        raise ValueError(f"phi must be > 4 for constriction PSO; got {phi}")
     return 2.0 / abs(2.0 - phi - np.sqrt(phi * phi - 4.0 * phi))
 
 
@@ -32,9 +37,8 @@ class PSO(Optimizer):
         G_max: int = 200,
         c1: float = 2.05,
         c2: float = 2.05,
-        phi: float = 4.1,
-        kappa: float = 0.2,
-        ring_k: int = 2,
+        vmax_frac: float = 0.2,       # per-dim velocity clamp = vmax_frac*(hi-lo)
+        ring_k: int = 2,              # neighbours on each side of the ring (neighbourhood size = 2k+1)
         delta_stag: float = 1e-4,
         G_stag: int = 20,
         rho: float = 0.2,
@@ -54,9 +58,12 @@ class PSO(Optimizer):
     ) -> None:
         super().__init__(**kw)
         self.P, self.G_max = P, G_max
-        self.c1, self.c2, self.phi = c1, c2, phi
-        self.chi = constriction_factor(phi)
-        self.kappa = kappa
+        self.c1, self.c2 = c1, c2
+        # phi = c1 + c2 is required by the constriction formula (Clerc & Kennedy).
+        # Deriving it here prevents silent chi errors when c1/c2 are changed in ablations.
+        self.phi = c1 + c2
+        self.chi = constriction_factor(self.phi)
+        self.vmax_frac = vmax_frac
         self.ring_k = ring_k
         self.delta_stag, self.G_stag, self.rho = delta_stag, G_stag, rho
         self.p_turb = p_turb
@@ -101,17 +108,24 @@ class PSO(Optimizer):
     def _neighborhood_best(
         self, pbest: np.ndarray, pbest_fit: np.ndarray, gbest_pos: np.ndarray
     ) -> np.ndarray:
-        """Return the (P, dim) array of each particle's neighborhood-best position."""
+        """Return the (P, dim) array of each particle's neighbourhood-best position.
+
+        Ring topology: each particle i has a symmetric neighbourhood of size
+        ``2*ring_k + 1`` (ring_k neighbours on each side plus itself).
+        ``ring_k=1`` → classic lbest ring; ``ring_k=2`` → lbest2 ring (5 particles).
+        """
         if self.topology == "gbest":
             return np.tile(gbest_pos, (self.P, 1))
-        # Ring topology with neighborhood {i-1, i, i+1}.
-        idx = np.arange(self.P)
-        left = (idx - 1) % self.P
-        right = (idx + 1) % self.P
-        stack_fit = np.stack([pbest_fit[left], pbest_fit, pbest_fit[right]], axis=1)
-        stack_idx = np.stack([left, idx, right], axis=1)
-        choice = stack_idx[idx, stack_fit.argmax(axis=1)]
-        return pbest[choice]
+
+        # Vectorised lbest ring — O(P * ring_k) but entirely in NumPy.
+        P = self.P
+        idx = np.arange(P)
+        offsets = np.arange(-self.ring_k, self.ring_k + 1)   # shape (2k+1,)
+        neighbors = (idx[:, None] + offsets[None, :]) % P    # shape (P, 2k+1)
+        neighbor_fits = pbest_fit[neighbors]                   # shape (P, 2k+1)
+        best_col = neighbor_fits.argmax(axis=1)               # shape (P,)
+        best_idx = neighbors[idx, best_col]                   # shape (P,)
+        return pbest[best_idx]
 
     # -- main loop -------------------------------------------------------
 
@@ -120,7 +134,7 @@ class PSO(Optimizer):
     ) -> Result:
         lo, hi = self._tile_bounds(instance)
         dim = instance.dim
-        vmax = self.kappa * (hi - lo)
+        vmax = self.vmax_frac * (hi - lo)
 
         X = self._init_positions(instance, lo, hi, rng)
         Vel = 0.5 * rng.uniform(-vmax, vmax, size=(self.P, dim))
@@ -131,6 +145,7 @@ class PSO(Optimizer):
         gbest_pos = pbest[g].copy()
         gbest_fit = float(pbest_fit[g])
 
+        # F_max = w1*1 - w2*0 - w3*0 = w1 (all coverage, zero penalty terms).
         threshold = self.early_stop_frac * fitness.w1
         convergence = [gbest_fit]
         stagnation = 0
@@ -193,6 +208,11 @@ class PSO(Optimizer):
                 pbest[worst] = X[worst]
                 pbest_fit[worst] = wf
                 stagnation = 0
+                # Update gbest immediately — a reinit particle may have improved it.
+                g_new = int(pbest_fit.argmax())
+                if pbest_fit[g_new] > gbest_fit:
+                    gbest_fit = float(pbest_fit[g_new])
+                    gbest_pos = pbest[g_new].copy()
 
             if gbest_fit >= threshold:
                 break
@@ -203,5 +223,5 @@ class PSO(Optimizer):
             best_fitness=gbest_fit,
             convergence=convergence,
             n_iterations=n_iter,
-            meta={"chi": self.chi},
+            meta={"chi": self.chi, "phi": self.phi},
         )

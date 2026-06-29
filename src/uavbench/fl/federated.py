@@ -23,6 +23,7 @@ regenerable from saved files via the ``analyze`` CLI command.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import time
@@ -33,17 +34,24 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.metrics import classification_report, f1_score
+import yaml
+from sklearn.metrics import f1_score
 from torch.utils.data import DataLoader, Subset
 
 from hflsim.shared.coords import haversine, latlon_to_meters
 from uavbench.optimizers import REGISTRY
+from uavbench.problem.energy import EnergyModel
 from uavbench.problem.fitness import Fitness
 from uavbench.problem.instance import ProblemInstance
 
+_ENERGY_MODEL = EnergyModel()
+
+from .client_selection import ClientSelector
 from .dataset import CachedDataset, ClientData, SyntheticClientData, make_client_loader
+from .device_state import DeviceStateManager
 from .features import compute_feature_cache, synthetic_feature_cache
-from .model import CachedFusionModel, clone_model, fedavg
+from .model import CachedFusionModel, clone_model, fedavg, reputation_fedavg
+from .reputation import ReputationManager
 
 logger = logging.getLogger("uavbench.fl.federated")
 
@@ -70,7 +78,6 @@ def _build_problem_instance(
     upper = np.array([xy_m[:, 0].max(), xy_m[:, 1].max(), 120.0])
 
     if prev_positions_m is None:
-        prev_positions_m = np.zeros((K, 3))
         # Spread initial positions evenly across the bounding box.
         xs = np.linspace(lower[0], upper[0], K)
         ys = np.linspace(lower[1], upper[1], K)
@@ -201,7 +208,7 @@ def _evaluate(
     preds = np.concatenate(all_preds)
     labels = np.concatenate(all_labels)
     acc = float((preds == labels).mean())
-    macro_f1 = float(f1_score(labels, preds, average="macro", zero_division=0))
+    macro_f1 = float(f1_score(labels, preds, average="macro", zero_division=0, labels=[0, 1, 2, 3]))
     per_class = f1_score(labels, preds, average=None, zero_division=0, labels=[0, 1, 2, 3])
     class_names = ["survived", "collapsed", "obstructed", "missing"]
     return {
@@ -316,13 +323,17 @@ def run_tier2(cfg: dict) -> dict:
     for method in methods:
         logger.info("=== Method: %s ===", method)
         N_clients = len(clients)
-        _seed = (cfg.get("optimizer_seed", 9876) + N_clients * 7919 + hash(method) % (2**31)) % (2**31)
+        _method_hash = int(hashlib.md5(method.encode()).hexdigest(), 16) % (2**31)
+        _seed = (cfg.get("optimizer_seed", 9876) + N_clients * 7919 + _method_hash) % (2**31)
         rng = np.random.default_rng(_seed)
+        torch.manual_seed(_seed)   # deterministic model init across runs
 
         global_model = CachedFusionModel()
         prev_uav_positions_m: np.ndarray | None = None
         rounds_to_target: int | None = None
         cumulative_energy_j: float = 0.0
+
+        method_start_idx = len(all_rows)
 
         for rnd in range(1, n_rounds + 1):
             t0 = time.perf_counter()
@@ -349,7 +360,7 @@ def run_tier2(cfg: dict) -> dict:
                     move_m = float(
                         np.sum(np.sqrt(np.sum((uav_pos_m - prev_uav_positions_m) ** 2, axis=1)))
                     )
-                    cumulative_energy_j += 250.0 * (move_m / 15.0)
+                    cumulative_energy_j += _ENERGY_MODEL.energy_joules(move_m)
                 prev_uav_positions_m = uav_pos_m.copy()
                 covered = _covered_clients(
                     {c.client_id: c.coords for c in clients}, uav_pos_m, ref, R_comm
@@ -392,7 +403,8 @@ def run_tier2(cfg: dict) -> dict:
             elapsed = time.perf_counter() - t0
 
             n_covered = len(covered)
-            comm_cost = n_covered  # one upload per covered client per round
+            # Uplink + downlink, no UAV→server hop (Tier-2 flat placement harness).
+            comm_mb_round = 2.0 * n_covered * _MODEL_SIZE_MB
 
             if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
                 rounds_to_target = rnd
@@ -405,7 +417,7 @@ def run_tier2(cfg: dict) -> dict:
                 "coverage_pct": coverage_pct,
                 "n_covered": n_covered,
                 "placement_fitness": placement_fitness,
-                "comm_cost": comm_cost,
+                "comm_mb_round": comm_mb_round,
                 "cumulative_energy_j": cumulative_energy_j,
                 "round_time_s": elapsed,
                 **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
@@ -416,6 +428,10 @@ def run_tier2(cfg: dict) -> dict:
                 rnd, n_rounds, metrics["accuracy"], metrics["macro_f1"],
                 n_covered, coverage_pct, elapsed,
             )
+
+        # Backfill per-method scalar onto all rows for this method.
+        for row in all_rows[method_start_idx:]:
+            row["rounds_to_target"] = rounds_to_target
 
         logger.info(
             "%s finished. Rounds to target (%.0f%%): %s | Cumulative energy: %.1f kJ",
@@ -430,11 +446,401 @@ def run_tier2(cfg: dict) -> dict:
     rounds_df = pd.DataFrame(all_rows)
     _write_table(rounds_df, results_dir / "tier2_rounds.parquet")
 
-    import yaml
     with open(results_dir / "config.tier2.resolved.yaml", "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
 
     size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
     logger.info("Tier-2 results at %s (%.2f MB)", results_dir, size_mb)
+
+    return {"rounds": rounds_df, "results_dir": results_dir, "size_mb": size_mb}
+
+
+# ---------------------------------------------------------------------------
+# Full paper system simulation
+# ---------------------------------------------------------------------------
+
+# Trainable parameter count: struct_branch (17,216) + fusion (50,436) = 67,652
+# At float32 (4 bytes) = 270,608 bytes ≈ 0.271 MB
+_MODEL_SIZE_MB: float = 67_652 * 4 / 1_000_000
+
+
+# Method configuration: (placement_method, selection_mode, reputation_weighted, dynamic)
+# placement_method: "ga" or None (flat/centralized)
+# selection_mode:   "ucb" | "random" | "all"
+# reputation_weighted: True → reputation_fedavg; False → uniform sample-weight fedavg
+# dynamic:          True → reposition every T_sel rounds; False → place once at round 1
+_METHOD_CFG: dict[str, tuple] = {
+    "proposed_hfl":      ("ga",  "ucb",    True,  True),
+    "flat_fl":           (None,  "all",    False, False),
+    "centralized":       (None,  "all",    False, False),   # handled specially
+    "hfl_no_selection":  ("ga",  "random", True,  True),
+    "hfl_static":        ("ga",  "ucb",    True,  False),
+    "hfl_no_reputation": ("ga",  "ucb",    False, True),
+}
+
+
+def _uav_pos_to_latlon(
+    uav_pos_m: np.ndarray,
+    ref: np.ndarray,
+) -> list[tuple[float, float]]:
+    """Convert UAV metre positions back to (lat, lon) tuples."""
+    lat0, lon0 = float(ref[0]), float(ref[1])
+    lat0_rad = math.radians(lat0)
+    R = 6_371_000.0
+    latlon = []
+    for x, y, _z in uav_pos_m:
+        lat = lat0 + math.degrees(y / R)
+        lon = lon0 + math.degrees(x / (R * math.cos(lat0_rad)))
+        latlon.append((lat, lon))
+    return latlon
+
+
+def _load_data(cfg: dict, results_dir: Path) -> tuple:
+    """Shared data loading for run_full_hfl (real or synthetic)."""
+    data_cfg = cfg["data"]
+    data_source = data_cfg.get("source", "synthetic")
+
+    if data_source == "synthetic":
+        K = cfg["fl"]["K"]
+        synth = SyntheticClientData(N=data_cfg["N_clients"], K=K, seed=data_cfg.get("seed", 42))
+        raw = synth.build()
+        return (
+            raw["full_dataset"],
+            raw["client_train_indices"],
+            raw["global_test_indices"],
+            raw["client_coords"],
+            raw["img_features"],
+        )
+
+    import os
+    from hflsim.data import get_hfl_data_partitions
+
+    hf_token = os.environ.get("HF_TOKEN", data_cfg.get("hf_token"))
+    full_dataset, client_train_indices, _, global_test_indices, client_coords = (
+        get_hfl_data_partitions(
+            csv_path=data_cfg.get("csv_path"),
+            data_dir=data_cfg.get("data_dir", "./data"),
+            N=data_cfg["N_clients"],
+            subsample=data_cfg.get("subsample", 0.05),
+            random_seed=data_cfg.get("seed", 42),
+            hf_token=hf_token,
+        )
+    )
+    # Allow the sweep to provide a shared N-level cache (avoids recomputing per seed).
+    cache_path = data_cfg.get("feature_cache_path") or str(results_dir / "img_features.npy")
+    img_features = compute_feature_cache(
+        full_dataset,
+        cache_path=cache_path,
+        batch_size=data_cfg.get("feature_batch_size", 32),
+        num_workers=0,
+    )
+    return full_dataset, client_train_indices, global_test_indices, client_coords, img_features
+
+
+def _run_centralized(
+    global_model: CachedFusionModel,
+    cached_dataset: CachedDataset,
+    all_train_indices: list[int],
+    global_test_indices: list[int],
+    n_rounds: int,
+    n_local_epochs: int,
+    lr: float,
+    batch_size: int,
+) -> list[dict]:
+    """Oracle: train on all data at one node, report metrics every n_local_epochs epochs."""
+    rows: list[dict] = []
+    loader = make_client_loader(cached_dataset, all_train_indices, batch_size)
+    trainable = [p for p in global_model.parameters() if p.requires_grad]
+    opt = optim.Adam(trainable, lr=lr)
+    loss_fn = nn.CrossEntropyLoss()
+
+    for rnd in range(1, n_rounds + 1):
+        t0 = time.perf_counter()
+        global_model.train()
+        for _ in range(n_local_epochs):
+            for img_feat, struct, labels in loader:
+                opt.zero_grad()
+                logits = global_model(img_feat, struct)
+                loss_fn(logits, labels).backward()
+                torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+                opt.step()
+        metrics = _evaluate(global_model, cached_dataset, global_test_indices)
+        rows.append({
+            "method": "centralized",
+            "round": rnd,
+            "accuracy": metrics["accuracy"],
+            "macro_f1": metrics["macro_f1"],
+            "coverage_pct": 100.0,
+            "n_selected": len(all_train_indices),
+            "placement_fitness": 1.0,
+            "comm_mb_round": 0.0,          # no communication
+            "cumulative_energy_j": 0.0,
+            "round_time_s": time.perf_counter() - t0,
+            **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
+        })
+        logger.info(
+            "Centralized round %d/%d | acc=%.3f | macro-F1=%.3f",
+            rnd, n_rounds, metrics["accuracy"], metrics["macro_f1"],
+        )
+    return rows
+
+
+def run_full_hfl(cfg: dict) -> dict:
+    """Full paper system simulation — all methods from §V including ablations.
+
+    Supported methods (``cfg["methods"]``):
+      proposed_hfl      — GA placement every T_sel rounds + UCB selection + reputation FedAvg
+      flat_fl           — no UAV hierarchy, all clients, server aggregates directly
+      centralized       — oracle upper bound (all data at one node, no federation)
+      hfl_no_selection  — GA every T_sel rounds + random selection + reputation FedAvg
+      hfl_static        — GA once (no repositioning) + UCB selection + reputation FedAvg
+      hfl_no_reputation — GA every T_sel rounds + UCB selection + uniform FedAvg
+
+    Additional config keys vs run_tier2
+    ------------------------------------
+    fl.T_sel            : int   — reposition interval in rounds (default 5)
+    fl.seed             : int   — per-run RNG seed (for multi-seed sweeps)
+    client_simulation   : dict  — optional; enabled by default
+    """
+    results_dir = Path(cfg["results_dir"])
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    fl = cfg["fl"]
+    n_rounds        = fl["n_rounds"]
+    n_local_epochs  = fl["n_local_epochs"]
+    lr              = fl["lr"]
+    batch_size      = fl["batch_size"]
+    K               = fl["K"]
+    R_comm          = fl["R_comm"]
+    capacity        = fl["capacity"]
+    T_sel           = fl.get("T_sel", 5)
+    target_accuracy = fl.get("target_accuracy", 0.70)
+    run_seed        = fl.get("seed", cfg.get("optimizer_seed", 42))
+
+    P     = cfg["budget"]["P"]
+    G_max = cfg["budget"]["G_max"]
+
+    # ── 1. Load data ────────────────────────────────────────────────────────
+    full_dataset, client_train_indices, global_test_indices, client_coords, img_features = (
+        _load_data(cfg, results_dir)
+    )
+    cached_dataset = CachedDataset(full_dataset, img_features)
+
+    clients: list[ClientData] = [
+        ClientData(
+            client_id=cid,
+            coords=client_coords[cid],
+            train_indices=client_train_indices[cid],
+            test_indices=[],
+        )
+        for cid in client_coords
+        if client_train_indices.get(cid)
+    ]
+    client_ids = [c.client_id for c in clients]
+    all_train_indices: list[int] = [idx for c in clients for idx in c.train_indices]
+    logger.info("%d clients loaded (full system).", len(clients))
+
+    # Epicentre — use config override or default to Noto Peninsula 2024
+    epicentre = tuple(cfg.get("epicentre", [37.488, 137.272]))   # type: ignore[assignment]
+
+    all_rows: list[dict] = []
+
+    # ── 2. Per-method outer loop ─────────────────────────────────────────────
+    for method in cfg["methods"]:
+        logger.info("=== Full-system method: %s ===", method)
+
+        if method not in _METHOD_CFG:
+            logger.warning("Unknown method %s — skipping.", method)
+            continue
+
+        placement_method, selection_mode, rep_weighted, dynamic = _METHOD_CFG[method]
+
+        # Per-method seed: combine the run-level seed with a stable method hash.
+        # The hash is applied exactly once here; callers (e.g. _paper_job) must NOT
+        # pre-encode the method identity into run_seed to avoid double-counting.
+        _method_hash = int(hashlib.md5(method.encode()).hexdigest(), 16) % (2**16)
+        _seed = (run_seed ^ _method_hash) % (2**31)
+        rng = np.random.default_rng(_seed)
+        torch.manual_seed(_seed)   # deterministic model init across runs
+
+        global_model = CachedFusionModel()
+
+        # ── Centralized baseline: no federation at all ───────────────────
+        if method == "centralized":
+            rows = _run_centralized(
+                global_model, cached_dataset, all_train_indices, global_test_indices,
+                n_rounds, n_local_epochs, lr, batch_size,
+            )
+            all_rows.extend(rows)
+            continue
+
+        # ── Federated path ───────────────────────────────────────────────
+        device_mgr  = DeviceStateManager(client_ids, rng)
+        rep_mgr     = ReputationManager(client_ids)
+        selector    = ClientSelector(client_ids, epicentre=epicentre)
+
+        # Precompute static client-coord lookup (avoid rebuilding each round)
+        client_coord_map: dict[int, tuple[float, float]] = {
+            c.client_id: c.coords for c in clients
+        }
+
+        prev_uav_pos_m:       np.ndarray | None = None
+        uav_pos_m:            np.ndarray | None = None
+        uav_latlon:           list[tuple[float, float]] = []
+        ref:                  np.ndarray | None = None
+        covered_all:          dict[int, int] = {}
+        last_placement_fitness: float = 0.0
+        cumulative_energy     = 0.0
+        rounds_to_target:     int | None = None
+        method_start_idx:     int = len(all_rows)
+
+        for rnd in range(1, n_rounds + 1):
+            t0 = time.perf_counter()
+
+            # ── Placement ────────────────────────────────────────────────
+            if placement_method is None:
+                # flat_fl: no UAV filter — all clients always covered (static, no dropouts).
+                covered_all = {c.client_id: 0 for c in clients}
+                placement_fitness = 1.0
+            else:
+                needs_placement = (uav_pos_m is None) or (dynamic and (rnd - 1) % T_sel == 0)
+                if needs_placement:
+                    uav_pos_m, ref, last_placement_fitness = _place_uavs(
+                        client_coords=client_coord_map,
+                        K=K,
+                        R_comm=R_comm,
+                        capacity=capacity,
+                        method=placement_method,
+                        rng=rng,
+                        P=P,
+                        G_max=G_max,
+                        prev_positions_m=prev_uav_pos_m,
+                    )
+                    if prev_uav_pos_m is not None:
+                        move_m = float(
+                            np.sum(np.sqrt(np.sum((uav_pos_m - prev_uav_pos_m) ** 2, axis=1)))
+                        )
+                        cumulative_energy += 250.0 * (move_m / 15.0)
+                    prev_uav_pos_m = uav_pos_m.copy()
+                    uav_latlon = _uav_pos_to_latlon(uav_pos_m, ref)
+                    covered_all = _covered_clients(client_coord_map, uav_pos_m, ref, R_comm)
+                placement_fitness = last_placement_fitness
+
+            # ── Client state + selection ──────────────────────────────────
+            device_states = device_mgr.get_all_states()
+            rep_scores    = rep_mgr.get_all_scores()
+
+            selected: dict[int, int] = selector.select(
+                covered           = covered_all,
+                device_states     = device_states,
+                reputation_scores = rep_scores,
+                client_coords     = client_coord_map,
+                uav_coords_latlon = uav_latlon,
+                round_num         = rnd,
+                uav_capacity      = capacity,
+                mode              = selection_mode,
+                rng               = rng,
+            )
+
+            coverage_pct = 100.0 * len(covered_all) / max(len(clients), 1)
+            n_selected   = len(selected)
+
+            # ── Local training ────────────────────────────────────────────
+            # (client_id) → (state_dict, n_samples, reputation_score)
+            client_updates: dict[int, tuple[dict, int, float]] = {}
+            for c in clients:
+                if c.client_id not in selected or not c.train_indices:
+                    continue
+                loader = make_client_loader(cached_dataset, c.train_indices, batch_size)
+                sd, n = _local_train(global_model, loader, n_local_epochs, lr)
+                rep  = rep_scores.get(c.client_id, 0.5)
+                client_updates[c.client_id] = (sd, n, rep)
+
+            # ── Reputation update ─────────────────────────────────────────
+            if client_updates:
+                rep_mgr.update_batch(
+                    {cid: sd for cid, (sd, _, _) in client_updates.items()},
+                    global_update_vec=None,
+                )
+
+            # ── UAV-level aggregation ─────────────────────────────────────
+            uav_groups: dict[int, list[tuple[dict, int, float]]] = {}
+            for cid, triple in client_updates.items():
+                uav_idx = selected[cid]
+                uav_groups.setdefault(uav_idx, []).append(triple)
+
+            uav_updates: list[tuple[dict, int, float]] = []
+            for uav_idx, upds in uav_groups.items():
+                if rep_weighted:
+                    agg = reputation_fedavg(upds)
+                    uav_rep = sum(r for _, _, r in upds) / len(upds)
+                else:
+                    agg = fedavg([(sd, n) for sd, n, _ in upds])
+                    uav_rep = 1.0
+                total_n = sum(n for _, n, _ in upds)
+                uav_updates.append((agg, total_n, uav_rep))
+
+            # ── Server-level aggregation ──────────────────────────────────
+            if uav_updates:
+                if rep_weighted:
+                    server_agg = reputation_fedavg(uav_updates)
+                else:
+                    server_agg = fedavg([(sd, n) for sd, n, _ in uav_updates])
+                global_model.load_trainable_state_dict(server_agg)
+
+            # ── Device state update ───────────────────────────────────────
+            device_mgr.update_round(set(selected.keys()))
+
+            # ── Evaluate ─────────────────────────────────────────────────
+            metrics = _evaluate(global_model, cached_dataset, global_test_indices)
+            elapsed = time.perf_counter() - t0
+
+            if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
+                rounds_to_target = rnd
+
+            # Communication cost (MB): uplink + downlink for clients and UAV→server
+            if placement_method is None:
+                # flat_fl: clients ↔ server directly (no UAV hop)
+                comm_mb = 2.0 * n_selected * _MODEL_SIZE_MB
+            else:
+                # HFL: clients ↔ UAVs ↔ server
+                n_active_uavs = len(uav_groups)
+                comm_mb = 2.0 * (n_selected + n_active_uavs) * _MODEL_SIZE_MB
+
+            all_rows.append({
+                "method":             method,
+                "round":              rnd,
+                "accuracy":           metrics["accuracy"],
+                "macro_f1":           metrics["macro_f1"],
+                "coverage_pct":       coverage_pct,
+                "n_selected":         n_selected,
+                "placement_fitness":  placement_fitness,
+                "comm_mb_round":      comm_mb,
+                "cumulative_energy_j": cumulative_energy,
+                "round_time_s":       elapsed,
+                **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
+            })
+            logger.info(
+                "Round %d/%d | acc=%.3f | macro-F1=%.3f | selected=%d/%.0f%% | %.1fs",
+                rnd, n_rounds, metrics["accuracy"], metrics["macro_f1"],
+                n_selected, coverage_pct, elapsed,
+            )
+
+        logger.info(
+            "%s done. Rounds to %.0f%%: %s | Energy: %.1f kJ",
+            method, target_accuracy * 100,
+            rounds_to_target if rounds_to_target else "not reached",
+            cumulative_energy / 1000,
+        )
+
+    # ── 3. Persist ───────────────────────────────────────────────────────────
+    rounds_df = pd.DataFrame(all_rows)
+    _write_table(rounds_df, results_dir / "fullsim_rounds.parquet")
+
+    with open(results_dir / "config.fullsim.resolved.yaml", "w") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+
+    size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
+    logger.info("Full-system results at %s (%.2f MB)", results_dir, size_mb)
 
     return {"rounds": rounds_df, "results_dir": results_dir, "size_mb": size_mb}

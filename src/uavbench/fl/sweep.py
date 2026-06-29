@@ -19,6 +19,7 @@ HuggingFace rate-limit strategy:
 from __future__ import annotations
 
 import copy
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -154,5 +155,97 @@ def run_sweep(cfg: dict) -> dict:
 
     size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
     logger.info("Sweep complete — %.2f MB at %s", size_mb, results_dir)
+
+    return {"rounds": full_df, "results_dir": results_dir, "size_mb": size_mb}
+
+
+# ---------------------------------------------------------------------------
+# Paper full-system sweep (N × method × seed)
+# ---------------------------------------------------------------------------
+
+def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
+    """Single (N, method, seed) full-system run, executed inside a joblib worker."""
+    import torch
+    torch.set_num_threads(1)
+
+    from .federated import run_full_hfl
+
+    job_cfg = copy.deepcopy(cfg)
+    job_cfg["data"]["N_clients"] = N
+    job_cfg["methods"] = [method]
+    _method_hash = int(hashlib.md5(method.encode()).hexdigest(), 16) % (2**20)
+    job_cfg["fl"]["seed"] = cfg.get("optimizer_seed", 9876) + seed_idx * 7919 + N * 31 + _method_hash
+    job_cfg["results_dir"] = str(Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}")
+    # Point to the shared N-level feature cache produced by _prefetch_all_N so that
+    # parallel seed workers don't each re-run the full ResNet forward pass.
+    if job_cfg["data"].get("source", "synthetic") == "real":
+        job_cfg["data"]["feature_cache_path"] = str(
+            Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy"
+        )
+
+    logger.info("[N=%d  method=%-20s  seed=%d] starting", N, method, seed_idx)
+    out = run_full_hfl(job_cfg)
+    df = out["rounds"].copy()
+    df.insert(0, "seed", seed_idx)
+    df.insert(0, "N", N)
+    final_acc = float(df["accuracy"].iloc[-1]) if len(df) else float("nan")
+    final_f1  = float(df["macro_f1"].iloc[-1])  if len(df) else float("nan")
+    logger.info(
+        "[N=%d  method=%-20s  seed=%d] done | acc=%.3f  macro-F1=%.3f",
+        N, method, seed_idx, final_acc, final_f1,
+    )
+    return df
+
+
+def run_paper_sweep(cfg: dict) -> dict:
+    """Run the full paper simulation sweep: N × method × seed grid.
+
+    Phase 1 (sequential): pre-fetch dataset for all N values.
+    Phase 2 (parallel):   run (N, method, seed) jobs with n_workers workers.
+
+    Returns dict with ``"rounds"`` (full DataFrame), ``"results_dir"``, ``"size_mb"``.
+    """
+    N_values: list[int]  = cfg["N_values"]
+    methods:  list[str]  = cfg["methods"]
+    n_seeds:  int        = cfg.get("n_seeds", 1)
+    n_workers: int       = cfg.get("n_workers", 8)
+    results_dir = Path(cfg["results_dir"])
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- Phase 1: sequential data pre-fetch ---
+    logger.info("Phase 1: pre-fetching data for %d N-values (sequential)…", len(N_values))
+    _prefetch_all_N(cfg)
+    logger.info("Phase 1 complete — all caches ready.")
+
+    # --- Phase 2: parallel full-system sweep ---
+    jobs = [
+        (N, method, seed_idx)
+        for N in N_values
+        for method in methods
+        for seed_idx in range(n_seeds)
+    ]
+    logger.info(
+        "Phase 2: %d N × %d methods × %d seeds = %d jobs — %d parallel workers",
+        len(N_values), len(methods), n_seeds, len(jobs), n_workers,
+    )
+
+    dfs = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
+        delayed(_paper_job)(N, method, seed_idx, cfg)
+        for N, method, seed_idx in jobs
+    )
+
+    full_df = pd.concat(dfs, ignore_index=True)
+
+    out_path = results_dir / "paper_sweep_rounds.parquet"
+    try:
+        full_df.to_parquet(out_path, index=False)
+    except Exception:
+        full_df.to_csv(out_path.with_suffix(".csv"), index=False)
+
+    with open(results_dir / "config.paper_sweep.resolved.yaml", "w") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+
+    size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
+    logger.info("Paper sweep complete — %.2f MB at %s", size_mb, results_dir)
 
     return {"rounds": full_df, "results_dir": results_dir, "size_mb": size_mb}
