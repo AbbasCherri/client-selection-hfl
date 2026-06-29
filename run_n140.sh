@@ -67,7 +67,7 @@ else
     fi
 fi
 
-"$PYTHON" run_simulation.py "${ARGS[@]}"
+"$PYTHON" -m hflsim "${ARGS[@]}"
 
 echo ""
 echo "=== Simulation complete (N = 140) ==="

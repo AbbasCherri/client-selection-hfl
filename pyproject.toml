@@ -3,12 +3,12 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "uavbench"
-version = "0.1.0"
-description = "PSO 3D UAV-placement benchmark for hierarchical federated learning (Tier-1 core)"
+name = "client-selection-hfl"
+version = "0.2.0"
+description = "Hierarchical Federated Learning simulation + UAV PSO placement for post-earthquake damage classification"
 requires-python = ">=3.11"
-readme = "README.md"
 dependencies = [
+    # shared scientific stack
     "numpy>=1.24.0,<3.0",
     "scipy>=1.11.0",
     "pandas>=2.0.0",
@@ -17,12 +17,24 @@ dependencies = [
     "joblib>=1.3.0",
     "pyyaml>=6.0",
     "tqdm>=4.66.0",
+    "scikit-learn>=1.3.0",
+    # HFL-specific
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "pillow>=10.0.0",
+    "requests>=2.31.0",
+    "huggingface_hub>=0.32.0",
+    "datasets>=2.14.0",
+    "hf_xet>=1.0.0",
+    "filelock>=3.12.0",
+    "typing_extensions>=4.7.0",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7.4.0"]
+dev = ["pytest>=7.4.0"]
 
 [project.scripts]
+hflsim   = "hflsim.cli:main"
 uavbench = "uavbench.cli:main"
 
 [tool.setuptools.packages.find]

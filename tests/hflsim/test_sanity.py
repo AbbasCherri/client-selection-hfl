@@ -10,29 +10,15 @@ import unittest
 from pathlib import Path
 
 
-def _bootstrap_venv():
-    repo_root  = Path(__file__).resolve().parent
-    venv_root  = repo_root / ".venv"
-    if not venv_root.exists():
-        return
-    for sp in [
-        venv_root / "lib"   / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages",
-        venv_root / "lib64" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages",
-    ]:
-        if sp.exists() and str(sp) not in sys.path:
-            sys.path.insert(0, str(sp))
-
-
-_bootstrap_venv()
 
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from models     import MultiModalFusionModel, FocalLoss
-from data_loader import MultiModalDataset, FEATURE_COLS
-from simulation  import IoTClient, UAVAggregator, ClientSelectionCoordinator, HFLOrchestrator
+from hflsim.models.fusion import MultiModalFusionModel, FocalLoss
+from hflsim.data.loader import MultiModalDataset, FEATURE_COLS
+from hflsim.simulation import IoTClient, UAVAggregator, ClientSelectionCoordinator, HFLOrchestrator
 
 
 # ---------------------------------------------------------------------------
