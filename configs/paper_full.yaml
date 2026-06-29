@@ -1,0 +1,60 @@
+# Full paper system simulation — §V comparison (Table III + Figures 4-8).
+#
+# Runs 6 methods × 3 N-values × 3 seeds = 54 jobs on 8 parallel workers.
+# Estimated wall-clock: ~2-3 hours on n1-standard-8.
+#
+# Methods:
+#   proposed_hfl      — GA every T_sel=5 rounds + UCB selection + reputation FedAvg
+#   flat_fl           — no UAVs, all clients, server aggregates directly (FedAvg baseline [27])
+#   centralized       — oracle upper bound (all data at one node)
+#   hfl_no_selection  — random client selection ablation
+#   hfl_static        — no UAV repositioning ablation
+#   hfl_no_reputation — uniform (sample-weighted) aggregation ablation
+#
+# Requires HF_TOKEN for the real dataset. Synthetic fallback not recommended
+# for paper results — use paper_full_synthetic.yaml for quick offline checks.
+
+name: paper_full_system
+results_dir: results/paper_full
+
+n_workers: 8
+n_seeds: 3           # repetitions for confidence intervals
+optimizer_seed: 9876
+
+# Noto Peninsula 2024 earthquake epicentre (lat °N, lon °E)
+epicentre: [37.488, 137.272]
+
+data:
+  source: real
+  subsample: 0.10    # 10% of 128 k rows ≈ 12,800 samples
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+
+fl:
+  K: 10              # UAVs (paper Table II: U ∈ {5,10,20}; use 10 for main comparison)
+  R_comm: 20000.0    # 20 km — Noto Peninsula scale
+  capacity: 20       # C_u clients per UAV (paper Table II: 10-50; use 20)
+  n_rounds: 30
+  n_local_epochs: 2
+  lr: 5.0e-4
+  batch_size: 32
+  target_accuracy: 0.70
+  T_sel: 5           # reposition UAVs every 5 FL rounds (paper §IV-E)
+
+budget:
+  P: 50              # GA population
+  G_max: 100         # GA generations
+
+N_values:
+  - 100
+  - 200
+  - 500
+
+methods:
+  - proposed_hfl
+  - flat_fl
+  - centralized
+  - hfl_no_selection
+  - hfl_static
+  - hfl_no_reputation

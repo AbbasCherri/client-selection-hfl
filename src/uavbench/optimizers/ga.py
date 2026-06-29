@@ -62,17 +62,26 @@ class GA(Optimizer):
         return np.clip(c1, lo, hi), np.clip(c2, lo, hi)
 
     def _mutate(self, rng, x, lo, hi):
+        """Bounded polynomial mutation (Deb & Agrawal 1999).
+
+        The perturbation magnitude scales with the distance to the nearer boundary,
+        ensuring the offspring always lies in [lo, hi] without clipping.
+        """
         dim = x.shape[0]
         pm = self.mutation_prob if self.mutation_prob is not None else 1.0 / dim
         do = rng.random(dim) < pm
         u = rng.random(dim)
         delta = np.where(
             u < 0.5,
-            (2.0 * u) ** (1.0 / (self.eta_m + 1.0)) - 1.0,
-            1.0 - (2.0 * (1.0 - u)) ** (1.0 / (self.eta_m + 1.0)),
+            (2.0 * u) ** (1.0 / (self.eta_m + 1.0)) - 1.0,        # range [-1, 0]
+            1.0 - (2.0 * (1.0 - u)) ** (1.0 / (self.eta_m + 1.0)), # range [0,  1]
         )
-        x = np.where(do, x + delta * (hi - lo), x)
-        return np.clip(x, lo, hi)
+        x_new = np.where(
+            do,
+            np.where(u < 0.5, x + delta * (x - lo), x + delta * (hi - x)),
+            x,
+        )
+        return np.clip(x_new, lo, hi)
 
     def _run(
         self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator

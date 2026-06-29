@@ -32,12 +32,19 @@ def load_config(path: str | Path) -> dict:
         return yaml.safe_load(f)
 
 
-def _build_optimizer(method: str, budget: dict):
-    """Instantiate an optimizer with the shared evaluation budget."""
+def _build_optimizer(method: str, budget: dict, method_params: dict | None = None):
+    """Instantiate an optimizer with the shared evaluation budget.
+
+    ``method_params`` carries any additional keyword arguments from the
+    ``optimizer_params.<method>`` section of the config YAML, allowing ablation
+    studies to be driven entirely by config changes rather than code edits.
+    Budget keys ``P`` and ``G_max`` always take precedence over ``method_params``.
+    """
     cls = REGISTRY[method]
+    params: dict = dict(method_params or {})
     if method in ("pso", "ga"):
-        return cls(P=budget["P"], G_max=budget["G_max"])
-    return cls()
+        params.update(P=budget["P"], G_max=budget["G_max"])
+    return cls(**params)
 
 
 def _instance_seed(base: int, scenario_idx: int, seed_i: int) -> int:
@@ -74,7 +81,8 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
     fitness = Fitness(instance, *fw)
     rng = _optimizer_rng(cfg["optimizer_seed"], method_idx, scenario_idx, seed_i)
 
-    optimizer = _build_optimizer(method, cfg["budget"])
+    opt_params = cfg.get("optimizer_params", {}).get(method, {})
+    optimizer = _build_optimizer(method, cfg["budget"], opt_params)
     result = optimizer.optimize(instance, fitness, rng)
 
     metrics = compute_metrics(instance, result, fitness_weights=fw, energy_model=EnergyModel())
