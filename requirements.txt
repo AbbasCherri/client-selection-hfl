@@ -1,5 +1,5 @@
 # Core scientific stack
-numpy>=1.24.0
+numpy>=1.24.0,<3.0
 pandas>=2.0.0
 scikit-learn>=1.3.0
 scipy>=1.11.0
@@ -8,16 +8,23 @@ pillow>=10.0.0
 requests>=2.31.0
 tqdm>=4.65.0
 
+# PSO benchmark / runner
+joblib>=1.3.0
+pyarrow>=14.0.0
+PyYAML>=6.0
+
 # PyTorch – CPU build; replace with a CUDA index-url on GPU instances
 torch>=2.0.0
 torchvision>=0.15.0
 
-# HuggingFace – 'datasets' is required for streaming mode
+# HuggingFace – 'datasets' required for real dataset streaming
 huggingface_hub>=0.32.0
 datasets>=2.14.0
 hf_xet>=1.0.0
 
 # Utilities
 filelock>=3.12.0
-PyYAML>=6.0
 typing_extensions>=4.7.0
+
+# Dev / testing
+pytest>=7.4.0
