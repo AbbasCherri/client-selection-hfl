@@ -1,0 +1,42 @@
+# Tier-2 scalability sweep — synthetic data (no HF_TOKEN required).
+# Same structure as tier2_sweep.yaml but uses generated data for offline testing.
+# Completes in a few minutes on n1-standard-8.
+name: tier2_sweep_synthetic
+results_dir: results/tier2_sweep_synthetic
+
+n_workers: 12
+optimizer_seed: 9876
+
+data:
+  source: synthetic
+  seed: 42
+
+fl:
+  K: 5
+  R_comm: 20000.0
+  capacity: 60
+  n_rounds: 10          # reduced for quick validation
+  n_local_epochs: 1
+  lr: 1.0e-3
+  batch_size: 16
+  target_accuracy: 0.60
+
+budget:
+  P: 20
+  G_max: 20
+
+N_values:
+  - 30
+  - 50
+  - 100
+  - 150
+  - 200
+  - 250
+
+methods:
+  - pso
+  - ga
+  - centroid
+  - random
+  - static
+  - no_uav

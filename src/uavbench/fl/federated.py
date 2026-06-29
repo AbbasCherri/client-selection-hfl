@@ -315,7 +315,9 @@ def run_tier2(cfg: dict) -> dict:
     # ------------------------------------------------------------------
     for method in methods:
         logger.info("=== Method: %s ===", method)
-        rng = np.random.default_rng(cfg.get("optimizer_seed", 9876) + hash(method) % (2**31))
+        N_clients = len(clients)
+        _seed = (cfg.get("optimizer_seed", 9876) + N_clients * 7919 + hash(method) % (2**31)) % (2**31)
+        rng = np.random.default_rng(_seed)
 
         global_model = CachedFusionModel()
         prev_uav_positions_m: np.ndarray | None = None
@@ -325,31 +327,34 @@ def run_tier2(cfg: dict) -> dict:
         for rnd in range(1, n_rounds + 1):
             t0 = time.perf_counter()
 
-            # ---- Placement ----
-            uav_pos_m, ref, placement_fitness = _place_uavs(
-                client_coords={c.client_id: c.coords for c in clients},
-                K=K,
-                R_comm=R_comm,
-                capacity=capacity,
-                method=method,
-                rng=rng,
-                P=P,
-                G_max=G_max,
-                prev_positions_m=prev_uav_positions_m,
-            )
-
-            if prev_uav_positions_m is not None:
-                move_m = float(
-                    np.sum(np.sqrt(np.sum((uav_pos_m - prev_uav_positions_m) ** 2, axis=1)))
+            # ---- Placement + Coverage ----
+            if method == "no_uav":
+                # Baseline: every client participates every round, no UAV filter.
+                # Models the upper-bound FL scenario — full participation, zero movement cost.
+                covered = {c.client_id: 0 for c in clients}
+                placement_fitness = 1.0
+            else:
+                uav_pos_m, ref, placement_fitness = _place_uavs(
+                    client_coords={c.client_id: c.coords for c in clients},
+                    K=K,
+                    R_comm=R_comm,
+                    capacity=capacity,
+                    method=method,
+                    rng=rng,
+                    P=P,
+                    G_max=G_max,
+                    prev_positions_m=prev_uav_positions_m,
                 )
-                # Simplified energy: 250 W fly power, 15 m/s
-                cumulative_energy_j += 250.0 * (move_m / 15.0)
-            prev_uav_positions_m = uav_pos_m.copy()
+                if prev_uav_positions_m is not None:
+                    move_m = float(
+                        np.sum(np.sqrt(np.sum((uav_pos_m - prev_uav_positions_m) ** 2, axis=1)))
+                    )
+                    cumulative_energy_j += 250.0 * (move_m / 15.0)
+                prev_uav_positions_m = uav_pos_m.copy()
+                covered = _covered_clients(
+                    {c.client_id: c.coords for c in clients}, uav_pos_m, ref, R_comm
+                )
 
-            # ---- Coverage ----
-            covered = _covered_clients(
-                {c.client_id: c.coords for c in clients}, uav_pos_m, ref, R_comm
-            )
             coverage_pct = 100.0 * len(covered) / max(len(clients), 1)
 
             # ---- Per-UAV grouping ----

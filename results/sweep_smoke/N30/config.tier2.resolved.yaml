@@ -1,0 +1,25 @@
+name: tier2_sweep_synthetic
+results_dir: results/sweep_smoke/N30
+n_workers: 2
+optimizer_seed: 9876
+data:
+  source: synthetic
+  seed: 42
+  N_clients: 30
+fl:
+  K: 5
+  R_comm: 20000.0
+  capacity: 60
+  n_rounds: 2
+  n_local_epochs: 1
+  lr: 0.001
+  batch_size: 16
+  target_accuracy: 0.6
+budget:
+  P: 10
+  G_max: 10
+N_values:
+- 30
+- 50
+methods:
+- pso
