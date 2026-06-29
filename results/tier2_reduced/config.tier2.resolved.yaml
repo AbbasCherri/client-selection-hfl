@@ -1,0 +1,24 @@
+name: tier2_reduced
+results_dir: results/tier2_reduced
+n_workers: 1
+optimizer_seed: 9876
+data:
+  source: synthetic
+  N_clients: 20
+  seed: 42
+fl:
+  K: 3
+  R_comm: 15000.0
+  capacity: 10
+  n_rounds: 5
+  n_local_epochs: 1
+  lr: 0.001
+  batch_size: 16
+  target_accuracy: 0.5
+budget:
+  P: 20
+  G_max: 20
+methods:
+- pso
+- static
+- random

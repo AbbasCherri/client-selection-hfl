@@ -80,3 +80,33 @@ def plot_dir(results_dir: Path) -> list[Path]:
         out = results_dir / f"convergence_{scenario}.png"
         paths.append(plot_convergence(conv, out, scenario))
     return paths
+
+
+def plot_tier2(results_dir: Path) -> list[Path]:
+    """Generate Tier-2 accuracy, macro-F1, and coverage curves per placement method."""
+    df = _read_table(results_dir / "tier2_rounds.parquet")
+    paths: list[Path] = []
+
+    for metric, ylabel in [
+        ("accuracy", "Accuracy"),
+        ("macro_f1", "Macro F1"),
+        ("coverage_pct", "Coverage (%)"),
+    ]:
+        if metric not in df.columns:
+            continue
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        for method in sorted(df["method"].unique()):
+            sub = df[df["method"] == method]
+            ax.plot(sub["round"], sub[metric], label=method, linewidth=1.8, marker="o", markersize=3)
+        ax.set_xlabel("FL Round")
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"Tier-2: {ylabel} vs Round")
+        ax.legend(frameon=False)
+        fig.tight_layout()
+        out = results_dir / f"tier2_{metric}.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        paths.append(out)
+
+    return paths

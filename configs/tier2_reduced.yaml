@@ -1,0 +1,32 @@
+# Tier-2 reduced config: synthetic data, tiny N, few rounds.
+# Completes in minutes on CPU; no HF token required.
+name: tier2_reduced
+results_dir: results/tier2_reduced
+
+n_workers: 1          # Tier-2 is run sequentially (one model per method)
+optimizer_seed: 9876
+
+data:
+  source: synthetic   # "synthetic" | "real" (real requires HF_TOKEN)
+  N_clients: 20       # number of simulated IoT clients
+  seed: 42
+
+fl:
+  K: 3                # number of UAVs / hover positions
+  R_comm: 15000.0     # metres — covers ~15 km; meaningful variation at this scale
+  capacity: 10        # max clients per UAV
+  n_rounds: 5
+  n_local_epochs: 1
+  lr: 1.0e-3
+  batch_size: 16
+  target_accuracy: 0.50
+
+# Shared metaheuristic budget (Tier-1 compatible keys)
+budget:
+  P: 20               # reduced population for smoke speed
+  G_max: 20
+
+methods:
+  - pso
+  - static
+  - random

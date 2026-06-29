@@ -11,7 +11,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .plotting import analyze_dir, plot_dir
+from .fl.federated import run_tier2
+from .plotting import analyze_dir, plot_dir, plot_tier2
 from .runner import load_config, run_experiment
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -102,6 +103,38 @@ def cmd_smoke(args: argparse.Namespace) -> None:
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
 
+def cmd_run_tier2(args: argparse.Namespace) -> None:
+    cfg = load_config(_find_config(args.config))
+    out = run_tier2(cfg)
+    df = out["rounds"]
+    print("\n=== Tier-2 summary (final round per method) ===")
+    last = df.groupby("method").last()[["accuracy", "macro_f1", "coverage_pct", "cumulative_energy_j"]]
+    with pd.option_context("display.max_rows", None, "display.width", 160):
+        print(last.to_string())
+    print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
+
+
+def cmd_smoke_tier2(args: argparse.Namespace) -> None:
+    cfg = load_config(_find_config("configs/tier2_reduced.yaml"))
+    start = time.perf_counter()
+    out = run_tier2(cfg)
+    elapsed = time.perf_counter() - start
+
+    df = out["rounds"]
+    last = df.groupby("method").last()[["accuracy", "macro_f1", "coverage_pct", "n_covered"]]
+    print("\n=== Tier-2 smoke (synthetic, final round per method) ===")
+    with pd.option_context("display.max_rows", None, "display.width", 160):
+        print(last.to_string())
+
+    try:
+        figs = plot_tier2(out["results_dir"])
+        logger.info("Tier-2 smoke finished in %.1fs; %d figures written", elapsed, len(figs))
+    except Exception as exc:
+        logger.warning("Tier-2 plotting skipped: %s", exc)
+        logger.info("Tier-2 smoke finished in %.1fs", elapsed)
+    print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="uavbench", description="PSO UAV-placement benchmark")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -120,6 +153,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_sm = sub.add_parser("smoke", help="fast end-to-end run (table + figure + projection)")
     p_sm.set_defaults(func=cmd_smoke)
+
+    p_t2 = sub.add_parser("run_tier2", help="run Tier-2 FL benchmark from a config")
+    p_t2.add_argument("--config", required=True)
+    p_t2.set_defaults(func=cmd_run_tier2)
+
+    p_s2 = sub.add_parser("smoke_tier2", help="fast Tier-2 smoke run (synthetic, no HF token)")
+    p_s2.set_defaults(func=cmd_smoke_tier2)
 
     p_cl = sub.add_parser("clean", help="remove results (of a config, or all)")
     p_cl.add_argument("--config", default=None)
