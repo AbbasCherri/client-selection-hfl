@@ -4,7 +4,7 @@
 name: tier2_sweep_synthetic
 results_dir: results/tier2_sweep_synthetic
 
-n_workers: 12
+n_workers: 8
 optimizer_seed: 9876
 
 data:

@@ -2,7 +2,7 @@
 # run_gcp.sh — Self-terminating GCP wrapper for the Tier-2 scalability sweep.
 #
 # Runs the full (N=30..250) × (6 methods: pso/ga/centroid/random/static/no_uav) grid
-# in parallel across all 8 vCPUs of the n1-standard-8 instance, then stops the VM.
+# in parallel across all 8 vCPUs of the instance, then stops the VM.
 #
 # Usage (SSH into the VM, then):
 #   chmod +x run_gcp.sh
@@ -46,7 +46,7 @@ source "$VENV/bin/activate"
 export PYTHONPATH="$SCRIPT_DIR/src"
 
 # Pin PyTorch/BLAS thread count per worker (each worker sets torch.set_num_threads(1)).
-# Total active threads = 12 workers × 1 = 12 = vCPU count.
+# Total active threads = 8 workers × 1 = 8 = vCPU count.
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
@@ -113,7 +113,7 @@ echo "[$(date)] Disk free    : $(df -h "$SCRIPT_DIR" | awk 'NR==2{print $4}')" |
 echo "[$(date)] ----- Starting N-scalability sweep -----" | tee -a "$LOG_FILE"
 echo "[$(date)] N: 30 50 100 150 200 250"                   | tee -a "$LOG_FILE"
 echo "[$(date)] Methods: pso ga centroid random static no_uav" | tee -a "$LOG_FILE"
-echo "[$(date)] 36 jobs total on 12 workers"                | tee -a "$LOG_FILE"
+echo "[$(date)] 36 jobs total on 8 workers"                 | tee -a "$LOG_FILE"
 
 cd "$SCRIPT_DIR"
 python3 -m uavbench run_sweep --config "$SWEEP_CFG" >> "$LOG_FILE" 2>&1
