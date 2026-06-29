@@ -1,0 +1,26 @@
+[Mon Jun 29 10:30:09 UTC 2026] HF_TOKEN set — using real HFL dataset.
+[Mon Jun 29 10:30:09 UTC 2026] ===== GCP sweep started =====
+[Mon Jun 29 10:30:09 UTC 2026] Project dir  : /home/abbasbcherri/client-selection-hfl
+[Mon Jun 29 10:30:09 UTC 2026] Config       : configs/tier2_sweep.yaml
+[Mon Jun 29 10:30:09 UTC 2026] Log          : /home/abbasbcherri/client-selection-hfl/simulation.log
+[Mon Jun 29 10:30:09 UTC 2026] Python       : Python 3.13.5
+[Mon Jun 29 10:30:09 UTC 2026] vCPUs        : 1
+[Mon Jun 29 10:30:09 UTC 2026] RAM          : 31Gi
+[Mon Jun 29 10:30:09 UTC 2026] Disk free    : 43G
+[Mon Jun 29 10:30:09 UTC 2026] ----- Starting N-scalability sweep -----
+[Mon Jun 29 10:30:09 UTC 2026] N: 30 50 100 150 200 250
+[Mon Jun 29 10:30:09 UTC 2026] Methods: pso ga centroid random static no_uav
+[Mon Jun 29 10:30:09 UTC 2026] 36 jobs total on 8 workers
+[Mon Jun 29 13:51:33 UTC 2026] Sweep done.
+[Mon Jun 29 13:51:33 UTC 2026] Results disk usage:
+16K	/home/abbasbcherri/client-selection-hfl/results/simulation_results_N14.csv
+16K	/home/abbasbcherri/client-selection-hfl/results/simulation_results_N35.csv
+164K	/home/abbasbcherri/client-selection-hfl/results/smoke
+60K	/home/abbasbcherri/client-selection-hfl/results/sweep_smoke
+164K	/home/abbasbcherri/client-selection-hfl/results/tier2_reduced
+77M	/home/abbasbcherri/client-selection-hfl/results/tier2_sweep
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda1        49G  5.0G   42G  11% /
+[Mon Jun 29 13:51:33 UTC 2026] ===== GCP sweep complete =====
+[Mon Jun 29 13:51:33 UTC 2026] Sweep finished successfully. Stopping VM.
+[Mon Jun 29 13:51:35 UTC 2026] gcloud stop failed (scope issue) — using sudo shutdown instead.

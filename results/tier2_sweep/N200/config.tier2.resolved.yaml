@@ -1,0 +1,32 @@
+name: tier2_sweep
+results_dir: results/tier2_sweep/N200
+n_workers: 8
+optimizer_seed: 9876
+data:
+  source: real
+  subsample: 0.1
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  N_clients: 200
+fl:
+  K: 5
+  R_comm: 20000.0
+  capacity: 60
+  n_rounds: 30
+  n_local_epochs: 2
+  lr: 0.0005
+  batch_size: 32
+  target_accuracy: 0.7
+budget:
+  P: 50
+  G_max: 100
+N_values:
+- 30
+- 50
+- 100
+- 150
+- 200
+- 250
+methods:
+- no_uav
