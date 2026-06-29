@@ -45,11 +45,19 @@ fi
 source "$VENV/bin/activate"
 export PYTHONPATH="$SCRIPT_DIR/src"
 
-# Pin top-level thread count — each joblib worker sets its own torch thread
-# budget to 1, so the total across 8 workers stays at 8 (= vCPU count).
+# Pin PyTorch/BLAS thread count per worker (each worker sets torch.set_num_threads(1)).
+# Total active threads = 12 workers × 1 = 12 = vCPU count.
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
+
+# Throttle HuggingFace parallel fetchers during the sequential pre-fetch phase
+# to avoid 429 rate limits. Workers never call HF — only the pre-fetch does.
+export HF_MAX_WORKERS=2
+export HF_XET_HIGH_PERFORMANCE=1
+export HF_XET_NUM_CONCURRENT_RANGE_GETS=8
+export HF_HUB_DISABLE_UPDATE_CHECK=1
+export HF_DATASET_REVISION="6cf97c900445e080e61cb45e1aa72515d3ff1de8"
 
 # ---------------------------------------------------------------------------
 # HF token — required for real dataset streaming
