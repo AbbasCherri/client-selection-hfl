@@ -19,9 +19,9 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Config — fill in before uploading to the VM
 # ---------------------------------------------------------------------------
-PROJECT_ID="your-gcp-project-id"       # e.g. my-project-123
-ZONE="us-central1-a"                   # zone where this VM lives
-INSTANCE_NAME="$(hostname)"            # GCP VMs return their own name via hostname
+PROJECT_ID="project-bacf2da8-2fce-4137-a90"
+ZONE="us-central1-a"
+INSTANCE_NAME="instance-20260615-095517"
 
 # ---------------------------------------------------------------------------
 # Paths
