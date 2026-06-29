@@ -8,7 +8,7 @@
 name: tier2_sweep
 results_dir: results/tier2_sweep
 
-n_workers: 12         # use all 12 vCPUs; each worker pins to 1 PyTorch thread
+n_workers: 8          # use all 8 vCPUs; each worker pins to 1 PyTorch thread
 optimizer_seed: 9876
 
 data:
