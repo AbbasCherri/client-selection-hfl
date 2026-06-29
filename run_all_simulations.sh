@@ -69,7 +69,7 @@ for N in "${N_values[@]}"; do
     echo "========================================================================"
     echo "  Starting HFL Simulation with N = $N IoT clients"
     echo "========================================================================"
-    "$PYTHON" run_simulation.py "${BASE_ARGS[@]}" --N "$N"
+    "$PYTHON" -m hflsim "${BASE_ARGS[@]}" --N "$N"
 done
 
 echo ""

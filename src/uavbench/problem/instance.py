@@ -24,37 +24,11 @@ from typing import Literal
 import numpy as np
 
 from .value import compute_value
+from hflsim.shared.coords import latlon_to_meters  # noqa: F401 — re-exported for callers
 
 _EARTH_RADIUS_M = 6_371_000.0
 
 Distribution = Literal["uniform", "clustered", "epicenter_biased"]
-
-
-def latlon_to_meters(
-    coords_latlon: np.ndarray, ref: tuple[float, float] | None = None
-) -> tuple[np.ndarray, tuple[float, float]]:
-    """Project (lat, lon) degrees to local (x, y) meters via equirectangular map.
-
-    Parameters
-    ----------
-    coords_latlon:
-        ``(N, 2)`` array of ``(lat, lon)`` in degrees.
-    ref:
-        Reference ``(lat, lon)`` for the projection origin. Defaults to the mean.
-
-    Returns
-    -------
-    xy_meters, ref
-        ``(N, 2)`` projected meters and the reference point used.
-    """
-    coords_latlon = np.asarray(coords_latlon, dtype=np.float64)
-    if ref is None:
-        ref = (float(coords_latlon[:, 0].mean()), float(coords_latlon[:, 1].mean()))
-    lat0, lon0 = ref
-    lat0_rad = np.radians(lat0)
-    x = np.radians(coords_latlon[:, 1] - lon0) * np.cos(lat0_rad) * _EARTH_RADIUS_M
-    y = np.radians(coords_latlon[:, 0] - lat0) * _EARTH_RADIUS_M
-    return np.column_stack([x, y]), ref
 
 
 @dataclass
