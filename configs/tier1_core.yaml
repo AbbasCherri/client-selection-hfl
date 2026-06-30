@@ -45,6 +45,34 @@ budget:
   P: 100
   G_max: 200         # full evaluation budget = 20,000 fitness evals
 
+# Per-method hyperparameters (P / G_max always come from `budget` above).
+# Listed explicitly so ablations are one-line config edits, not code edits.
+optimizer_params:
+  pso:
+    c1: 2.05
+    c2: 2.05
+    vmax_frac: 0.2
+    ring_k: 2
+    delta_stag: 1.0e-4
+    G_stag: 20
+    rho: 0.2
+    p_turb: 0.1
+    early_stop_frac: 0.95
+    jitter_m: 10.0
+    use_constriction: true
+    topology: ring
+    use_clamp: true
+    use_stagnation: true
+    use_turbulence: true
+    seeding: value_kmeans
+  ga:
+    crossover_prob: 0.9
+    eta_c: 15.0
+    eta_m: 20.0
+    tournament_size: 3
+    n_elite: 2
+    early_stop_frac: 0.95
+
 methods:
   - pso
   - ga

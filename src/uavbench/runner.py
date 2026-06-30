@@ -85,7 +85,10 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
     optimizer = _build_optimizer(method, cfg["budget"], opt_params)
     result = optimizer.optimize(instance, fitness, rng)
 
-    metrics = compute_metrics(instance, result, fitness_weights=fw, energy_model=EnergyModel())
+    metrics = compute_metrics(
+        instance, result, fitness_weights=fw, energy_model=EnergyModel(),
+        G_max=cfg["budget"]["G_max"],
+    )
     metrics.update(
         scenario=f"{scenario['distribution']}_N{scenario['N']}_K{scenario['K']}",
         distribution=scenario["distribution"],

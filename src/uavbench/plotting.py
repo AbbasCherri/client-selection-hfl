@@ -17,6 +17,16 @@ def _read_table(path: Path) -> pd.DataFrame:
     return pd.read_parquet(p) if p.suffix == ".parquet" else pd.read_csv(p)
 
 
+def _last_round(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
+    """Row-order-independent 'final FL round' selection: max `round` per group.
+
+    Using ``.groupby(...).last()`` silently depends on on-disk row order; this
+    instead picks the row with the maximum ``round`` value explicitly.
+    """
+    idx = df.groupby(group_cols)["round"].idxmax()
+    return df.loc[idx].reset_index(drop=True)
+
+
 def summarize(runs_df: pd.DataFrame) -> pd.DataFrame:
     """Mean +/- std and 95% CI of key metrics per (scenario, method)."""
     metrics = ["final_fitness", "coverage_pct", "f_cover_norm", "movement_joules",
@@ -41,10 +51,14 @@ def plot_convergence(conv_df: pd.DataFrame, out_path: Path, scenario: str | None
     for method in sorted(sub["method"].unique()):
         m = sub[sub["method"] == method]
         pivot = m.pivot_table(index="iteration", columns="seed", values="best_fitness")
-        pivot = pivot.ffill()  # carry final value for early-stopped runs
-        mean = pivot.mean(axis=1)
+        # Std/CI are computed on the *raw* (un-filled) values: ffill-ing first
+        # would carry a converged seed's plateau value into both the variance
+        # estimate and the sample count, artificially shrinking the CI band
+        # right when fewer seeds are still actively contributing new data.
         n = pivot.count(axis=1).clip(lower=1)
         ci = 1.96 * pivot.std(axis=1) / np.sqrt(n)
+        filled = pivot.ffill()  # carry final value forward, mean line only
+        mean = filled.mean(axis=1)
         ax.plot(mean.index, mean.values, label=method, linewidth=1.8)
         ax.fill_between(mean.index, (mean - ci).values, (mean + ci).values, alpha=0.15)
 
@@ -180,9 +194,7 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
     # ── Figure 3: Scalability — final accuracy vs N ──────────────────────
     if "accuracy" in df.columns:
         last = (
-            df.groupby(["N", "method", "seed"])
-            .last()
-            .reset_index()
+            _last_round(df, ["N", "method", "seed"])
             .groupby(["N", "method"])["accuracy"]
             .agg(["mean", "std", "count"])
             .reset_index()
@@ -212,11 +224,7 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
     N_ref = 200 if 200 in N_values else N_values[len(N_values) // 2]
     sub_ref = df[df["N"] == N_ref]
     if not sub_ref.empty:
-        last_ref = (
-            sub_ref.groupby(["method", "seed"])
-            .last()
-            .reset_index()
-        )
+        last_ref = _last_round(sub_ref, ["method", "seed"])
         agg_ref = last_ref.groupby("method")[
             ["comm_mb_round", "cumulative_energy_j"]
         ].mean()
@@ -246,9 +254,7 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
     # ── Figure 5: Ablation heat-table (accuracy + F1 at N_ref) ──────────
     if not sub_ref.empty and "accuracy" in df.columns and "macro_f1" in df.columns:
         abl = (
-            sub_ref.groupby(["method", "seed"])
-            .last()
-            .reset_index()
+            _last_round(sub_ref, ["method", "seed"])
             .groupby("method")[["accuracy", "macro_f1"]]
             .mean()
             .reindex([m for m in METHOD_ORDER if m in sub_ref["method"].unique()])
@@ -279,7 +285,7 @@ def plot_sweep(results_dir: Path) -> list[Path]:
     """Generate scalability sweep figures: accuracy/macro-F1 vs N, per method."""
     df = _read_table(results_dir / "sweep_rounds.parquet")
     # Use the final FL round per (N, method) as the headline value.
-    final = df.groupby(["N", "method"]).last().reset_index()
+    final = _last_round(df, ["N", "method"])
     paths: list[Path] = []
 
     for metric, ylabel in [

@@ -30,6 +30,9 @@ data:
   seed: 42
   data_dir: ./data
   feature_batch_size: 32
+  # N_clients is overwritten per-job by run_paper_sweep (one of N_values below).
+  # This default only matters if run_full_hfl is called directly on this file.
+  N_clients: 200
 
 fl:
   K: 10              # UAVs (paper Table II: U ∈ {5,10,20}; use 10 for main comparison)
