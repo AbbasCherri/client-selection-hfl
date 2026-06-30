@@ -720,7 +720,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         move_m = float(
                             np.sum(np.sqrt(np.sum((uav_pos_m - prev_uav_pos_m) ** 2, axis=1)))
                         )
-                        cumulative_energy += 250.0 * (move_m / 15.0)
+                        cumulative_energy += _ENERGY_MODEL.energy_joules(move_m)
                     prev_uav_pos_m = uav_pos_m.copy()
                     uav_latlon = _uav_pos_to_latlon(uav_pos_m, ref)
                     covered_all = _covered_clients(client_coord_map, uav_pos_m, ref, R_comm)
@@ -743,6 +743,7 @@ def run_full_hfl(cfg: dict) -> dict:
             )
 
             coverage_pct = 100.0 * len(covered_all) / max(len(clients), 1)
+            participation_pct = 100.0 * len(selected) / max(len(clients), 1)
             n_selected   = len(selected)
 
             # ── Local training ────────────────────────────────────────────
@@ -755,6 +756,12 @@ def run_full_hfl(cfg: dict) -> dict:
                 sd, n = _local_train(global_model, loader, n_local_epochs, lr)
                 rep  = rep_scores.get(c.client_id, 0.5)
                 client_updates[c.client_id] = (sd, n, rep)
+
+            # Clients chosen for this round but unable to train (e.g. empty shard)
+            # count as absent for the temporal-reliability term of their reputation.
+            for cid in selected:
+                if cid not in client_updates:
+                    rep_mgr.mark_absent(cid)
 
             # ── Reputation update ─────────────────────────────────────────
             if client_updates:
@@ -771,13 +778,15 @@ def run_full_hfl(cfg: dict) -> dict:
 
             uav_updates: list[tuple[dict, int, float]] = []
             for uav_idx, upds in uav_groups.items():
+                total_n = sum(n for _, n, _ in upds)
                 if rep_weighted:
                     agg = reputation_fedavg(upds)
-                    uav_rep = sum(r for _, _, r in upds) / len(upds)
+                    # Sample-weighted, consistent with how client reputations are
+                    # used inside reputation_fedavg itself (n_k * R_k weighting).
+                    uav_rep = sum(r * n for _, n, r in upds) / max(total_n, 1)
                 else:
                     agg = fedavg([(sd, n) for sd, n, _ in upds])
                     uav_rep = 1.0
-                total_n = sum(n for _, n, _ in upds)
                 uav_updates.append((agg, total_n, uav_rep))
 
             # ── Server-level aggregation ──────────────────────────────────
@@ -813,6 +822,7 @@ def run_full_hfl(cfg: dict) -> dict:
                 "accuracy":           metrics["accuracy"],
                 "macro_f1":           metrics["macro_f1"],
                 "coverage_pct":       coverage_pct,
+                "participation_pct":  participation_pct,
                 "n_selected":         n_selected,
                 "placement_fitness":  placement_fitness,
                 "comm_mb_round":      comm_mb,
@@ -825,6 +835,10 @@ def run_full_hfl(cfg: dict) -> dict:
                 rnd, n_rounds, metrics["accuracy"], metrics["macro_f1"],
                 n_selected, coverage_pct, elapsed,
             )
+
+        # Backfill per-method scalar onto all rows for this method.
+        for row in all_rows[method_start_idx:]:
+            row["rounds_to_target"] = rounds_to_target
 
         logger.info(
             "%s done. Rounds to %.0f%%: %s | Energy: %.1f kJ",

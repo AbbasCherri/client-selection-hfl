@@ -13,7 +13,7 @@ import pandas as pd
 
 from .fl.federated import run_full_hfl, run_tier2
 from .fl.sweep import run_paper_sweep, run_sweep
-from .plotting import analyze_dir, plot_dir, plot_sweep, plot_tier2
+from .plotting import _last_round, analyze_dir, plot_dir, plot_sweep, plot_tier2
 from .runner import load_config, run_experiment
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -107,7 +107,7 @@ def cmd_run_tier2(args: argparse.Namespace) -> None:
     out = run_tier2(cfg)
     df = out["rounds"]
     print("\n=== Tier-2 summary (final round per method) ===")
-    last = df.groupby("method").last()[["accuracy", "macro_f1", "coverage_pct", "cumulative_energy_j"]]
+    last = _last_round(df, ["method"])[["method", "accuracy", "macro_f1", "coverage_pct", "cumulative_energy_j"]].set_index("method")
     with pd.option_context("display.max_rows", None, "display.width", 160):
         print(last.to_string())
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
@@ -120,7 +120,7 @@ def cmd_smoke_tier2(args: argparse.Namespace) -> None:
     elapsed = time.perf_counter() - start
 
     df = out["rounds"]
-    last = df.groupby("method").last()[["accuracy", "macro_f1", "coverage_pct", "n_covered"]]
+    last = _last_round(df, ["method"])[["method", "accuracy", "macro_f1", "coverage_pct", "n_covered"]].set_index("method")
     print("\n=== Tier-2 smoke (synthetic, final round per method) ===")
     with pd.option_context("display.max_rows", None, "display.width", 160):
         print(last.to_string())
@@ -141,8 +141,9 @@ def cmd_run_paper_sim(args: argparse.Namespace) -> None:
 
     print("\n=== Paper simulation summary (final round, mean across seeds) ===")
     summary = (
-        df.groupby(["method", "N"])
-        .last()[["accuracy", "macro_f1", "coverage_pct", "comm_mb_round", "cumulative_energy_j"]]
+        _last_round(df, ["method", "N", "seed"])
+        .groupby(["method", "N"])[["accuracy", "macro_f1", "coverage_pct", "comm_mb_round", "cumulative_energy_j"]]
+        .mean()
         .reset_index()
     )
     with pd.option_context("display.max_rows", None, "display.width", 200):

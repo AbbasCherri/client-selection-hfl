@@ -145,7 +145,11 @@ class SyntheticClientData:
             split = max(1, int(len(shard) * 0.8))
             client_train_indices[k] = shard[:split]
             client_test_indices[k] = shard[split:]
-            client_coords[k] = (float(raw_lat[shard[0]]), float(raw_lon[shard[0]]))
+            # Centroid of the shard's samples, not just the first one — a UAV
+            # covering this point should plausibly cover the client's data.
+            client_coords[k] = (
+                float(np.mean(raw_lat[shard])), float(np.mean(raw_lon[shard])),
+            )
 
         global_test = [i for sub in client_test_indices.values() for i in sub]
 

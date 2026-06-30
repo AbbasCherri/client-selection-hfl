@@ -32,7 +32,7 @@ def _vec(state_dict: dict) -> np.ndarray:
 class ReputationManager:
     """Maintains per-client reputation scores updated after every FL round."""
 
-    def __init__(self, client_ids: list[int]) -> None:
+    def __init__(self, client_ids: list[int], window_size: int | None = None) -> None:
         self._R_contrib: dict[int, float] = {cid: 0.5 for cid in client_ids}
         self._R_anomaly: dict[int, float] = {cid: 1.0 for cid in client_ids}
         self._R_temp:    dict[int, float] = {cid: 0.5 for cid in client_ids}
@@ -40,7 +40,10 @@ class ReputationManager:
         self._total:   dict[int, int] = {cid: 0 for cid in client_ids}
         self._success: dict[int, int] = {cid: 0 for cid in client_ids}
 
-        # Rolling window of update ℓ2-norms (for anomaly detection)
+        # Rolling window of update ℓ2-norms (for anomaly detection). Sized to
+        # hold several rounds' worth of updates so it isn't fully replaced by
+        # a single round when the client pool is large (default: 10 rounds).
+        self._window_size = window_size if window_size is not None else max(100, 10 * len(client_ids))
         self._norm_window: list[float] = []
         # Per-client norm history (for consistency)
         self._norm_history: dict[int, list[float]] = {cid: [] for cid in client_ids}
@@ -61,9 +64,9 @@ class ReputationManager:
         vecs: dict[int, np.ndarray] = {cid: _vec(sd) for cid, sd in updates.items()}
         norms = [float(np.linalg.norm(v)) for v in vecs.values()]
 
-        # Extend the global norm window (capped at 100 entries)
+        # Extend the global norm window (capped at self._window_size entries)
         self._norm_window.extend(norms)
-        self._norm_window = self._norm_window[-100:]
+        self._norm_window = self._norm_window[-self._window_size:]
         mu = float(np.mean(self._norm_window))
         sigma = float(np.std(self._norm_window)) + 1e-8
 

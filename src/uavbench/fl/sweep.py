@@ -19,7 +19,6 @@ HuggingFace rate-limit strategy:
 from __future__ import annotations
 
 import copy
-import hashlib
 import logging
 import os
 from pathlib import Path
@@ -173,8 +172,12 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     job_cfg = copy.deepcopy(cfg)
     job_cfg["data"]["N_clients"] = N
     job_cfg["methods"] = [method]
-    _method_hash = int(hashlib.md5(method.encode()).hexdigest(), 16) % (2**20)
-    job_cfg["fl"]["seed"] = cfg.get("optimizer_seed", 9876) + seed_idx * 7919 + N * 31 + _method_hash
+    # Method identity is folded into the seed exactly once, inside run_full_hfl
+    # (via its own method hash). Do NOT add a method hash here too, or every
+    # (N, seed_idx) job's seed double-counts the method and silently shifts
+    # the per-method RNG draw in a way that is no longer reproducible from
+    # this function's inputs alone.
+    job_cfg["fl"]["seed"] = cfg.get("optimizer_seed", 9876) + seed_idx * 7919 + N * 31
     job_cfg["results_dir"] = str(Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}")
     # Point to the shared N-level feature cache produced by _prefetch_all_N so that
     # parallel seed workers don't each re-run the full ResNet forward pass.
