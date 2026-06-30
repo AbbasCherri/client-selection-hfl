@@ -21,8 +21,8 @@ set -euo pipefail
 # Config — fill in before uploading to the VM
 # ---------------------------------------------------------------------------
 PROJECT_ID="project-bacf2da8-2fce-4137-a90"
-ZONE="us-central1-a"
-INSTANCE_NAME="instance-20260615-095517"
+ZONE="europe-west9-b"
+INSTANCE_NAME="instance-20260625-100247"
 
 # ---------------------------------------------------------------------------
 # Paths
