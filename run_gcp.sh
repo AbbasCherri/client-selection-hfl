@@ -1,7 +1,8 @@
 #!/bin/bash
-# run_gcp.sh — Self-terminating GCP wrapper for the Tier-2 scalability sweep.
+# run_gcp.sh — Self-terminating GCP wrapper for the full paper system simulation.
 #
-# Runs the full (N=30..250) × (6 methods: pso/ga/centroid/random/static/no_uav) grid
+# Runs the full paper comparison (6 methods: proposed_hfl/flat_fl/centralized/
+# hfl_no_selection/hfl_static/hfl_no_reputation × 3 N-values × 3 seeds = 54 jobs)
 # in parallel across all 8 vCPUs of the instance, then stops the VM.
 #
 # Usage (SSH into the VM, then):
@@ -64,12 +65,12 @@ if [ -n "${HF_TOKEN:-}" ]; then
     export HF_TOKEN
     echo "[$(date)] HF_TOKEN set — using real HFL dataset." | tee -a "$LOG_FILE"
 else
-    echo "[$(date)] WARNING: HF_TOKEN not set." | tee -a "$LOG_FILE"
-    echo "[$(date)] Set HF_TOKEN=hf_xxx before launching. Falling back to synthetic sweep config." | tee -a "$LOG_FILE"
-    SWEEP_CFG="configs/tier2_sweep_synthetic.yaml"
+    echo "[$(date)] ERROR: HF_TOKEN not set." | tee -a "$LOG_FILE"
+    echo "[$(date)] paper_full.yaml requires the real dataset (data.source: real). Set HF_TOKEN=hf_xxx before launching." | tee -a "$LOG_FILE"
+    exit 1
 fi
 
-SWEEP_CFG="${SWEEP_CFG:-configs/tier2_sweep.yaml}"
+PAPER_CFG="${PAPER_CFG:-configs/paper_full.yaml}"
 
 # ---------------------------------------------------------------------------
 # Self-terminating shutdown — fires on success AND any error
@@ -77,7 +78,7 @@ SWEEP_CFG="${SWEEP_CFG:-configs/tier2_sweep.yaml}"
 shutdown_vm() {
     local exit_code=$?
     if [ "$exit_code" -eq 0 ]; then
-        echo "[$(date)] Sweep finished successfully. Stopping VM." | tee -a "$LOG_FILE"
+        echo "[$(date)] Paper simulation finished successfully. Stopping VM." | tee -a "$LOG_FILE"
     else
         echo "[$(date)] ERROR: script exited with code $exit_code. Stopping VM anyway." | tee -a "$LOG_FILE"
     fi
@@ -98,9 +99,9 @@ trap shutdown_vm EXIT
 # ---------------------------------------------------------------------------
 # System info
 # ---------------------------------------------------------------------------
-echo "[$(date)] ===== GCP sweep started ====="              | tee -a "$LOG_FILE"
+echo "[$(date)] ===== GCP paper simulation started ====="    | tee -a "$LOG_FILE"
 echo "[$(date)] Project dir  : $SCRIPT_DIR"                 | tee -a "$LOG_FILE"
-echo "[$(date)] Config       : $SWEEP_CFG"                  | tee -a "$LOG_FILE"
+echo "[$(date)] Config       : $PAPER_CFG"                  | tee -a "$LOG_FILE"
 echo "[$(date)] Log          : $LOG_FILE"                   | tee -a "$LOG_FILE"
 echo "[$(date)] Python       : $(python3 --version)"         | tee -a "$LOG_FILE"
 echo "[$(date)] vCPUs        : $(nproc)"                    | tee -a "$LOG_FILE"
@@ -108,17 +109,16 @@ echo "[$(date)] RAM          : $(free -h | awk '/^Mem/{print $2}')" | tee -a "$L
 echo "[$(date)] Disk free    : $(df -h "$SCRIPT_DIR" | awk 'NR==2{print $4}')" | tee -a "$LOG_FILE"
 
 # ---------------------------------------------------------------------------
-# Run the sweep — N×method grid, 8-core parallel
+# Run the full paper system simulation — method×N×seed grid, 8-core parallel
 # ---------------------------------------------------------------------------
-echo "[$(date)] ----- Starting N-scalability sweep -----" | tee -a "$LOG_FILE"
-echo "[$(date)] N: 30 50 100 150 200 250"                   | tee -a "$LOG_FILE"
-echo "[$(date)] Methods: pso ga centroid random static no_uav" | tee -a "$LOG_FILE"
-echo "[$(date)] 36 jobs total on 8 workers"                 | tee -a "$LOG_FILE"
+echo "[$(date)] ----- Starting full paper simulation -----" | tee -a "$LOG_FILE"
+echo "[$(date)] Methods: proposed_hfl flat_fl centralized hfl_no_selection hfl_static hfl_no_reputation" | tee -a "$LOG_FILE"
+echo "[$(date)] N: 100 200 500, seeds: 3 — 54 jobs total on 8 workers" | tee -a "$LOG_FILE"
 
 cd "$SCRIPT_DIR"
-python3 -m uavbench run_sweep --config "$SWEEP_CFG" >> "$LOG_FILE" 2>&1
+python3 -m uavbench run_paper_sim --config "$PAPER_CFG" >> "$LOG_FILE" 2>&1
 
-echo "[$(date)] Sweep done." | tee -a "$LOG_FILE"
+echo "[$(date)] Paper simulation done." | tee -a "$LOG_FILE"
 
 # ---------------------------------------------------------------------------
 # Disk summary
@@ -127,4 +127,4 @@ echo "[$(date)] Results disk usage:" | tee -a "$LOG_FILE"
 du -sh "$RESULTS_DIR"/* 2>/dev/null | tee -a "$LOG_FILE" || true
 df -h "$SCRIPT_DIR" | tee -a "$LOG_FILE"
 
-echo "[$(date)] ===== GCP sweep complete =====" | tee -a "$LOG_FILE"
+echo "[$(date)] ===== GCP paper simulation complete =====" | tee -a "$LOG_FILE"
