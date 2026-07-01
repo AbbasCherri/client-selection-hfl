@@ -1,0 +1,36 @@
+name: paper_full_system
+results_dir: results/paper_full/N100/seed0
+n_workers: 8
+n_seeds: 3
+optimizer_seed: 9876
+epicentre:
+- 37.488
+- 137.272
+data:
+  source: real
+  subsample: 0.1
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  N_clients: 100
+  feature_cache_path: results/paper_full/N100/img_features.npy
+fl:
+  K: 10
+  R_comm: 20000.0
+  capacity: 20
+  n_rounds: 30
+  n_local_epochs: 2
+  lr: 0.0005
+  batch_size: 32
+  target_accuracy: 0.7
+  T_sel: 5
+  seed: 12976
+budget:
+  P: 50
+  G_max: 100
+N_values:
+- 100
+- 200
+- 500
+methods:
+- hfl_no_reputation

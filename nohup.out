@@ -24,3 +24,31 @@ Filesystem      Size  Used Avail Use% Mounted on
 [Mon Jun 29 13:51:33 UTC 2026] ===== GCP sweep complete =====
 [Mon Jun 29 13:51:33 UTC 2026] Sweep finished successfully. Stopping VM.
 [Mon Jun 29 13:51:35 UTC 2026] gcloud stop failed (scope issue) — using sudo shutdown instead.
+[Tue Jun 30 06:45:23 UTC 2026] HF_TOKEN set — using real HFL dataset.
+[Tue Jun 30 06:45:23 UTC 2026] ===== GCP paper simulation started =====
+[Tue Jun 30 06:45:23 UTC 2026] Project dir  : /home/abbasbcherri/client-selection-hfl
+[Tue Jun 30 06:45:23 UTC 2026] Config       : configs/paper_full.yaml
+[Tue Jun 30 06:45:23 UTC 2026] Log          : /home/abbasbcherri/client-selection-hfl/simulation.log
+[Tue Jun 30 06:45:23 UTC 2026] Python       : Python 3.13.5
+[Tue Jun 30 06:45:23 UTC 2026] vCPUs        : 1
+[Tue Jun 30 06:45:23 UTC 2026] RAM          : 31Gi
+[Tue Jun 30 06:45:23 UTC 2026] Disk free    : 42G
+[Tue Jun 30 06:45:23 UTC 2026] ----- Starting full paper simulation -----
+[Tue Jun 30 06:45:23 UTC 2026] Methods: proposed_hfl flat_fl centralized hfl_no_selection hfl_static hfl_no_reputation
+[Tue Jun 30 06:45:23 UTC 2026] N: 100 200 500, seeds: 3 — 54 jobs total on 8 workers
+[Tue Jun 30 06:46:07 UTC 2026] Paper simulation finished successfully. Stopping VM.
+[Tue Jun 30 06:46:09 UTC 2026] gcloud stop failed (scope issue) — using sudo shutdown instead.
+[Tue Jun 30 06:55:29 UTC 2026] HF_TOKEN set — using real HFL dataset.
+[Tue Jun 30 06:55:29 UTC 2026] ===== GCP paper simulation started =====
+[Tue Jun 30 06:55:29 UTC 2026] Project dir  : /home/abbasbcherri/client-selection-hfl
+[Tue Jun 30 06:55:29 UTC 2026] Config       : configs/paper_full.yaml
+[Tue Jun 30 06:55:29 UTC 2026] Log          : /home/abbasbcherri/client-selection-hfl/simulation.log
+[Tue Jun 30 06:55:29 UTC 2026] Python       : Python 3.13.5
+[Tue Jun 30 06:55:29 UTC 2026] vCPUs        : 1
+[Tue Jun 30 06:55:29 UTC 2026] RAM          : 31Gi
+[Tue Jun 30 06:55:29 UTC 2026] Disk free    : 42G
+[Tue Jun 30 06:55:29 UTC 2026] ----- Starting full paper simulation -----
+[Tue Jun 30 06:55:29 UTC 2026] Methods: proposed_hfl flat_fl centralized hfl_no_selection hfl_static hfl_no_reputation
+[Tue Jun 30 06:55:29 UTC 2026] N: 100 200 500, seeds: 3 — 54 jobs total on 8 workers
+[Tue Jun 30 09:02:32 UTC 2026] ERROR: script exited with code 1. Stopping VM anyway.
+[Tue Jun 30 09:02:33 UTC 2026] gcloud stop failed (scope issue) — using sudo shutdown instead.
