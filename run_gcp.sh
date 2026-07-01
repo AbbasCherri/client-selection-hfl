@@ -58,6 +58,12 @@ export HF_MAX_WORKERS=2
 export HF_HUB_DISABLE_UPDATE_CHECK=1
 export HF_DATASET_REVISION="6cf97c900445e080e61cb45e1aa72515d3ff1de8"
 
+# Extend per-request HTTP timeout for huggingface_hub (covers tree-listing cursor
+# pages AND data shard downloads).  Default is 10 s, which is too short for the
+# recursive repo tree-walk on a large dataset repo — each cursor page can take
+# 15–60 s under HF gateway load, producing the 504s we observed.
+export HF_HUB_DOWNLOAD_TIMEOUT=300
+
 # ---------------------------------------------------------------------------
 # HF token — required for real dataset streaming
 # ---------------------------------------------------------------------------

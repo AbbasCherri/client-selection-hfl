@@ -29,6 +29,7 @@ import math
 import pickle
 import hashlib
 import logging
+import time
 import requests
 import numpy as np
 import pandas as pd
@@ -80,8 +81,8 @@ def _latlon_to_tile(lat: float, lon: float, zoom: int):
     return x, y
 
 
-def _fetch_tile(z: int, x: int, y: int, timeout: int = 5) -> Image.Image:
-    """Fetch a single map tile; returns a blank 256×256 image on failure."""
+def _fetch_tile(z: int, x: int, y: int, timeout: int = 15) -> Image.Image:
+    """Fetch a single map tile; returns a blank 256×256 image after 3 failed attempts."""
     os.makedirs(TILE_CACHE, exist_ok=True)
     cache_file = os.path.join(TILE_CACHE, f"{z}_{x}_{y}.jpg")
     if os.path.exists(cache_file):
@@ -89,16 +90,22 @@ def _fetch_tile(z: int, x: int, y: int, timeout: int = 5) -> Image.Image:
             return Image.open(cache_file).convert("RGB")
         except Exception:
             pass
-    try:
-        url = GSI_URL.format(z=z, x=x, y=y)
-        resp = requests.get(url, timeout=timeout)
-        resp.raise_for_status()
-        img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-        img.save(cache_file, "JPEG", quality=85)
-        return img
-    except Exception as exc:
-        logger.debug("Tile fetch failed (%s); using blank image.", exc)
-        return Image.new("RGB", (256, 256), (0, 0, 0))
+    url = GSI_URL.format(z=z, x=x, y=y)
+    for attempt in range(1, 4):
+        try:
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+            img.save(cache_file, "JPEG", quality=85)
+            return img
+        except Exception as exc:
+            if attempt < 3:
+                delay = attempt  # 1 s, 2 s — short: tiles are small and transient failures are brief
+                logger.debug("Tile (%d/%d/%d) attempt %d/3 failed (%s); retrying in %ds.", z, x, y, attempt, exc, delay)
+                time.sleep(delay)
+            else:
+                logger.debug("Tile (%d/%d/%d) failed after 3 attempts (%s); using blank image.", z, x, y, exc)
+    return Image.new("RGB", (256, 256), (0, 0, 0))
 
 
 def _get_building_chip(lat: float, lon: float, zoom: int = GSI_ZOOM, size: int = CHIP_PX) -> Image.Image:
@@ -161,11 +168,27 @@ def _stream_metadata_df(
     subsample: float = 1.0,
     random_seed: int = 42,
     hf_token: str | None = None,
+    _cache_dir: str = "./data",
 ) -> pd.DataFrame:
     """
     Stream the HF dataset and return a lightweight metadata DataFrame
     containing only the columns needed for partitioning + training.
+
+    Results are cached to <_cache_dir>/.metadata_df_cache_*.parquet so that
+    repeated calls (e.g. once per N-value in _prefetch_all_N, plus once per
+    parallel worker) only hit the HF tree-listing API on the very first call.
+    Without this cache, every call triggers a recursive repo tree-walk
+    (GET .../tree?recursive=true) which times out with 504s under concurrent
+    load, exhausting the huggingface_hub retry budget and crashing the job.
     """
+    cache_file = os.path.join(
+        _cache_dir,
+        f".metadata_df_cache_sub{int(subsample * 10000)}_seed{random_seed}.parquet",
+    )
+    if os.path.isfile(cache_file):
+        logger.info("Loading cached metadata DataFrame from %s", cache_file)
+        return pd.read_parquet(cache_file)
+
     try:
         from datasets import load_dataset  # type: ignore
     except ImportError as exc:
@@ -176,24 +199,51 @@ def _stream_metadata_df(
 
     logger.info("Streaming metadata from %s (revision=%s) …", HF_REPO_ID, HF_DATASET_REVISION)
 
-    ds = load_dataset(
-        HF_REPO_ID,
-        split="train",
-        streaming=True,
-        revision=HF_DATASET_REVISION,
-        token=hf_token,
-        trust_remote_code=False,
-    )
+    # Outer retry loop — huggingface_hub has its own per-request retry budget
+    # (default 5 retries with backoff), but if that budget exhausts on any
+    # single tree-listing cursor page or data shard, the exception propagates
+    # here.  We catch it and restart the entire stream from scratch after a
+    # delay, giving HF's API gateway time to recover.  Delays: 30 s, 60 s,
+    # 120 s, 240 s (exponential, capped at 4 min) — well within GCP preemption
+    # horizons and cheap compared to a failed VM run.
+    _needed = set(FEATURE_COLS) | {"damage_val", "chip_path"}
+    _max_attempts = 5
+    rows: list[dict] = []
+    _last_exc: Exception | None = None
 
-    needed = set(FEATURE_COLS) | {"damage_val", "chip_path"}
-    rows = []
-    for row in ds:
-        filtered = {k: row[k] for k in needed if k in row}
-        if "damage_val" not in filtered and "label" in row:
-            filtered["damage_val"] = row["label"]
-        if "chip_path" not in filtered:
-            filtered["chip_path"] = ""
-        rows.append(filtered)
+    for _attempt in range(1, _max_attempts + 1):
+        try:
+            ds = load_dataset(
+                HF_REPO_ID,
+                split="train",
+                streaming=True,
+                revision=HF_DATASET_REVISION,
+                token=hf_token,
+                trust_remote_code=False,
+            )
+            rows = []
+            for row in ds:
+                filtered = {k: row[k] for k in _needed if k in row}
+                if "damage_val" not in filtered and "label" in row:
+                    filtered["damage_val"] = row["label"]
+                if "chip_path" not in filtered:
+                    filtered["chip_path"] = ""
+                rows.append(filtered)
+            break  # success
+        except Exception as exc:
+            _last_exc = exc
+            if _attempt < _max_attempts:
+                _delay = min(30 * (2 ** (_attempt - 1)), 240)  # 30, 60, 120, 240 s
+                logger.warning(
+                    "HF stream attempt %d/%d failed: %s — retrying in %ds …",
+                    _attempt, _max_attempts, exc, _delay,
+                )
+                time.sleep(_delay)
+            else:
+                raise RuntimeError(
+                    f"HuggingFace dataset streaming failed after {_max_attempts} attempts. "
+                    "Check network connectivity and HF API status."
+                ) from _last_exc
 
     df = pd.DataFrame(rows)
     logger.info("Streamed %d rows from HuggingFace.", len(df))
@@ -216,6 +266,19 @@ def _stream_metadata_df(
         logger.info("Subsampled to %d rows (%.1f%%).", len(df), subsample * 100)
 
     df = df.fillna(0)
+
+    try:
+        os.makedirs(_cache_dir, exist_ok=True)
+        # Write via a temp file + atomic rename so a crash mid-write never
+        # leaves a corrupted cache that causes pd.read_parquet to fail on the
+        # next run.
+        _tmp = cache_file + ".tmp"
+        df.to_parquet(_tmp, index=False)
+        os.replace(_tmp, cache_file)
+        logger.info("Metadata DataFrame cached to %s (%d rows)", cache_file, len(df))
+    except Exception as exc:
+        logger.warning("Could not write metadata cache: %s", exc)
+
     return df
 
 
@@ -386,6 +449,7 @@ def get_hfl_data_partitions(
             subsample=subsample,
             random_seed=random_seed,
             hf_token=hf_token or os.getenv("HF_TOKEN"),
+            _cache_dir=data_dir,
         )
         cache_root_dir = os.path.join(data_dir, ".partition_cache")
 

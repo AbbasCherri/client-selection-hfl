@@ -55,7 +55,7 @@ def _prefetch_all_N(cfg: dict) -> None:
     results_dir = Path(cfg["results_dir"])
 
     for N in cfg["N_values"]:
-        logger.info("[prefetch] N=%d — streaming dataset from HuggingFace …", N)
+        logger.info("[prefetch] N=%d — loading dataset (first call streams HF, subsequent calls hit disk cache) …", N)
         full_dataset, _, _, _, _ = get_hfl_data_partitions(
             csv_path=data_cfg.get("csv_path"),
             data_dir=data_cfg.get("data_dir", "./data"),
@@ -178,9 +178,15 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # the per-method RNG draw in a way that is no longer reproducible from
     # this function's inputs alone.
     job_cfg["fl"]["seed"] = cfg.get("optimizer_seed", 9876) + seed_idx * 7919 + N * 31
-    job_cfg["results_dir"] = str(Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}")
-    # Point to the shared N-level feature cache produced by _prefetch_all_N so that
-    # parallel seed workers don't each re-run the full ResNet forward pass.
+    # Each (N, method, seed) gets its own sub-directory so parallel workers
+    # never write to the same fullsim_rounds.parquet simultaneously.  Without
+    # the method segment, all 6 methods for a given (N, seed) share one dir
+    # and race to overwrite each other's output file — the last writer wins
+    # and earlier results are silently lost.
+    job_cfg["results_dir"] = str(Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / method)
+    # Point to the shared N-level feature cache (one dir above) produced by
+    # _prefetch_all_N so parallel method/seed workers don't each re-run the
+    # full ResNet forward pass.
     if job_cfg["data"].get("source", "synthetic") == "real":
         job_cfg["data"]["feature_cache_path"] = str(
             Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy"
