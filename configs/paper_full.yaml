@@ -40,7 +40,9 @@ fl:
   capacity: 10       # C_u clients per UAV; K=20 × cap=10 → up to 200 slots (>N_max=100)
   n_rounds: 100
   n_local_epochs: 2
+  n_uav_epochs: 2      # UAV image-branch training epochs per round (paper §IV-A Step 3)
   lr: 5.0e-4
+  uav_lr: 5.0e-4       # UAV learning rate (can tune independently from IoT lr)
   batch_size: 32
   target_accuracy: 0.70
   T_sel: 5           # reposition UAVs every 5 FL rounds (paper §IV-E)

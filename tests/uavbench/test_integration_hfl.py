@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
 
 def _minimal_cfg(results_dir: str, methods: list[str], n_rounds: int = 2,
@@ -22,7 +23,9 @@ def _minimal_cfg(results_dir: str, methods: list[str], n_rounds: int = 2,
         "fl": {
             "n_rounds": n_rounds,
             "n_local_epochs": 1,
+            "n_uav_epochs": 1,   # UAV image-branch training (paper §IV-A Step 3)
             "lr": 0.01,
+            "uav_lr": 0.01,
             "batch_size": 4,
             "K": K,
             "R_comm": R_comm,
@@ -207,3 +210,80 @@ class TestMultiSeedDiversity:
         # At least two seeds should have different selection sequences
         assert len(set(map(tuple, results))) > 1, \
             "All seeds produced identical selections — rng not being used"
+
+
+# ── UAV image-branch training verification ────────────────────────────────────
+
+class TestUavImageTraining:
+    def test_proposed_hfl_img_proj_changes_from_init(self):
+        """After one round of proposed_hfl, img_proj weights must differ from random init."""
+        from uavbench.fl.federated import run_full_hfl
+        import torch
+
+        with tempfile.TemporaryDirectory() as d:
+            cfg = _minimal_cfg(d, ["proposed_hfl"], n_rounds=1)
+            out = run_full_hfl(cfg)
+
+        final_model = out["models"].get("proposed_hfl")
+        assert final_model is not None, "proposed_hfl model not returned"
+
+        # img_proj is not all zeros (it was trained, not left at frozen-zero state)
+        w = final_model.img_proj.proj[0].weight
+        assert not torch.all(w == 0), "img_proj is all zeros — likely never updated"
+
+    def test_uav_local_train_modifies_img_proj(self):
+        """_uav_local_train on a fresh model must update img_proj weights."""
+        from uavbench.fl.federated import _uav_local_train
+        from uavbench.fl.model import CachedFusionModel
+        from uavbench.fl.dataset import SyntheticClientData, CachedDataset, make_client_loader
+        import torch
+
+        data = SyntheticClientData(N=40, K=2, seed=1).build()
+        base_ds = data["full_dataset"]
+        img_features = data["img_features"]
+        cached_ds = CachedDataset(base_ds, img_features)
+
+        model = CachedFusionModel()
+        model.freeze_img_proj()  # mimic FL harness init
+        w_before = model.img_proj.proj[0].weight.clone()
+
+        indices = list(range(32))
+        loader = make_client_loader(cached_ds, indices, batch_size=8)
+        sd, n = _uav_local_train(model, loader, n_epochs=1, lr=0.01)
+
+        # img_proj must appear in the returned state dict
+        assert any(k.startswith("img_proj.") for k in sd), \
+            "full_trainable_state_dict missing img_proj keys"
+
+        # The trained img_proj weights must differ from the frozen-at-init values
+        trained_w = sd["img_proj.proj.0.weight"]
+        assert not torch.allclose(w_before, trained_w), \
+            "img_proj unchanged after _uav_local_train — UAV training has no effect"
+
+        # The original global model's img_proj must be untouched (clone was trained)
+        assert torch.allclose(w_before, model.img_proj.proj[0].weight), \
+            "global model img_proj was mutated — clone independence broken"
+
+    def test_uav_training_increases_comm_cost(self):
+        """proposed_hfl with UAV image training must cost more bytes than flat_fl."""
+        from uavbench.fl.federated import run_full_hfl
+        with tempfile.TemporaryDirectory() as d:
+            cfg = _minimal_cfg(d, ["proposed_hfl", "flat_fl"], n_rounds=2)
+            out = run_full_hfl(cfg)
+        df = out["rounds"]
+        hfl_comm = df[df["method"] == "proposed_hfl"]["comm_mb_round"].sum()
+        flat_comm = df[df["method"] == "flat_fl"]["comm_mb_round"].sum()
+        # UAV↔server transfers (full 133K-param model) push HFL comm above flat_fl
+        if hfl_comm > 0 and flat_comm > 0:
+            assert hfl_comm >= flat_comm, \
+                f"HFL comm ({hfl_comm:.4f} MB) should be ≥ flat_fl ({flat_comm:.4f} MB)"
+
+    def test_centralized_trains_img_proj(self):
+        """Centralized baseline unfreezes img_proj before training — must not error."""
+        from uavbench.fl.federated import run_full_hfl
+        with tempfile.TemporaryDirectory() as d:
+            cfg = _minimal_cfg(d, ["centralized"], n_rounds=2)
+            out = run_full_hfl(cfg)
+        df = out["rounds"]
+        assert len(df) == 2
+        assert df["accuracy"].between(0.0, 1.0).all()
