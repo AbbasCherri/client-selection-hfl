@@ -119,7 +119,7 @@ echo "[$(date)] Disk free    : $(df -h "$SCRIPT_DIR" | awk 'NR==2{print $4}')" |
 # ---------------------------------------------------------------------------
 echo "[$(date)] ----- Starting full paper simulation -----" | tee -a "$LOG_FILE"
 echo "[$(date)] Methods: proposed_hfl flat_fl centralized hfl_no_selection hfl_static hfl_no_reputation" | tee -a "$LOG_FILE"
-echo "[$(date)] N: 100 200 500, seeds: 3 — 54 jobs total on 8 workers" | tee -a "$LOG_FILE"
+echo "[$(date)] N: 30 50 100, seeds: 3 — 54 jobs total on 8 workers" | tee -a "$LOG_FILE"
 
 cd "$SCRIPT_DIR"
 python3 -m uavbench run_paper_sim --config "$PAPER_CFG" >> "$LOG_FILE" 2>&1
