@@ -33,4 +33,4 @@ N_values:
 - 200
 - 500
 methods:
-- hfl_static
+- hfl_no_reputation

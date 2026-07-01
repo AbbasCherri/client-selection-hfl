@@ -52,3 +52,29 @@ Filesystem      Size  Used Avail Use% Mounted on
 [Tue Jun 30 06:55:29 UTC 2026] N: 100 200 500, seeds: 3 — 54 jobs total on 8 workers
 [Tue Jun 30 09:02:32 UTC 2026] ERROR: script exited with code 1. Stopping VM anyway.
 [Tue Jun 30 09:02:33 UTC 2026] gcloud stop failed (scope issue) — using sudo shutdown instead.
+[Wed Jul  1 06:20:12 UTC 2026] HF_TOKEN set — using real HFL dataset.
+[Wed Jul  1 06:20:12 UTC 2026] ===== GCP paper simulation started =====
+[Wed Jul  1 06:20:12 UTC 2026] Project dir  : /home/abbasbcherri/client-selection-hfl
+[Wed Jul  1 06:20:12 UTC 2026] Config       : configs/paper_full.yaml
+[Wed Jul  1 06:20:12 UTC 2026] Log          : /home/abbasbcherri/client-selection-hfl/simulation.log
+[Wed Jul  1 06:20:12 UTC 2026] Python       : Python 3.13.5
+[Wed Jul  1 06:20:12 UTC 2026] vCPUs        : 1
+[Wed Jul  1 06:20:12 UTC 2026] RAM          : 31Gi
+[Wed Jul  1 06:20:12 UTC 2026] Disk free    : 42G
+[Wed Jul  1 06:20:12 UTC 2026] ----- Starting full paper simulation -----
+[Wed Jul  1 06:20:12 UTC 2026] Methods: proposed_hfl flat_fl centralized hfl_no_selection hfl_static hfl_no_reputation
+[Wed Jul  1 06:20:12 UTC 2026] N: 100 200 500, seeds: 3 — 54 jobs total on 8 workers
+[Wed Jul  1 08:40:42 UTC 2026] Paper simulation done.
+[Wed Jul  1 08:40:42 UTC 2026] Results disk usage:
+39M	/home/abbasbcherri/client-selection-hfl/results/paper_full
+16K	/home/abbasbcherri/client-selection-hfl/results/simulation_results_N14.csv
+16K	/home/abbasbcherri/client-selection-hfl/results/simulation_results_N35.csv
+164K	/home/abbasbcherri/client-selection-hfl/results/smoke
+60K	/home/abbasbcherri/client-selection-hfl/results/sweep_smoke
+164K	/home/abbasbcherri/client-selection-hfl/results/tier2_reduced
+77M	/home/abbasbcherri/client-selection-hfl/results/tier2_sweep
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda1        49G  5.0G   42G  11% /
+[Wed Jul  1 08:40:42 UTC 2026] ===== GCP paper simulation complete =====
+[Wed Jul  1 08:40:42 UTC 2026] Paper simulation finished successfully. Stopping VM.
+[Wed Jul  1 08:40:44 UTC 2026] gcloud stop failed (scope issue) — using sudo shutdown instead.

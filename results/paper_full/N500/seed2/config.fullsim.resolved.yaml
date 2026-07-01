@@ -33,4 +33,4 @@ N_values:
 - 200
 - 500
 methods:
-- proposed_hfl
+- hfl_no_reputation

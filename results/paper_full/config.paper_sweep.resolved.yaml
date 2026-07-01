@@ -1,5 +1,5 @@
 name: paper_full_system
-results_dir: results/paper_full/N100/seed0
+results_dir: results/paper_full
 n_workers: 8
 n_seeds: 3
 optimizer_seed: 9876
@@ -12,8 +12,7 @@ data:
   seed: 42
   data_dir: ./data
   feature_batch_size: 32
-  N_clients: 100
-  feature_cache_path: results/paper_full/N100/img_features.npy
+  N_clients: 200
 fl:
   K: 10
   R_comm: 20000.0
@@ -24,7 +23,6 @@ fl:
   batch_size: 32
   target_accuracy: 0.7
   T_sel: 5
-  seed: 12976
 budget:
   P: 50
   G_max: 100
@@ -33,4 +31,9 @@ N_values:
 - 200
 - 500
 methods:
+- proposed_hfl
+- flat_fl
+- centralized
+- hfl_no_selection
 - hfl_static
+- hfl_no_reputation
