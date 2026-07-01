@@ -1,7 +1,7 @@
 # Full paper system simulation — §V comparison (Table III + Figures 4-8).
 #
 # Runs 6 methods × 3 N-values × 3 seeds = 54 jobs on 8 parallel workers.
-# Estimated wall-clock: ~2-3 hours on n1-standard-8.
+# Estimated wall-clock: ~4-8 hours on n1-standard-8 (100 rounds, full dataset).
 #
 # Methods:
 #   proposed_hfl      — GA every T_sel=5 rounds + UCB selection + reputation FedAvg
@@ -26,19 +26,19 @@ epicentre: [37.488, 137.272]
 
 data:
   source: real
-  subsample: 0.10    # 10% of 128 k rows ≈ 12,800 samples
+  subsample: 1.0     # 100% of dataset (~128 k rows)
   seed: 42
   data_dir: ./data
   feature_batch_size: 32
   # N_clients is overwritten per-job by run_paper_sweep (one of N_values below).
   # This default only matters if run_full_hfl is called directly on this file.
-  N_clients: 200
+  N_clients: 50
 
 fl:
-  K: 10              # UAVs (paper Table II: U ∈ {5,10,20}; use 10 for main comparison)
+  K: 20              # UAVs — midpoint of 10-30 range; covers N=30-100 clients well
   R_comm: 20000.0    # 20 km — Noto Peninsula scale
-  capacity: 20       # C_u clients per UAV (paper Table II: 10-50; use 20)
-  n_rounds: 30
+  capacity: 10       # C_u clients per UAV; K=20 × cap=10 → up to 200 slots (>N_max=100)
+  n_rounds: 100
   n_local_epochs: 2
   lr: 5.0e-4
   batch_size: 32
@@ -50,9 +50,9 @@ budget:
   G_max: 100         # GA generations
 
 N_values:
+  - 30
+  - 50
   - 100
-  - 200
-  - 500
 
 methods:
   - proposed_hfl
