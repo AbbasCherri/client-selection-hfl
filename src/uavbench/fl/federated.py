@@ -50,7 +50,11 @@ from .client_selection import ClientSelector
 from .dataset import CachedDataset, ClientData, SyntheticClientData, make_client_loader
 from .device_state import DeviceStateManager
 from .features import compute_feature_cache, synthetic_feature_cache
-from .model import CachedFusionModel, clone_model, fedavg, reputation_fedavg
+from .model import (
+    CachedFusionModel, clone_model,
+    fedavg, reputation_fedavg,
+    mixed_fedavg, mixed_reputation_fedavg,
+)
 from .reputation import ReputationManager
 
 logger = logging.getLogger("uavbench.fl.federated")
@@ -164,7 +168,12 @@ def _local_train(
     n_epochs: int,
     lr: float,
 ) -> tuple[dict, int]:
-    """Train a client-local copy of the model; return (trainable_state_dict, n_samples)."""
+    """Train a client-local copy of the model; return (trainable_state_dict, n_samples).
+
+    img_proj is frozen on the clone (inherited from global_model which has
+    freeze_img_proj() called after construction).  Only struct_branch + fusion
+    are updated — the IoT-level payload per paper §IV-B.
+    """
     local = clone_model(model)
     local.train()
     trainable = [p for p in local.parameters() if p.requires_grad]
@@ -183,6 +192,39 @@ def _local_train(
             n_seen += labels.shape[0]
 
     return local.trainable_state_dict(), n_seen // max(n_epochs, 1)
+
+
+def _uav_local_train(
+    model: CachedFusionModel,
+    loader: DataLoader,
+    n_epochs: int,
+    lr: float,
+) -> tuple[dict, int]:
+    """Train a UAV-local copy with img_proj unfrozen (full model, paper §IV-A Step 3).
+
+    Uses the same cached 512-dim ResNet features as IoT clients — no raw image
+    loading or backbone forward pass required.  img_proj learns to map ImageNet
+    features to damage-relevant representations; IoT devices cannot do this.
+    Returns (full_trainable_state_dict, n_samples).
+    """
+    local = clone_model(model)
+    local.unfreeze_img_proj()
+    local.train()
+    trainable = [p for p in local.parameters() if p.requires_grad]
+    opt = optim.Adam(trainable, lr=lr)
+    loss_fn = nn.CrossEntropyLoss()
+
+    n_seen = 0
+    for _ in range(n_epochs):
+        for img_feat, struct, labels in loader:
+            opt.zero_grad()
+            logits = local(img_feat, struct)
+            loss_fn(logits, labels).backward()
+            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            opt.step()
+            n_seen += labels.shape[0]
+
+    return local.full_trainable_state_dict(), n_seen // max(n_epochs, 1)
 
 
 def _evaluate(
@@ -459,9 +501,11 @@ def run_tier2(cfg: dict) -> dict:
 # Full paper system simulation
 # ---------------------------------------------------------------------------
 
-# Trainable parameter count: struct_branch (17,216) + fusion (50,436) = 67,652
-# At float32 (4 bytes) = 270,608 bytes ≈ 0.271 MB
-_MODEL_SIZE_MB: float = 67_652 * 4 / 1_000_000
+# IoT payload:  struct_branch (17,216) + fusion (50,436)         = 67,652 params ≈ 0.271 MB
+# UAV payload:  img_proj (65,664) + struct_branch + fusion       = 133,316 params ≈ 0.533 MB
+_IOT_MODEL_SIZE_MB: float = 67_652  * 4 / 1_000_000
+_UAV_MODEL_SIZE_MB: float = 133_316 * 4 / 1_000_000
+_MODEL_SIZE_MB: float = _IOT_MODEL_SIZE_MB   # kept for run_tier2 back-compat
 
 
 # Method configuration: (placement_method, selection_mode, reputation_weighted, dynamic)
@@ -550,6 +594,8 @@ def _run_centralized(
     """Oracle: train on all data at one node, report metrics every n_local_epochs epochs."""
     rows: list[dict] = []
     loader = make_client_loader(cached_dataset, all_train_indices, batch_size)
+    # Centralized has full compute — train the entire model including img_proj.
+    global_model.unfreeze_img_proj()
     trainable = [p for p in global_model.parameters() if p.requires_grad]
     opt = optim.Adam(trainable, lr=lr)
     loss_fn = nn.CrossEntropyLoss()
@@ -616,6 +662,8 @@ def run_full_hfl(cfg: dict) -> dict:
     T_sel           = fl.get("T_sel", 5)
     target_accuracy = fl.get("target_accuracy", 0.70)
     run_seed        = fl.get("seed", cfg.get("optimizer_seed", 42))
+    n_uav_epochs    = fl.get("n_uav_epochs", n_local_epochs)
+    uav_lr          = fl.get("uav_lr", lr)
 
     P     = cfg["budget"]["P"]
     G_max = cfg["budget"]["G_max"]
@@ -644,6 +692,7 @@ def run_full_hfl(cfg: dict) -> dict:
     epicentre = tuple(cfg.get("epicentre", [37.488, 137.272]))   # type: ignore[assignment]
 
     all_rows: list[dict] = []
+    models_by_method: dict[str, "CachedFusionModel"] = {}
 
     # ── 2. Per-method outer loop ─────────────────────────────────────────────
     for method in cfg["methods"]:
@@ -664,6 +713,8 @@ def run_full_hfl(cfg: dict) -> dict:
         torch.manual_seed(_seed)   # deterministic model init across runs
 
         global_model = CachedFusionModel()
+        # img_proj frozen for IoT clients; UAV training unfreezes on its own clone.
+        global_model.freeze_img_proj()
 
         # ── Centralized baseline: no federation at all ───────────────────
         if method == "centralized":
@@ -672,6 +723,7 @@ def run_full_hfl(cfg: dict) -> dict:
                 n_rounds, n_local_epochs, lr, batch_size,
             )
             all_rows.extend(rows)
+            models_by_method[method] = global_model
             continue
 
         # ── Federated path ───────────────────────────────────────────────
@@ -746,8 +798,32 @@ def run_full_hfl(cfg: dict) -> dict:
             participation_pct = 100.0 * len(selected) / max(len(clients), 1)
             n_selected   = len(selected)
 
-            # ── Local training ────────────────────────────────────────────
-            # (client_id) → (state_dict, n_samples, reputation_score)
+            # ── Build UAV groups from selection map ───────────────────────
+            # Maps uav_idx → list of ClientData for clients assigned to that UAV.
+            client_by_id = {c.client_id: c for c in clients}
+            uav_groups: dict[int, list] = {j: [] for j in range(K)}
+            for cid, uav_idx in selected.items():
+                if cid in client_by_id:
+                    uav_groups[uav_idx].append(client_by_id[cid])
+
+            # ── UAV local training on imagery (paper §IV-A Step 3) ───────
+            # Each UAV trains the full model (img_proj + struct + fusion) on
+            # the pooled shard of all its assigned clients.  Uses the existing
+            # 512-dim ResNet feature cache — no backbone forward pass needed.
+            # flat_fl has no UAVs (placement_method is None), so it skips this.
+            uav_img_updates: dict[int, tuple[dict, int]] = {}
+            if placement_method is not None:
+                for uav_idx, group in uav_groups.items():
+                    uav_indices = [idx for c in group for idx in c.train_indices]
+                    if not uav_indices:
+                        continue
+                    uav_loader = make_client_loader(cached_dataset, uav_indices, batch_size)
+                    sd, n = _uav_local_train(global_model, uav_loader, n_uav_epochs, uav_lr)
+                    uav_img_updates[uav_idx] = (sd, n)
+
+            # ── IoT local training on structured data (paper §IV-A Step 5) ─
+            # img_proj is frozen on global_model → clone inherits the freeze →
+            # only struct_branch + fusion are updated (IoT-level payload).
             client_updates: dict[int, tuple[dict, int, float]] = {}
             for c in clients:
                 if c.client_id not in selected or not c.train_indices:
@@ -770,24 +846,48 @@ def run_full_hfl(cfg: dict) -> dict:
                     global_update_vec=None,
                 )
 
-            # ── UAV-level aggregation ─────────────────────────────────────
-            uav_groups: dict[int, list[tuple[dict, int, float]]] = {}
+            # ── UAV-level aggregation (paper §IV-A Step 6) ───────────────
+            # w̃_u = (n_img·w_img + Σ n_i·w_i) / (n_img + Σ n_i)
+            # img_proj: UAV's update only.  struct+fusion: FedAvg of UAV+IoT.
+            iot_by_uav: dict[int, list[tuple[dict, int, float]]] = {}
             for cid, triple in client_updates.items():
                 uav_idx = selected[cid]
-                uav_groups.setdefault(uav_idx, []).append(triple)
+                iot_by_uav.setdefault(uav_idx, []).append(triple)
 
             uav_updates: list[tuple[dict, int, float]] = []
-            for uav_idx, upds in uav_groups.items():
-                total_n = sum(n for _, n, _ in upds)
-                if rep_weighted:
-                    agg = reputation_fedavg(upds)
-                    # Sample-weighted, consistent with how client reputations are
-                    # used inside reputation_fedavg itself (n_k * R_k weighting).
-                    uav_rep = sum(r * n for _, n, r in upds) / max(total_n, 1)
+            for uav_idx in range(K):
+                iot_upds = iot_by_uav.get(uav_idx, [])
+                uav_img  = uav_img_updates.get(uav_idx)
+
+                if not iot_upds and uav_img is None:
+                    continue
+
+                if uav_img is None:
+                    # No UAV image data (empty coverage zone); IoT-only FedAvg.
+                    # Carry current img_proj weights so server aggregation has
+                    # a complete dict regardless of method.
+                    total_n = sum(n for _, n, _ in iot_upds)
+                    partial = (reputation_fedavg(iot_upds) if rep_weighted
+                               else fedavg([(sd, n) for sd, n, _ in iot_upds]))
+                    full_agg = {
+                        **{f"img_proj.{k}": v.clone()
+                           for k, v in global_model.img_proj.state_dict().items()},
+                        **partial,
+                    }
+                    uav_rep = (sum(r * n for _, n, r in iot_upds) / max(total_n, 1)
+                               if rep_weighted else 1.0)
                 else:
-                    agg = fedavg([(sd, n) for sd, n, _ in upds])
-                    uav_rep = 1.0
-                uav_updates.append((agg, total_n, uav_rep))
+                    total_n = uav_img[1] + sum(n for _, n, _ in iot_upds)
+                    if rep_weighted:
+                        full_agg = mixed_reputation_fedavg((*uav_img, 1.0), iot_upds)
+                        iot_n = sum(n for _, n, _ in iot_upds)
+                        uav_rep = (sum(r * n for _, n, r in iot_upds) / max(iot_n, 1)
+                                   if iot_upds else 1.0)
+                    else:
+                        full_agg = mixed_fedavg(uav_img, [(sd, n) for sd, n, _ in iot_upds])
+                        uav_rep = 1.0
+
+                uav_updates.append((full_agg, total_n, uav_rep))
 
             # ── Server-level aggregation ──────────────────────────────────
             if uav_updates:
@@ -795,7 +895,7 @@ def run_full_hfl(cfg: dict) -> dict:
                     server_agg = reputation_fedavg(uav_updates)
                 else:
                     server_agg = fedavg([(sd, n) for sd, n, _ in uav_updates])
-                global_model.load_trainable_state_dict(server_agg)
+                global_model.load_full_trainable_state_dict(server_agg)
 
             # ── Device state update ───────────────────────────────────────
             device_mgr.update_round(set(selected.keys()))
@@ -807,14 +907,16 @@ def run_full_hfl(cfg: dict) -> dict:
             if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
                 rounds_to_target = rnd
 
-            # Communication cost (MB): uplink + downlink for clients and UAV→server
+            # Communication cost (MB): uplink + downlink
+            # IoT↔UAV: IoT payload (struct+fusion only, _IOT_MODEL_SIZE_MB)
+            # UAV↔server: UAV payload (img_proj+struct+fusion, _UAV_MODEL_SIZE_MB)
+            # flat_fl: IoT↔server directly, IoT payload only
             if placement_method is None:
-                # flat_fl: clients ↔ server directly (no UAV hop)
-                comm_mb = 2.0 * n_selected * _MODEL_SIZE_MB
+                comm_mb = 2.0 * n_selected * _IOT_MODEL_SIZE_MB
             else:
-                # HFL: clients ↔ UAVs ↔ server
-                n_active_uavs = len(uav_groups)
-                comm_mb = 2.0 * (n_selected + n_active_uavs) * _MODEL_SIZE_MB
+                n_active_uavs = len(uav_img_updates)
+                comm_mb = (2.0 * n_selected * _IOT_MODEL_SIZE_MB
+                           + 2.0 * n_active_uavs * _UAV_MODEL_SIZE_MB)
 
             all_rows.append({
                 "method":             method,
@@ -840,6 +942,7 @@ def run_full_hfl(cfg: dict) -> dict:
         for row in all_rows[method_start_idx:]:
             row["rounds_to_target"] = rounds_to_target
 
+        models_by_method[method] = global_model
         logger.info(
             "%s done. Rounds to %.0f%%: %s | Energy: %.1f kJ",
             method, target_accuracy * 100,
@@ -857,4 +960,9 @@ def run_full_hfl(cfg: dict) -> dict:
     size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
     logger.info("Full-system results at %s (%.2f MB)", results_dir, size_mb)
 
-    return {"rounds": rounds_df, "results_dir": results_dir, "size_mb": size_mb}
+    return {
+        "rounds": rounds_df,
+        "results_dir": results_dir,
+        "size_mb": size_mb,
+        "models": models_by_method,
+    }

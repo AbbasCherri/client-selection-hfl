@@ -1,4 +1,4 @@
-"""Tests for CachedFusionModel, fedavg, and reputation_fedavg (model.py)."""
+"""Tests for CachedFusionModel, fedavg, reputation_fedavg, and mixed aggregation (model.py)."""
 
 import numpy as np
 import pytest
@@ -8,6 +8,8 @@ from uavbench.fl.model import (
     CachedFusionModel,
     clone_model,
     fedavg,
+    mixed_fedavg,
+    mixed_reputation_fedavg,
     reputation_fedavg,
 )
 
@@ -36,10 +38,11 @@ class TestCachedFusionModel:
             out = m(img, struct)
         assert out.shape == (1, 4)
 
-    def test_img_proj_is_frozen(self):
+    def test_img_proj_is_trainable_by_default(self):
+        """img_proj starts trainable; FL harness calls freeze_img_proj() after construction."""
         m = self._model()
         for p in m.img_proj.parameters():
-            assert not p.requires_grad, "img_proj params must be frozen"
+            assert p.requires_grad, "img_proj must be trainable on fresh model"
 
     def test_struct_branch_is_trainable(self):
         m = self._model()
@@ -99,6 +102,212 @@ class TestCachedFusionModel:
         with torch.no_grad():
             m1.struct_branch.mlp[0].weight.fill_(0.0)
         assert not torch.all(m2.struct_branch.mlp[0].weight == 0.0)
+
+
+# ── freeze / unfreeze ────────────────────────────────────────────────────────
+
+class TestFreezeUnfreeze:
+    def test_freeze_img_proj_disables_grad(self):
+        m = CachedFusionModel()
+        m.freeze_img_proj()
+        for p in m.img_proj.parameters():
+            assert not p.requires_grad
+
+    def test_unfreeze_img_proj_enables_grad(self):
+        m = CachedFusionModel()
+        m.freeze_img_proj()
+        m.unfreeze_img_proj()
+        for p in m.img_proj.parameters():
+            assert p.requires_grad
+
+    def test_freeze_does_not_affect_struct_branch(self):
+        m = CachedFusionModel()
+        m.freeze_img_proj()
+        for p in m.struct_branch.parameters():
+            assert p.requires_grad
+
+    def test_freeze_does_not_affect_fusion(self):
+        m = CachedFusionModel()
+        m.freeze_img_proj()
+        for p in m.fusion.parameters():
+            assert p.requires_grad
+
+    def test_unfreeze_does_not_affect_struct_branch(self):
+        m = CachedFusionModel()
+        m.unfreeze_img_proj()
+        for p in m.struct_branch.parameters():
+            assert p.requires_grad
+
+    def test_toggle_roundtrip(self):
+        m = CachedFusionModel()
+        m.freeze_img_proj()
+        m.unfreeze_img_proj()
+        m.freeze_img_proj()
+        for p in m.img_proj.parameters():
+            assert not p.requires_grad
+
+
+# ── full_trainable_state_dict ─────────────────────────────────────────────────
+
+class TestFullTrainableStateDict:
+    def test_includes_img_proj_keys(self):
+        m = CachedFusionModel()
+        sd = m.full_trainable_state_dict()
+        img_keys = [k for k in sd if k.startswith("img_proj.")]
+        assert len(img_keys) > 0
+
+    def test_includes_struct_branch_keys(self):
+        m = CachedFusionModel()
+        sd = m.full_trainable_state_dict()
+        struct_keys = [k for k in sd if k.startswith("struct_branch.")]
+        assert len(struct_keys) > 0
+
+    def test_includes_fusion_keys(self):
+        m = CachedFusionModel()
+        sd = m.full_trainable_state_dict()
+        fusion_keys = [k for k in sd if k.startswith("fusion.")]
+        assert len(fusion_keys) > 0
+
+    def test_total_param_count(self):
+        m = CachedFusionModel()
+        sd = m.full_trainable_state_dict()
+        n_params = sum(v.numel() for v in sd.values())
+        # img_proj: 65,664  |  struct_branch: 17,216  |  fusion: 50,436
+        assert n_params == 133_316, f"Expected 133,316 params, got {n_params}"
+
+    def test_load_full_state_dict_updates_all_modules(self):
+        m1 = CachedFusionModel()
+        m2 = CachedFusionModel()
+        m1.unfreeze_img_proj()
+        sd1 = m1.full_trainable_state_dict()
+        m2.load_full_trainable_state_dict(sd1)
+        sd2 = m2.full_trainable_state_dict()
+        for k in sd1:
+            assert torch.allclose(sd1[k], sd2[k]), f"Key {k} not loaded correctly"
+
+    def test_load_full_without_img_proj_leaves_it_unchanged(self):
+        """flat_fl server aggregation omits img_proj — those weights must stay."""
+        m = CachedFusionModel()
+        before = {k: v.clone() for k, v in m.img_proj.state_dict().items()}
+        partial = m.trainable_state_dict()  # only struct_branch + fusion
+        m.load_full_trainable_state_dict(partial)
+        after = m.img_proj.state_dict()
+        for k in before:
+            assert torch.equal(before[k], after[k]), f"img_proj.{k} changed unexpectedly"
+
+    def test_full_sd_is_clone_not_reference(self):
+        m = CachedFusionModel()
+        sd = m.full_trainable_state_dict()
+        first_key = next(iter(sd))
+        sd[first_key].fill_(999.0)
+        # Original model param must be unchanged
+        with torch.no_grad():
+            actual = list(m.img_proj.parameters())[0]
+            assert not torch.all(actual == 999.0)
+
+
+# ── mixed_fedavg ──────────────────────────────────────────────────────────────
+
+class TestMixedFedAvg:
+    def _uav_sd(self, val_img: float, val_struct: float) -> dict:
+        return {
+            "img_proj.w": torch.full((2,), val_img),
+            "struct_branch.w": torch.full((2,), val_struct),
+            "fusion.w": torch.full((2,), val_struct),
+        }
+
+    def _iot_sd(self, val: float) -> dict:
+        return {
+            "struct_branch.w": torch.full((2,), val),
+            "fusion.w": torch.full((2,), val),
+        }
+
+    def test_img_proj_from_uav_only(self):
+        uav_sd = self._uav_sd(7.0, 1.0)
+        iot_sd = self._iot_sd(0.0)
+        result = mixed_fedavg((uav_sd, 10), [(iot_sd, 10)])
+        assert torch.allclose(result["img_proj.w"], torch.full((2,), 7.0))
+
+    def test_struct_fusion_is_weighted_average(self):
+        uav_sd = self._uav_sd(0.0, 0.0)
+        iot_sd = self._iot_sd(10.0)
+        # UAV n=0, IoT n=10 → struct should be 10.0
+        result = mixed_fedavg((uav_sd, 0), [(iot_sd, 10)])
+        assert torch.allclose(result["struct_branch.w"], torch.full((2,), 10.0))
+
+    def test_uav_and_iot_equal_weight(self):
+        uav_sd = self._uav_sd(5.0, 0.0)
+        iot_sd = self._iot_sd(10.0)
+        # UAV n=1, IoT n=1 → struct = 0.5*0 + 0.5*10 = 5.0
+        result = mixed_fedavg((uav_sd, 1), [(iot_sd, 1)])
+        assert torch.allclose(result["struct_branch.w"], torch.full((2,), 5.0))
+
+    def test_zero_total_returns_uav_sd(self):
+        uav_sd = self._uav_sd(3.0, 3.0)
+        result = mixed_fedavg((uav_sd, 0), [])
+        assert torch.allclose(result["img_proj.w"], torch.full((2,), 3.0))
+
+    def test_multiple_iot_clients(self):
+        uav_sd = self._uav_sd(0.0, 6.0)
+        iot1 = self._iot_sd(0.0)
+        iot2 = self._iot_sd(12.0)
+        # UAV n=1, IoT1 n=1, IoT2 n=1 → total=3
+        # struct: (1/3)*6 + (1/3)*0 + (1/3)*12 = 6.0
+        result = mixed_fedavg((uav_sd, 1), [(iot1, 1), (iot2, 1)])
+        assert torch.allclose(result["struct_branch.w"], torch.full((2,), 6.0), atol=1e-5)
+
+
+# ── mixed_reputation_fedavg ───────────────────────────────────────────────────
+
+class TestMixedReputationFedAvg:
+    def _uav_sd(self, val_img: float, val_struct: float) -> dict:
+        return {
+            "img_proj.w": torch.full((2,), val_img),
+            "struct_branch.w": torch.full((2,), val_struct),
+            "fusion.w": torch.full((2,), val_struct),
+        }
+
+    def _iot_sd(self, val: float) -> dict:
+        return {
+            "struct_branch.w": torch.full((2,), val),
+            "fusion.w": torch.full((2,), val),
+        }
+
+    def test_img_proj_always_from_uav(self):
+        uav_sd = self._uav_sd(9.0, 0.0)
+        iot_sd = self._iot_sd(0.0)
+        result = mixed_reputation_fedavg((uav_sd, 10, 1.0), [(iot_sd, 10, 0.5)])
+        assert torch.allclose(result["img_proj.w"], torch.full((2,), 9.0))
+
+    def test_high_iot_reputation_dominates_struct(self):
+        uav_sd = self._uav_sd(0.0, 0.0)
+        iot_sd = self._iot_sd(10.0)
+        # UAV rep=0.0 means w_uav=0; IoT rep=1.0, n=10 → struct should be 10.0
+        result = mixed_reputation_fedavg((uav_sd, 10, 0.0), [(iot_sd, 10, 1.0)])
+        assert torch.allclose(result["struct_branch.w"], torch.full((2,), 10.0), atol=1e-5)
+
+    def test_zero_all_weights_falls_back_to_mixed_fedavg(self):
+        uav_sd = self._uav_sd(5.0, 5.0)
+        iot_sd = self._iot_sd(5.0)
+        # All reps 0, all n=0 → fallback; result should still have img_proj from UAV
+        result = mixed_reputation_fedavg((uav_sd, 0, 0.0), [(iot_sd, 0, 0.0)])
+        assert "img_proj.w" in result
+
+    def test_negative_reputation_clipped_to_zero(self):
+        uav_sd = self._uav_sd(0.0, 0.0)
+        iot_sd = self._iot_sd(10.0)
+        # UAV rep=-1.0 → clipped to 0; IoT gets full weight
+        result = mixed_reputation_fedavg((uav_sd, 1, -1.0), [(iot_sd, 1, 1.0)])
+        # struct should be close to 10.0 (uav struct ignored due to rep=0)
+        assert float(result["struct_branch.w"][0]) > 5.0
+
+    def test_result_has_all_expected_keys(self):
+        uav_sd = self._uav_sd(1.0, 1.0)
+        iot_sd = self._iot_sd(1.0)
+        result = mixed_reputation_fedavg((uav_sd, 1, 1.0), [(iot_sd, 1, 1.0)])
+        assert "img_proj.w" in result
+        assert "struct_branch.w" in result
+        assert "fusion.w" in result
 
 
 # ── fedavg ────────────────────────────────────────────────────────────────────
