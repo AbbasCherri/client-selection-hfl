@@ -4,7 +4,7 @@
 # Estimated wall-clock: ~3-5 hours on n1-standard-12 (100 rounds, full dataset).
 #
 # Methods:
-#   proposed_hfl      — GA every T_sel=5 rounds + UCB selection + reputation FedAvg
+#   proposed_hfl      — PSO placement every T_sel=5 rounds (or λ_min trigger) + UCB selection + reputation FedAvg
 #   flat_fl           — no UAVs, all clients, server aggregates directly (FedAvg baseline [27])
 #   centralized       — oracle upper bound (all data at one node)
 #   hfl_no_selection  — random client selection ablation
@@ -45,11 +45,14 @@ fl:
   uav_lr: 5.0e-4       # UAV learning rate (can tune independently from IoT lr)
   batch_size: 32
   target_accuracy: 0.70
-  T_sel: 5           # reposition UAVs every 5 FL rounds (paper §IV-E)
+  T_sel: 5           # reposition UAVs + reselect clients every 5 FL rounds (paper §IV-E)
+  lambda_min: 0.5    # early-reselection trigger: eligible < λ_min·min(ΣC_u, N) (§IV-E6)
+  R_min: 0.3         # UAV clusters below this trimmed-mean reputation are excluded (§IV-D)
+  placement_method: pso   # authoritative placement optimizer ("ga" for the ablation)
 
 budget:
-  P: 50              # GA population
-  G_max: 30          # GA generations (early-stop at 95% of w1=0.6 fires well before this)
+  P: 50              # PSO swarm size
+  G_max: 30          # PSO iterations (early-stop at 95% of w1=0.6 fires well before this)
 
 N_values:
   - 30

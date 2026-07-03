@@ -158,16 +158,20 @@ class HFLOrchestrator:
                 delta_w = round_updates[idx]
                 proj_w = projected_updates[idx]
 
-                # A. Contribution score (cosine similarity with EMA update history)
+                # A. Contribution score (paper Algorithm 3):
+                #    Δw̄_n(t) = 0.7·Δw_n(t) + 0.3·Δw̄_n(t−1);
+                #    R_contrib = (1 + cos(Δw̄_n(t), Δw̄_n(t−1))) / 2
                 if client.update_ema is None:
                     client.update_ema = delta_w
                     r_contrib = 0.5
                 else:
-                    client.update_ema = 0.9 * client.update_ema + 0.1 * delta_w
-                    cos_sim = np.dot(delta_w, client.update_ema) / (
-                        np.linalg.norm(delta_w) * np.linalg.norm(client.update_ema) + 1e-8
+                    prev_ema = client.update_ema
+                    new_ema = 0.7 * delta_w + 0.3 * prev_ema
+                    cos_sim = np.dot(new_ema, prev_ema) / (
+                        np.linalg.norm(new_ema) * np.linalg.norm(prev_ema) + 1e-8
                     )
                     r_contrib = (cos_sim + 1.0) / 2.0
+                    client.update_ema = new_ema
 
                 # B. Anomaly score (Mahalanobis distance)
                 diff = proj_w - mean_update
@@ -182,10 +186,12 @@ class HFLOrchestrator:
                 if len(client.success_history) > 10:
                     client.success_history.pop(0)
                 success_rate = np.mean(client.success_history)
-                r_temp = 0.5 * success_rate + 0.5 * (100.0 / (100.0 + var_lat + 1e-5))
+                r_temp = 0.5 * success_rate + 0.5 / (1.0 + var_lat)
 
-                new_rep = (r_contrib + r_anomaly + r_temp) / 3.0
-                client.reputation = 0.8 * client.reputation + 0.2 * new_rep
+                # Paper Algorithm 3 final weighting: 0.4/0.3/0.3, set directly.
+                client.last_r_contrib = r_contrib
+                client.last_r_anomaly = r_anomaly
+                client.reputation = 0.4 * r_contrib + 0.3 * r_anomaly + 0.3 * r_temp
 
         for client in selected_clients:
             if client.client_id not in successful_client_ids:
@@ -196,8 +202,12 @@ class HFLOrchestrator:
                     client.success_history.pop(0)
                 success_rate = np.mean(client.success_history)
                 var_lat = np.var(client.latency_history) if len(client.latency_history) >= 2 else 0.0
-                r_temp = 0.5 * success_rate + 0.5 * (100.0 / (100.0 + var_lat + 1e-5))
-                client.reputation = 0.8 * client.reputation + 0.2 * (r_temp / 3.0)
+                r_temp = 0.5 * success_rate + 0.5 / (1.0 + var_lat)
+                # Recompute with the paper's 0.4/0.3/0.3 weights, carrying the
+                # client's last observed contribution/anomaly components.
+                r_contrib = getattr(client, "last_r_contrib", 0.5)
+                r_anomaly = getattr(client, "last_r_anomaly", 1.0)
+                client.reputation = 0.4 * r_contrib + 0.3 * r_anomaly + 0.3 * r_temp
 
         # 4. UAV edge aggregation
         uav_updates = {}
@@ -210,15 +220,14 @@ class HFLOrchestrator:
                 assigned_reps = [
                     c.reputation for c in uav.assigned_clients if hasattr(c, 'local_model_state')
                 ]
-                if len(assigned_reps) >= 3:
+                if assigned_reps:
+                    # Trim exactly floor(n·0.1) from each tail (paper §IV-C7);
+                    # small clusters where that floors to 0 use the plain mean.
                     assigned_reps.sort()
-                    trim_idx = max(1, int(len(assigned_reps) * 0.1))
-                    if len(assigned_reps) - 2 * trim_idx > 0:
-                        trimmed_reps = assigned_reps[trim_idx:-trim_idx]
-                    else:
-                        trimmed_reps = assigned_reps
-                    uav.reputation = np.mean(trimmed_reps)
-                elif len(assigned_reps) > 0:
+                    n_reps = len(assigned_reps)
+                    trim_idx = int(n_reps * 0.1)
+                    if trim_idx > 0 and n_reps - 2 * trim_idx >= 1:
+                        assigned_reps = assigned_reps[trim_idx:n_reps - trim_idx]
                     uav.reputation = np.mean(assigned_reps)
                 else:
                     uav.reputation = 0.5

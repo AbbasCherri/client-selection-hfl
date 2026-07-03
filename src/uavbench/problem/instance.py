@@ -146,7 +146,7 @@ def generate_instance(
     uav_battery: float = 1.0,
     R_comm: float = 500.0,
     B_min_uav: float = 0.2,
-    beta_mode: str = "pinned",
+    beta_mode: str = "scheduled",
     t: int = 0,
     T_decay: int = 20,
     prev_mode: str = "stale",
@@ -207,6 +207,7 @@ def generate_instance(
         t=t,
         T_decay=T_decay,
         beta_mode=beta_mode,
+        R_comm=R_comm,
     )
 
     lower = np.array([area["x"][0], area["y"][0], z_lo], dtype=np.float64)

@@ -31,6 +31,8 @@ def pso_place_uavs(
     method: str = "pso",
     P: int = 50,
     G_max: int = 100,
+    value: np.ndarray | None = None,
+    prev_positions: np.ndarray | None = None,
 ) -> list[UAVAggregator]:
     """Run a placement optimizer on real client coordinates and return UAVAggregators.
 
@@ -54,6 +56,14 @@ def pso_place_uavs(
         Population size (ignored for heuristic methods).
     G_max:
         Maximum generations / iterations (ignored for heuristic methods).
+    value:
+        Optional (N,) per-device value scores V_i(t) weighting the coverage
+        term. Uniform when omitted (placement-only pass with no FL history).
+    prev_positions:
+        Optional (K, 3) previous UAV positions in projected metres, used by
+        the movement penalty. When omitted, defaults to an even spread across
+        the bounding box (a plausible pre-reconfiguration layout) rather than
+        the projection origin, which would bias placement toward it.
     """
     latlon = np.array(list(client_coords.values()), dtype=np.float64)  # (N, 2)
     xy_m, ref = latlon_to_meters(latlon)  # projected metres, ref = (lat0, lon0)
@@ -64,12 +74,16 @@ def pso_place_uavs(
     lower = np.array([xy_m[:, 0].min(), xy_m[:, 1].min(), 50.0])
     upper = np.array([xy_m[:, 0].max(), xy_m[:, 1].max(), 200.0])
 
-    # Start with no previous layout (all zeros → movement penalty is from origin).
-    prev_positions = np.zeros((K, 3))
+    if prev_positions is None:
+        # Even spread across the bounding box at mid-altitude — a neutral
+        # previous layout for the movement penalty.
+        xs = np.linspace(lower[0], upper[0], K)
+        ys = np.linspace(lower[1], upper[1], K)
+        prev_positions = np.column_stack([xs, ys, np.full(K, 0.5 * (lower[2] + upper[2]))])
 
     instance = ProblemInstance(
         device_coords=device_coords,
-        value=np.ones(N),  # uniform weights for placement-only pass
+        value=np.ones(N) if value is None else np.asarray(value, dtype=np.float64),
         capacity=np.full(K, float(capacity)),
         battery=np.ones(K),
         prev_positions=prev_positions,
