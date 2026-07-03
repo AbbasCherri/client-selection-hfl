@@ -83,9 +83,17 @@ class ClientSelectionCoordinator:
             max_snr, min_snr = max(all_snrs), min(all_snrs)
             u_snr = (client.snr - min_snr) / (max_snr - min_snr + 1e-5)
 
-            u_dens = min(1.0, client.num_samples / (self.max_samples * 0.5))
+            # Building-density proxy (no building inventory available).
+            u_dens = min(1.0, client.num_samples / (self.max_samples + 1e-9))
 
-            u_score = 0.4 * u_epi + 0.3 * u_snr + 0.3 * u_dens
+            # U_prox = max(0, 1 − d_min / R_comm)  (paper Algorithm 2, θ4 = 0.1)
+            if self.uavs:
+                d_min = min(haversine(client.coords, uav.coords) for uav in self.uavs)
+                u_prox = max(0.0, 1.0 - d_min / self.R_comm)
+            else:
+                u_prox = 0.0
+
+            u_score = 0.4 * u_epi + 0.3 * u_snr + 0.2 * u_dens + 0.1 * u_prox
 
             beta = max(0.0, 1.0 - round_num / 20.0)
             u_rep = beta * u_score + (1.0 - beta) * client.reputation
@@ -135,15 +143,6 @@ class ClientSelectionCoordinator:
                 assignment[client.client_id] = target_uav.uav_id
                 client.selection_count += 1
 
-        if not selected_clients and sorted_clients and self.uavs:
-            # Emergency fallback: assign the top-ranked client to the nearest UAV
-            # even if the communication gate was too strict. This keeps the
-            # simulation from stalling with zero-participation rounds.
-            client = sorted_clients[0]
-            target_uav = min(self.uavs, key=lambda u: haversine(client.coords, u.coords))
-            target_uav.assigned_clients.append(client)
-            selected_clients.append(client)
-            assignment[client.client_id] = target_uav.uav_id
-            client.selection_count += 1
-
+        # Paper Algorithm 4: clients with no feasible UAV are skipped; a round
+        # with zero participants simply performs no aggregation.
         return selected_clients, assignment

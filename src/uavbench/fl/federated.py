@@ -39,6 +39,7 @@ from sklearn.metrics import f1_score
 from torch.utils.data import DataLoader, Subset
 
 from hflsim.shared.coords import haversine, latlon_to_meters
+from hflsim.shared.value import compute_value
 from uavbench.optimizers import REGISTRY
 from uavbench.problem.energy import EnergyModel
 from uavbench.problem.fitness import Fitness
@@ -53,9 +54,8 @@ from .features import compute_feature_cache, synthetic_feature_cache
 from .model import (
     CachedFusionModel, clone_model,
     fedavg, reputation_fedavg,
-    mixed_fedavg, mixed_reputation_fedavg,
 )
-from .reputation import ReputationManager
+from .reputation import ReputationManager, trimmed_mean
 
 logger = logging.getLogger("uavbench.fl.federated")
 
@@ -71,8 +71,15 @@ def _build_problem_instance(
     R_comm: float,
     capacity: int,
     prev_positions_m: np.ndarray | None,
+    value: np.ndarray | None = None,
 ) -> ProblemInstance:
-    """Construct a ProblemInstance from client geographic coordinates."""
+    """Construct a ProblemInstance from client geographic coordinates.
+
+    ``value`` carries the per-device V_i(t) = β·U_i + (1−β)·R_i scores so the
+    placement fitness weights coverage by device value (paper §IV-E1). Callers
+    without utility/reputation state (e.g. the Tier-2 placement benchmark) may
+    omit it, in which case coverage is unweighted.
+    """
     latlon = np.array(list(client_coords.values()), dtype=np.float64)
     xy_m, ref = latlon_to_meters(latlon)
     N = len(xy_m)
@@ -89,7 +96,7 @@ def _build_problem_instance(
 
     return ProblemInstance(
         device_coords=device_coords,
-        value=np.ones(N),   # uniform — coverage drives FL quality, not value weighting
+        value=np.ones(N) if value is None else np.asarray(value, dtype=np.float64),
         capacity=np.full(K, float(capacity)),
         battery=np.ones(K),
         prev_positions=prev_positions_m,
@@ -110,6 +117,7 @@ def _place_uavs(
     P: int,
     G_max: int,
     prev_positions_m: np.ndarray | None,
+    value: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """Run a placement optimizer and return UAV positions in metres.
 
@@ -120,7 +128,7 @@ def _place_uavs(
     best_fitness    : placement fitness score
     """
     instance, ref = _build_problem_instance(
-        client_coords, K, R_comm, capacity, prev_positions_m
+        client_coords, K, R_comm, capacity, prev_positions_m, value=value
     )
     fitness = Fitness(instance)
 
@@ -294,6 +302,7 @@ def run_tier2(cfg: dict) -> dict:
     K: int = cfg["fl"]["K"]
     R_comm: float = cfg["fl"]["R_comm"]
     capacity: int = cfg["fl"]["capacity"]
+    T_sel: int = cfg["fl"].get("T_sel", 5)
     P: int = cfg["budget"]["P"]
     G_max: int = cfg["budget"]["G_max"]
     methods: list[str] = cfg["methods"]
@@ -372,6 +381,9 @@ def run_tier2(cfg: dict) -> dict:
 
         global_model = CachedFusionModel()
         prev_uav_positions_m: np.ndarray | None = None
+        uav_pos_m: np.ndarray | None = None
+        covered: dict[int, int] = {}
+        last_placement_fitness: float = 0.0
         rounds_to_target: int | None = None
         cumulative_energy_j: float = 0.0
 
@@ -387,26 +399,30 @@ def run_tier2(cfg: dict) -> dict:
                 covered = {c.client_id: 0 for c in clients}
                 placement_fitness = 1.0
             else:
-                uav_pos_m, ref, placement_fitness = _place_uavs(
-                    client_coords={c.client_id: c.coords for c in clients},
-                    K=K,
-                    R_comm=R_comm,
-                    capacity=capacity,
-                    method=method,
-                    rng=rng,
-                    P=P,
-                    G_max=G_max,
-                    prev_positions_m=prev_uav_positions_m,
-                )
-                if prev_uav_positions_m is not None:
-                    move_m = float(
-                        np.sum(np.sqrt(np.sum((uav_pos_m - prev_uav_positions_m) ** 2, axis=1)))
+                # Reposition only every T_sel rounds (paper §IV-E6), not per round.
+                needs_placement = (uav_pos_m is None) or ((rnd - 1) % T_sel == 0)
+                if needs_placement:
+                    uav_pos_m, ref, last_placement_fitness = _place_uavs(
+                        client_coords={c.client_id: c.coords for c in clients},
+                        K=K,
+                        R_comm=R_comm,
+                        capacity=capacity,
+                        method=method,
+                        rng=rng,
+                        P=P,
+                        G_max=G_max,
+                        prev_positions_m=prev_uav_positions_m,
                     )
-                    cumulative_energy_j += _ENERGY_MODEL.energy_joules(move_m)
-                prev_uav_positions_m = uav_pos_m.copy()
-                covered = _covered_clients(
-                    {c.client_id: c.coords for c in clients}, uav_pos_m, ref, R_comm
-                )
+                    if prev_uav_positions_m is not None:
+                        move_m = float(
+                            np.sum(np.sqrt(np.sum((uav_pos_m - prev_uav_positions_m) ** 2, axis=1)))
+                        )
+                        cumulative_energy_j += _ENERGY_MODEL.energy_joules(move_m)
+                    prev_uav_positions_m = uav_pos_m.copy()
+                    covered = _covered_clients(
+                        {c.client_id: c.coords for c in clients}, uav_pos_m, ref, R_comm
+                    )
+                placement_fitness = last_placement_fitness
 
             coverage_pct = 100.0 * len(covered) / max(len(clients), 1)
 
@@ -509,17 +525,18 @@ _MODEL_SIZE_MB: float = _IOT_MODEL_SIZE_MB   # kept for run_tier2 back-compat
 
 
 # Method configuration: (placement_method, selection_mode, reputation_weighted, dynamic)
-# placement_method: "ga" or None (flat/centralized)
+# placement_method: "pso" (authoritative placement optimizer) or None (flat/centralized);
+#                   override per run via cfg["fl"]["placement_method"]
 # selection_mode:   "ucb" | "random" | "all"
 # reputation_weighted: True → reputation_fedavg; False → uniform sample-weight fedavg
 # dynamic:          True → reposition every T_sel rounds; False → place once at round 1
 _METHOD_CFG: dict[str, tuple] = {
-    "proposed_hfl":      ("ga",  "ucb",    True,  True),
+    "proposed_hfl":      ("pso", "ucb",    True,  True),
     "flat_fl":           (None,  "all",    False, False),
     "centralized":       (None,  "all",    False, False),   # handled specially
-    "hfl_no_selection":  ("ga",  "random", True,  True),
-    "hfl_static":        ("ga",  "ucb",    True,  False),
-    "hfl_no_reputation": ("ga",  "ucb",    False, True),
+    "hfl_no_selection":  ("pso", "random", True,  True),
+    "hfl_static":        ("pso", "ucb",    True,  False),
+    "hfl_no_reputation": ("pso", "ucb",    False, True),
 }
 
 
@@ -660,10 +677,13 @@ def run_full_hfl(cfg: dict) -> dict:
     R_comm          = fl["R_comm"]
     capacity        = fl["capacity"]
     T_sel           = fl.get("T_sel", 5)
+    lambda_min      = fl.get("lambda_min", 0.5)   # early-reselection trigger (paper §IV-E6)
+    R_min           = fl.get("R_min", 0.3)        # min cluster reputation for aggregation (§IV-D)
     target_accuracy = fl.get("target_accuracy", 0.70)
     run_seed        = fl.get("seed", cfg.get("optimizer_seed", 42))
     n_uav_epochs    = fl.get("n_uav_epochs", n_local_epochs)
     uav_lr          = fl.get("uav_lr", lr)
+    placement_override = fl.get("placement_method")
 
     P     = cfg["budget"]["P"]
     G_max = cfg["budget"]["G_max"]
@@ -703,6 +723,8 @@ def run_full_hfl(cfg: dict) -> dict:
             continue
 
         placement_method, selection_mode, rep_weighted, dynamic = _METHOD_CFG[method]
+        if placement_method is not None and placement_override:
+            placement_method = placement_override
 
         # Per-method seed: combine the run-level seed with a stable method hash.
         # The hash is applied exactly once here; callers (e.g. _paper_job) must NOT
@@ -741,22 +763,67 @@ def run_full_hfl(cfg: dict) -> dict:
         uav_latlon:           list[tuple[float, float]] = []
         ref:                  np.ndarray | None = None
         covered_all:          dict[int, int] = {}
+        selected:             dict[int, int] = {}
         last_placement_fitness: float = 0.0
         cumulative_energy     = 0.0
         rounds_to_target:     int | None = None
         method_start_idx:     int = len(all_rows)
 
+        # Pre-project client coordinates once (static ground sensors): shared by
+        # the per-selection V_i(t) computation. Order matches client_coord_map.
+        _client_latlon = np.array([client_coord_map[c.client_id] for c in clients])
+        _client_xy_m, _value_ref = latlon_to_meters(_client_latlon)
+        _epi_xy_m, _ = latlon_to_meters(np.array([epicentre]), ref=_value_ref)
+        _device_coords_m = np.column_stack([_client_xy_m, np.zeros(len(clients))])
+        _epicentre_m = np.append(_epi_xy_m[0], 0.0)
+        _samples_arr = np.array([len(c.train_indices) for c in clients], dtype=np.float64)
+
         for rnd in range(1, n_rounds + 1):
             t0 = time.perf_counter()
+
+            # ── Client state (needed for both triggers and selection) ─────
+            device_states = device_mgr.get_all_states()
+            rep_scores    = rep_mgr.get_all_scores()
+
+            # Early-reselection trigger: eligible devices < λ_min · ΣC_u (§IV-E6).
+            # The paper assumes N ≫ ΣC_u; when total UAV capacity exceeds the
+            # client population (as in the paper_full config) the literal form
+            # is always true, so the threshold is capped at the population size.
+            n_eligible = sum(1 for st in device_states.values() if st.eligible())
+            low_eligible = n_eligible < lambda_min * min(K * capacity, len(clients))
 
             # ── Placement ────────────────────────────────────────────────
             if placement_method is None:
                 # flat_fl: no UAV filter — all clients always covered (static, no dropouts).
                 covered_all = {c.client_id: 0 for c in clients}
                 placement_fitness = 1.0
+                reselect = True
             else:
-                needs_placement = (uav_pos_m is None) or (dynamic and (rnd - 1) % T_sel == 0)
+                needs_placement = (uav_pos_m is None) or (
+                    dynamic and ((rnd - 1) % T_sel == 0 or low_eligible)
+                )
                 if needs_placement:
+                    # Per-device value V_i(t) = β(t)·U_i + (1−β(t))·R_i drives the
+                    # placement fitness coverage term (paper §IV-E1).
+                    snr_arr = np.array(
+                        [device_states[c.client_id].snr_db for c in clients]
+                    )
+                    rep_arr = np.array(
+                        [rep_scores.get(c.client_id, 0.5) for c in clients]
+                    )
+                    prev_for_value = (
+                        prev_uav_pos_m if prev_uav_pos_m is not None
+                        else np.column_stack([
+                            np.linspace(_client_xy_m[:, 0].min(), _client_xy_m[:, 0].max(), K),
+                            np.linspace(_client_xy_m[:, 1].min(), _client_xy_m[:, 1].max(), K),
+                            np.full(K, 70.0),
+                        ])
+                    )
+                    device_values = compute_value(
+                        _device_coords_m, _epicentre_m, snr_arr, _samples_arr,
+                        prev_for_value, rep_arr,
+                        t=rnd, beta_mode="scheduled", R_comm=R_comm,
+                    )
                     uav_pos_m, ref, last_placement_fitness = _place_uavs(
                         client_coords=client_coord_map,
                         K=K,
@@ -767,6 +834,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         P=P,
                         G_max=G_max,
                         prev_positions_m=prev_uav_pos_m,
+                        value=device_values,
                     )
                     if prev_uav_pos_m is not None:
                         move_m = float(
@@ -777,22 +845,24 @@ def run_full_hfl(cfg: dict) -> dict:
                     uav_latlon = _uav_pos_to_latlon(uav_pos_m, ref)
                     covered_all = _covered_clients(client_coord_map, uav_pos_m, ref, R_comm)
                 placement_fitness = last_placement_fitness
+                # Client selection runs every T_sel rounds or on trigger (§IV-C),
+                # not every round; between selections the roster persists.
+                reselect = (rnd - 1) % T_sel == 0 or low_eligible or not selected
 
-            # ── Client state + selection ──────────────────────────────────
-            device_states = device_mgr.get_all_states()
-            rep_scores    = rep_mgr.get_all_scores()
-
-            selected: dict[int, int] = selector.select(
-                covered           = covered_all,
-                device_states     = device_states,
-                reputation_scores = rep_scores,
-                client_coords     = client_coord_map,
-                uav_coords_latlon = uav_latlon,
-                round_num         = rnd,
-                uav_capacity      = capacity,
-                mode              = selection_mode,
-                rng               = rng,
-            )
+            # ── Client selection ──────────────────────────────────────────
+            if reselect:
+                selected = selector.select(
+                    covered           = covered_all,
+                    device_states     = device_states,
+                    reputation_scores = rep_scores,
+                    client_coords     = client_coord_map,
+                    uav_coords_latlon = uav_latlon,
+                    round_num         = rnd,
+                    uav_capacity      = capacity,
+                    mode              = selection_mode,
+                    rng               = rng,
+                    R_comm            = R_comm,
+                )
 
             coverage_pct = 100.0 * len(covered_all) / max(len(clients), 1)
             participation_pct = 100.0 * len(selected) / max(len(clients), 1)
@@ -824,7 +894,9 @@ def run_full_hfl(cfg: dict) -> dict:
             # ── IoT local training on structured data (paper §IV-A Step 5) ─
             # img_proj is frozen on global_model → clone inherits the freeze →
             # only struct_branch + fusion are updated (IoT-level payload).
+            global_trainable = global_model.trainable_state_dict()
             client_updates: dict[int, tuple[dict, int, float]] = {}
+            client_deltas: dict[int, dict] = {}
             for c in clients:
                 if c.client_id not in selected or not c.train_indices:
                     continue
@@ -832,6 +904,10 @@ def run_full_hfl(cfg: dict) -> dict:
                 sd, n = _local_train(global_model, loader, n_local_epochs, lr)
                 rep  = rep_scores.get(c.client_id, 0.5)
                 client_updates[c.client_id] = (sd, n, rep)
+                # Reputation scores the update *delta* Δw_n, not absolute weights.
+                client_deltas[c.client_id] = {
+                    k: v - global_trainable[k] for k, v in sd.items()
+                }
 
             # Clients chosen for this round but unable to train (e.g. empty shard)
             # count as absent for the temporal-reliability term of their reputation.
@@ -840,15 +916,24 @@ def run_full_hfl(cfg: dict) -> dict:
                     rep_mgr.mark_absent(cid)
 
             # ── Reputation update ─────────────────────────────────────────
-            if client_updates:
+            if client_deltas:
                 rep_mgr.update_batch(
-                    {cid: sd for cid, (sd, _, _) in client_updates.items()},
+                    client_deltas,
                     global_update_vec=None,
+                    response_times={
+                        cid: device_states[cid].compute_time_s
+                        for cid in client_deltas if cid in device_states
+                    },
                 )
 
             # ── UAV-level aggregation (paper §IV-A Step 6) ───────────────
-            # w̃_u = (n_img·w_img + Σ n_i·w_i) / (n_img + Σ n_i)
-            # img_proj: UAV's update only.  struct+fusion: FedAvg of UAV+IoT.
+            # struct_branch + fusion: plain data-size FedAvg over the IoT
+            # updates (reputation weighting is server-level only, §IV-A Step 7).
+            # img_proj: overlaid from the UAV's own image training. The UAV's
+            # struct+fusion update is *not* mixed in: in this simulation the
+            # UAV trains on the pooled shards of its assigned IoT clients (no
+            # separate aerial dataset exists), so including it would count
+            # every sample twice; its unique contribution is the vision head.
             iot_by_uav: dict[int, list[tuple[dict, int, float]]] = {}
             for cid, triple in client_updates.items():
                 uav_idx = selected[cid]
@@ -862,40 +947,44 @@ def run_full_hfl(cfg: dict) -> dict:
                 if not iot_upds and uav_img is None:
                     continue
 
-                if uav_img is None:
-                    # No UAV image data (empty coverage zone); IoT-only FedAvg.
-                    # Carry current img_proj weights so server aggregation has
-                    # a complete dict regardless of method.
+                if iot_upds:
+                    sf_agg = fedavg([(sd, n) for sd, n, _ in iot_upds])
                     total_n = sum(n for _, n, _ in iot_upds)
-                    partial = (reputation_fedavg(iot_upds) if rep_weighted
-                               else fedavg([(sd, n) for sd, n, _ in iot_upds]))
-                    full_agg = {
-                        **{f"img_proj.{k}": v.clone()
-                           for k, v in global_model.img_proj.state_dict().items()},
-                        **partial,
-                    }
-                    uav_rep = (sum(r * n for _, n, r in iot_upds) / max(total_n, 1)
-                               if rep_weighted else 1.0)
                 else:
-                    total_n = uav_img[1] + sum(n for _, n, _ in iot_upds)
-                    if rep_weighted:
-                        full_agg = mixed_reputation_fedavg((*uav_img, 1.0), iot_upds)
-                        iot_n = sum(n for _, n, _ in iot_upds)
-                        uav_rep = (sum(r * n for _, n, r in iot_upds) / max(iot_n, 1)
-                                   if iot_upds else 1.0)
-                    else:
-                        full_agg = mixed_fedavg(uav_img, [(sd, n) for sd, n, _ in iot_upds])
-                        uav_rep = 1.0
+                    # Coverage zone with UAV imagery but no IoT deliveries:
+                    # struct+fusion stay at the current global weights.
+                    sf_agg = global_model.trainable_state_dict()
+                    total_n = uav_img[1]
+
+                if uav_img is not None:
+                    img_part = {k: v for k, v in uav_img[0].items()
+                                if k.startswith("img_proj.")}
+                else:
+                    img_part = {f"img_proj.{k}": v.clone()
+                                for k, v in global_model.img_proj.state_dict().items()}
+                full_agg = {**img_part, **sf_agg}
+
+                # UAV reputation = trimmed mean (10% per tail) of its assigned
+                # cluster's IoT reputations (paper §IV-C7).
+                cluster_reps = [
+                    rep_scores.get(c.client_id, 0.5) for c in uav_groups[uav_idx]
+                ]
+                uav_rep = trimmed_mean(cluster_reps) if cluster_reps else 1.0
 
                 uav_updates.append((full_agg, total_n, uav_rep))
 
             # ── Server-level aggregation ──────────────────────────────────
+            # Reputation-weighted FedAvg; UAVs whose cluster trimmed-mean
+            # reputation falls below R_min are excluded this round (§IV-D).
             if uav_updates:
                 if rep_weighted:
-                    server_agg = reputation_fedavg(uav_updates)
+                    active = [u for u in uav_updates if u[2] >= R_min]
+                    if active:
+                        server_agg = reputation_fedavg(active)
+                        global_model.load_full_trainable_state_dict(server_agg)
                 else:
                     server_agg = fedavg([(sd, n) for sd, n, _ in uav_updates])
-                global_model.load_full_trainable_state_dict(server_agg)
+                    global_model.load_full_trainable_state_dict(server_agg)
 
             # ── Device state update ───────────────────────────────────────
             device_mgr.update_round(set(selected.keys()))

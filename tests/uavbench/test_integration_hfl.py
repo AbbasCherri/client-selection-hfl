@@ -31,6 +31,7 @@ def _minimal_cfg(results_dir: str, methods: list[str], n_rounds: int = 2,
             "R_comm": R_comm,
             "capacity": capacity,
             "T_sel": T_sel,
+            "lambda_min": 0.0,   # disable the eligibility trigger so cadence tests are deterministic
             "target_accuracy": 0.99,  # high so rounds_to_target is usually None
             "seed": 42,
         },

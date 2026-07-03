@@ -20,7 +20,7 @@ T_MAX_S: float = 300.0    # maximum compute time (s)
 
 
 class DeviceState:
-    __slots__ = ("battery", "snr_db", "memory_ok", "compute_time_s")
+    __slots__ = ("battery", "snr_db", "memory_ok", "compute_time_s", "margin_s")
 
     def __init__(
         self,
@@ -28,18 +28,22 @@ class DeviceState:
         snr_db: float,
         memory_ok: bool,
         compute_time_s: float,
+        margin_s: float = 0.0,
     ) -> None:
         self.battery = battery
         self.snr_db = snr_db
         self.memory_ok = memory_ok
         self.compute_time_s = compute_time_s
+        # Adaptive safety margin ε_n(t) from historical completion-time
+        # variance (paper §IV-C1: T̂_n ≤ T_max − ε_n).
+        self.margin_s = margin_s
 
     def eligible(self) -> bool:
         return (
             self.battery >= B_MIN
             and self.snr_db >= SNR_MIN_DB
             and self.memory_ok
-            and self.compute_time_s <= T_MAX_S
+            and self.compute_time_s <= T_MAX_S - self.margin_s
         )
 
 
@@ -73,6 +77,9 @@ class DeviceStateManager:
         # Per-round noise (updated each call to update_round)
         self._snr_noise: dict[int, float] = {cid: 0.0 for cid in client_ids}
         self._compute_noise: dict[int, float] = {cid: 0.0 for cid in client_ids}
+        # Recent observed completion times (last 10 rounds) for the adaptive
+        # eligibility margin ε_n(t) = 1.96·std (paper §IV-C1).
+        self._compute_history: dict[int, list[float]] = {cid: [] for cid in client_ids}
 
     def update_round(self, selected_ids: set[int]) -> None:
         """Advance device states by one FL round.
@@ -89,13 +96,19 @@ class DeviceStateManager:
                 self._battery[cid] = min(1.0, self._battery[cid] + 0.005)
             self._snr_noise[cid] = float(self._rng.normal(0.0, 2.0))
             self._compute_noise[cid] = float(self._rng.normal(0.0, 30.0))
+            if cid in selected_ids:
+                observed = max(10.0, self._compute_base[cid] + self._compute_noise[cid])
+                self._compute_history[cid] = (self._compute_history[cid] + [observed])[-10:]
 
     def get_state(self, client_id: int) -> DeviceState:
+        history = self._compute_history.get(client_id, [])
+        margin = 1.96 * float(np.std(history)) if len(history) >= 3 else 0.0
         return DeviceState(
             battery=self._battery[client_id],
             snr_db=self._snr_base[client_id] + self._snr_noise[client_id],
             memory_ok=self._memory_ok[client_id],
             compute_time_s=max(10.0, self._compute_base[client_id] + self._compute_noise[client_id]),
+            margin_s=margin,
         )
 
     def get_all_states(self) -> dict[int, DeviceState]:
