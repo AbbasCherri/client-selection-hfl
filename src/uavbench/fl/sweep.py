@@ -6,8 +6,8 @@ with joblib across the 12 vCPUs of the GCP instance.
 
 Thread budget:
     Each worker calls ``torch.set_num_threads(1)`` so MKL/OpenBLAS does not
-    spawn extra threads per job. Total active threads = n_workers × 1 = 8,
-    matching the 8-vCPU budget exactly.
+    spawn extra threads per job. Total active threads = n_workers × 1 = 12,
+    matching the 12-vCPU budget exactly.
 
 HuggingFace rate-limit strategy:
     All N-value datasets are streamed and cached **sequentially** in
@@ -82,7 +82,7 @@ def _prefetch_all_N(cfg: dict) -> None:
 def _job(N: int, method: str, cfg: dict) -> pd.DataFrame:
     """Single (N, method) FL run, executed inside a joblib worker process."""
     import torch
-    torch.set_num_threads(1)  # intra-op; interop pinned via OMP_NUM_THREADS in run_gcp.sh
+    torch.set_num_threads(1)  # limit intra-op parallelism so 12 workers don't thrash BLAS
 
     from .federated import run_tier2  # import inside worker to avoid fork issues
 
@@ -121,7 +121,7 @@ def run_sweep(cfg: dict) -> dict:
     """
     N_values: list[int] = cfg["N_values"]
     methods: list[str] = cfg["methods"]
-    n_workers: int = cfg.get("n_workers", 8)
+    n_workers: int = cfg.get("n_workers", 12)
     results_dir = Path(cfg["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -217,7 +217,7 @@ def run_paper_sweep(cfg: dict) -> dict:
     N_values: list[int]  = cfg["N_values"]
     methods:  list[str]  = cfg["methods"]
     n_seeds:  int        = cfg.get("n_seeds", 1)
-    n_workers: int       = cfg.get("n_workers", 8)
+    n_workers: int       = cfg.get("n_workers", 12)
     results_dir = Path(cfg["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
 

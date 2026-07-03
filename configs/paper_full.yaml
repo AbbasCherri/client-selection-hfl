@@ -1,7 +1,7 @@
 # Full paper system simulation — §V comparison (Table III + Figures 4-8).
 #
-# Runs 6 methods × 3 N-values × 3 seeds = 54 jobs on 8 parallel workers.
-# Estimated wall-clock: ~4-8 hours on n1-standard-8 (100 rounds, full dataset).
+# Runs 6 methods × 3 N-values × 3 seeds = 54 jobs on 12 parallel workers.
+# Estimated wall-clock: ~3-5 hours on n1-standard-12 (100 rounds, full dataset).
 #
 # Methods:
 #   proposed_hfl      — GA every T_sel=5 rounds + UCB selection + reputation FedAvg
@@ -17,7 +17,7 @@
 name: paper_full_system
 results_dir: results/paper_full
 
-n_workers: 8
+n_workers: 12
 n_seeds: 3           # repetitions for confidence intervals
 optimizer_seed: 9876
 
@@ -49,7 +49,7 @@ fl:
 
 budget:
   P: 50              # GA population
-  G_max: 100         # GA generations
+  G_max: 30          # GA generations (early-stop at 95% of w1=0.6 fires well before this)
 
 N_values:
   - 30
