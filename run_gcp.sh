@@ -3,7 +3,7 @@
 #
 # Runs the full paper comparison (6 methods: proposed_hfl/flat_fl/centralized/
 # hfl_no_selection/hfl_static/hfl_no_reputation × 3 N-values × 3 seeds = 54 jobs)
-# in parallel across all 8 vCPUs of the instance, then stops the VM.
+# in parallel across all 12 vCPUs of the instance, then stops the VM.
 #
 # Usage (SSH into the VM, then):
 #   chmod +x run_gcp.sh
@@ -21,8 +21,8 @@ set -euo pipefail
 # Config — fill in before uploading to the VM
 # ---------------------------------------------------------------------------
 PROJECT_ID="project-bacf2da8-2fce-4137-a90"
-ZONE="europe-west9-b"
-INSTANCE_NAME="instance-20260625-100247"
+ZONE="us-central1-a"
+INSTANCE_NAME="instance-20260703-060853"
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -46,11 +46,10 @@ fi
 source "$VENV/bin/activate"
 export PYTHONPATH="$SCRIPT_DIR/src"
 
-# Pin PyTorch/BLAS thread count per worker (each worker sets torch.set_num_threads(1)).
-# Total active threads = 8 workers × 1 = 8 = vCPU count.
-export OMP_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
+# OMP/BLAS thread limits are set INSIDE the parallel FL worker processes via
+# torch.set_num_threads(1) in the sweep code.  Setting them here globally would
+# also throttle the single-threaded ResNet-18 feature pre-fetch to 1 thread,
+# turning a 20-min feature extraction into a 3-hour one.  Do NOT export them here.
 
 # Throttle HuggingFace parallel fetchers during the sequential pre-fetch phase
 # to avoid 429 rate limits. Workers never call HF — only the pre-fetch does.
@@ -115,11 +114,11 @@ echo "[$(date)] RAM          : $(free -h | awk '/^Mem/{print $2}')" | tee -a "$L
 echo "[$(date)] Disk free    : $(df -h "$SCRIPT_DIR" | awk 'NR==2{print $4}')" | tee -a "$LOG_FILE"
 
 # ---------------------------------------------------------------------------
-# Run the full paper system simulation — method×N×seed grid, 8-core parallel
+# Run the full paper system simulation — method×N×seed grid, 12-core parallel
 # ---------------------------------------------------------------------------
 echo "[$(date)] ----- Starting full paper simulation -----" | tee -a "$LOG_FILE"
 echo "[$(date)] Methods: proposed_hfl flat_fl centralized hfl_no_selection hfl_static hfl_no_reputation" | tee -a "$LOG_FILE"
-echo "[$(date)] N: 30 50 100, seeds: 3 — 54 jobs total on 8 workers" | tee -a "$LOG_FILE"
+echo "[$(date)] N: 30 50 100, seeds: 3 — 54 jobs total on 12 workers" | tee -a "$LOG_FILE"
 
 cd "$SCRIPT_DIR"
 python3 -m uavbench run_paper_sim --config "$PAPER_CFG" >> "$LOG_FILE" 2>&1
