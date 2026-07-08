@@ -527,7 +527,7 @@ _MODEL_SIZE_MB: float = _IOT_MODEL_SIZE_MB   # kept for run_tier2 back-compat
 # Method configuration: (placement_method, selection_mode, reputation_weighted, dynamic)
 # placement_method: "pso" (authoritative placement optimizer) or None (flat/centralized);
 #                   override per run via cfg["fl"]["placement_method"]
-# selection_mode:   "ucb" | "random" | "all"
+# selection_mode:   "ucb" | "random" | "all" | "fedcs" | "rep_cap" | "fair_mab"
 # reputation_weighted: True → reputation_fedavg; False → uniform sample-weight fedavg
 # dynamic:          True → reposition every T_sel rounds; False → place once at round 1
 _METHOD_CFG: dict[str, tuple] = {
@@ -537,6 +537,13 @@ _METHOD_CFG: dict[str, tuple] = {
     "hfl_no_selection":  ("pso", "random", True,  True),
     "hfl_static":        ("pso", "ucb",    True,  False),
     "hfl_no_reputation": ("pso", "ucb",    False, True),
+    # Literature baselines (Algorithms B1-B3, REPORTS/literature_baselines.md):
+    # identical PSO placement, reputation FedAvg, and T_sel cadence as
+    # proposed_hfl — only the client-selection rule differs, isolating it as
+    # the experimental variable.
+    "fedcs":             ("pso", "fedcs",    True, True),   # Nishio & Yonetani, ICC 2019
+    "rep_cap":           ("pso", "rep_cap",  True, True),   # Zhao et al., Chin. J. Aeronaut. 2024
+    "fair_mab":          ("pso", "fair_mab", True, True),   # Zhu et al., Sensors 2024
 }
 
 
@@ -658,6 +665,9 @@ def run_full_hfl(cfg: dict) -> dict:
       hfl_no_selection  — GA every T_sel rounds + random selection + reputation FedAvg
       hfl_static        — GA once (no repositioning) + UCB selection + reputation FedAvg
       hfl_no_reputation — GA every T_sel rounds + UCB selection + uniform FedAvg
+      fedcs             — literature B1: FedCS greedy deadline selection (Nishio & Yonetani 2019)
+      rep_cap           — literature B2: reputation-capability ranking (Zhao et al. 2024)
+      fair_mab          — literature B3: fairness/energy MAB selection (Zhu et al. 2024)
 
     Additional config keys vs run_tier2
     ------------------------------------
@@ -862,6 +872,7 @@ def run_full_hfl(cfg: dict) -> dict:
                     mode              = selection_mode,
                     rng               = rng,
                     R_comm            = R_comm,
+                    t_stale_cap       = T_sel,   # fair_mab staleness saturates on the reselection cadence
                 )
 
             coverage_pct = 100.0 * len(covered_all) / max(len(clients), 1)
