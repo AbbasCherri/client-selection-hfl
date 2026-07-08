@@ -78,3 +78,14 @@ Filesystem      Size  Used Avail Use% Mounted on
 [Wed Jul  1 08:40:42 UTC 2026] ===== GCP paper simulation complete =====
 [Wed Jul  1 08:40:42 UTC 2026] Paper simulation finished successfully. Stopping VM.
 [Wed Jul  1 08:40:44 UTC 2026] gcloud stop failed (scope issue) — using sudo shutdown instead.
+[Wed Jul  8 08:08:26 UTC 2026] HF_TOKEN set — using real HFL dataset.
+[Wed Jul  8 08:08:26 UTC 2026] ===== GCP selection-isolation simulation started =====
+[Wed Jul  8 08:08:26 UTC 2026] Project dir  : /home/abbasbcherri/client-selection-hfl
+[Wed Jul  8 08:08:26 UTC 2026] Config       : configs/selection_isolation.yaml
+[Wed Jul  8 08:08:26 UTC 2026] Log          : /home/abbasbcherri/client-selection-hfl/selection_sim.log
+[Wed Jul  8 08:08:26 UTC 2026] Python       : Python 3.14.4
+[Wed Jul  8 08:08:26 UTC 2026] vCPUs        : 12
+[Wed Jul  8 08:08:26 UTC 2026] RAM          : 41Gi
+[Wed Jul  8 08:08:26 UTC 2026] Disk free    : 33G
+[Wed Jul  8 08:08:26 UTC 2026] ----- Starting selection-isolation sweep -----
+[Wed Jul  8 08:08:26 UTC 2026] Modes: ucb random fedcs rep_cap fair_mab | N: 30 50 100 200 350 500 | seeds: 3 — 90 jobs on 12 workers
