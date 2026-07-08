@@ -1,0 +1,75 @@
+# Selection-isolation benchmark — client-selection rules head-to-head.
+#
+# The selection rule is the ONLY experimental variable:
+#   - Static UAVs at elbow-method K-means cluster centres (no PSO, no movement).
+#   - Every mode shares the identical seed per (N, seed): same model init,
+#     same device heterogeneity, same UAV layout.
+#   - Identical FL pipeline for all modes (reputation FedAvg, R_min gate,
+#     T_sel reselection cadence, UAV image training).
+#
+# Grid: 6 N-values × 5 modes × 3 seeds = 90 jobs on 12 parallel workers.
+#
+# Modes:
+#   ucb      — proposed system (Algorithms 1-4: eligibility → priority → UCB → greedy)
+#   random   — eligibility gate + random draw (no-selection ablation)
+#   fedcs    — B1: FedCS greedy deadline selection (Nishio & Yonetani, ICC 2019)
+#   rep_cap  — B2: reputation-capability ranking (Zhao et al., CJA 2024)
+#   fair_mab — B3: fairness/energy MAB selection (Zhu et al., Sensors 2024)
+#
+# Requires HF_TOKEN for the real dataset; set data.source: synthetic for a
+# token-free offline check.
+
+name: selection_isolation
+results_dir: results/selection_isolation
+
+n_workers: 12
+n_seeds: 3
+optimizer_seed: 9876
+
+# Noto Peninsula 2024 earthquake epicentre (lat °N, lon °E)
+epicentre: [37.488, 137.272]
+
+data:
+  source: real
+  subsample: 0.10    # ~10% of the dataset (~13 k rows)
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  # N_clients is overwritten per-job by run_selection_sweep (N_values below).
+  N_clients: 100
+
+fl:
+  R_comm: 20000.0    # 20 km — Noto Peninsula scale
+  capacity: 10       # C_u per UAV; with elbow-chosen K this creates real
+                     # selection pressure (slots < eligible clients at large N)
+  n_rounds: 200
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  lr: 5.0e-4
+  uav_lr: 5.0e-4
+  batch_size: 32
+  target_accuracy: 0.70
+  T_sel: 5           # reselect clients every 5 rounds (paper §IV-E cadence)
+  lambda_min: 0.5    # early-reselection trigger (§IV-E6)
+  R_min: 0.3         # UAV clusters below this trimmed-mean reputation excluded (§IV-D)
+
+# Elbow K-means placement: K searched in [k_min, min(k_max, N//5)] so each
+# UAV serves ≥5 devices on average — "comparable UAVs" as N scales.
+elbow:
+  k_min: 2
+  k_max: 30
+
+N_values:
+  - 30
+  - 50
+  - 100
+  - 200
+  - 350
+  - 500
+
+modes:
+  - ucb
+  - random
+  - fedcs
+  - rep_cap
+  - fair_mab
