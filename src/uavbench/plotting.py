@@ -144,6 +144,7 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
     METHOD_ORDER = [
         "proposed_hfl", "flat_fl", "centralized",
         "hfl_no_selection", "hfl_static", "hfl_no_reputation",
+        "fedcs", "rep_cap", "fair_mab",
     ]
     METHOD_LABELS = {
         "proposed_hfl":      "Proposed HFL",
@@ -152,8 +153,15 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
         "hfl_no_selection":  "No Selection",
         "hfl_static":        "Static UAVs",
         "hfl_no_reputation": "No Reputation",
+        # Literature baselines (Algorithms B1-B3)
+        "fedcs":             "FedCS (Nishio & Yonetani '19)",
+        "rep_cap":           "Rep-Capability (Zhao et al. '24)",
+        "fair_mab":          "Fairness MAB (Zhu et al. '24)",
     }
-    COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    COLORS = [
+        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b",
+        "#e377c2", "#7f7f7f", "#17becf",
+    ]
     METHOD_COLOR = {m: COLORS[i % len(COLORS)] for i, m in enumerate(METHOD_ORDER)}
 
     N_values = sorted(df["N"].unique())

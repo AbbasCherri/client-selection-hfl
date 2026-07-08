@@ -36,6 +36,7 @@ class TestMethodHashDeterminism:
         methods = [
             "proposed_hfl", "flat_fl", "centralized",
             "hfl_no_selection", "hfl_static", "hfl_no_reputation",
+            "fedcs", "rep_cap", "fair_mab",
         ]
         hashes = [self._method_hash_federated(m) for m in methods]
         assert len(set(hashes)) == len(methods), "Some methods share the same hash bucket"

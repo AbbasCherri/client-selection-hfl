@@ -13,9 +13,22 @@ Pipeline
 
 Selection modes
 ---------------
-"ucb"    — full pipeline (proposed system)
-"random" — eligibility filter only, then random draw per UAV (hfl_no_selection)
-"all"    — skip all filters; every covered client participates (flat_fl / centralized)
+"ucb"      — full pipeline (proposed system)
+"random"   — eligibility filter only, then random draw per UAV (hfl_no_selection)
+"all"      — skip all filters; every covered client participates (flat_fl / centralized)
+
+Literature baselines (Algorithms B1-B3, REPORTS/literature_baselines.md)
+------------------------------------------------------------------------
+"fedcs"    — B1: FedCS greedy deadline selection per UAV, purely time-driven
+             (Nishio & Yonetani, ICC 2019)
+"rep_cap"  — B2: γ·R_n + (1−γ)·ℓ̃_n reputation-capability ranking, no
+             exploration, no utility (Zhao et al., Chin. J. Aeronaut. 2024)
+"fair_mab" — B3: w_e·b_n + w_s·staleness_n fairness/energy MAB reward,
+             no reputation, no utility (Zhu et al., Sensors 2024)
+
+All three run behind the same eligibility gate as "ucb"; "rep_cap" and
+"fair_mab" rank candidates and feed the identical greedy UAV assignment
+(Algorithm 4), so the selection rule is the only experimental variable.
 """
 
 from __future__ import annotations
@@ -41,6 +54,19 @@ W_DENS = 0.2
 W_PROX = 0.1
 
 UCB_C = math.sqrt(2)   # exploration constant from paper
+
+# Baseline B2 (Zhao et al. 2024): trust/capability split γ·R_n + (1−γ)·ℓ̃_n.
+# γ = 0.5 is the symmetric default documented in the adaptation note.
+REPCAP_GAMMA = 0.5
+
+# Baseline B3 (Zhu et al. 2024): reward = w_energy·b_n + w_stale·staleness_n,
+# weights sum to 1 (0.5/0.5 default per the source's balanced setting).
+FAIRMAB_W_ENERGY = 0.5
+FAIRMAB_W_STALE = 0.5
+# Staleness normalization cap in rounds; T_sel (the reselection interval) is
+# the documented default so staleness saturates on the same cadence the
+# proposed system reconsiders devices. Callers pass fl.T_sel via select().
+DEFAULT_T_STALE_CAP = 5
 
 # Noto Peninsula 2024 epicentre (default; override via cfg)
 DEFAULT_EPICENTRE = (37.488, 137.272)   # (lat °N, lon °E)
@@ -130,6 +156,9 @@ class ClientSelector:
         epicentre: tuple[float, float] | None = None,
     ) -> None:
         self._counts: dict[int, int] = {cid: 0 for cid in client_ids}
+        # Round of each client's most recent selection (0 = never selected).
+        # Maintained for every mode; consumed by the fair_mab staleness term.
+        self._last_selected: dict[int, int] = {cid: 0 for cid in client_ids}
         self._epicentre = epicentre or DEFAULT_EPICENTRE
 
     def select(
@@ -141,9 +170,10 @@ class ClientSelector:
         uav_coords_latlon: list[tuple[float, float]],
         round_num: int,
         uav_capacity: int,
-        mode: str = "ucb",                              # "ucb" | "random" | "all"
+        mode: str = "ucb",       # "ucb" | "random" | "all" | "fedcs" | "rep_cap" | "fair_mab"
         rng: np.random.Generator | None = None,
         R_comm: float = DEFAULT_R_COMM_M,
+        t_stale_cap: int = DEFAULT_T_STALE_CAP,
     ) -> dict[int, int]:
         """Return {client_id: uav_idx} for the clients selected this round."""
         if mode == "all":
@@ -160,10 +190,33 @@ class ClientSelector:
             return {}
 
         if mode == "random":
-            return self._random_select(eligible, uav_capacity, round_num, rng=rng)
+            selected = self._random_select(eligible, uav_capacity, round_num, rng=rng)
+            return self._record_selection(selected, round_num)
+
+        eligible_ids = list(eligible.keys())
+
+        # ── Literature baselines (Algorithms B1-B3) ─────────────────────
+        if mode == "fedcs":
+            selected = self._fedcs_select(eligible, device_states, uav_capacity)
+            return self._record_selection(selected, round_num)
+
+        if mode in ("rep_cap", "fair_mab"):
+            if mode == "rep_cap":
+                scores = self._rep_cap_scores(eligible_ids, device_states, reputation_scores)
+            else:
+                scores = self._fair_mab_scores(
+                    eligible_ids, device_states, round_num, t_stale_cap
+                )
+            selected = self._greedy_assign(
+                eligible_ids, eligible, scores, uav_capacity,
+                client_coords, uav_coords_latlon, R_comm,
+            )
+            return self._record_selection(selected, round_num)
+
+        if mode != "ucb":
+            raise ValueError(f"unknown selection mode: {mode!r}")
 
         # ── UCB pipeline ────────────────────────────────────────────────
-        eligible_ids = list(eligible.keys())
 
         utility = _compute_utility(
             eligible_ids, device_states, client_coords, uav_coords_latlon,
@@ -186,14 +239,95 @@ class ClientSelector:
         sel_cnts = np.array([self._counts[cid] for cid in eligible_ids], dtype=float)
         ucb = priority + UCB_C * np.sqrt(math.log(t) / (sel_cnts + 1.0))
 
-        return self._greedy_assign(
+        selected = self._greedy_assign(
             eligible_ids, eligible, ucb, uav_capacity,
             client_coords, uav_coords_latlon, R_comm,
         )
+        return self._record_selection(selected, round_num)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _record_selection(self, selected: dict[int, int], round_num: int) -> dict[int, int]:
+        """Update last-selected bookkeeping (fair_mab staleness) and pass through."""
+        for cid in selected:
+            self._last_selected[cid] = round_num
+        return selected
+
+    def _fedcs_select(
+        self,
+        eligible: dict[int, int],
+        device_states: dict[int, DeviceState],
+        uav_capacity: int,
+    ) -> dict[int, int]:
+        """Baseline B1 — FedCS greedy deadline selection (Nishio & Yonetani 2019).
+
+        Per UAV, cheapest-first by predicted completion time T̂_n; a candidate
+        is added while the projected round time stays within T_max and the UAV
+        is under capacity. Purely time-driven: no reputation, no utility.
+        """
+        by_uav: dict[int, list[int]] = {}
+        for cid, uav in eligible.items():
+            by_uav.setdefault(uav, []).append(cid)
+
+        selected: dict[int, int] = {}
+        for uav, cids in by_uav.items():
+            cids.sort(key=lambda c: device_states[c].compute_time_s)
+            t_proj = 0.0
+            n_sel = 0
+            for cid in cids:
+                t_hat = device_states[cid].compute_time_s
+                t_inc = max(t_hat - t_proj, 0.0)
+                if t_proj + t_inc <= T_MAX_S and n_sel < uav_capacity:
+                    selected[cid] = uav
+                    t_proj = max(t_proj, t_hat)
+                    n_sel += 1
+                    self._counts[cid] += 1
+                else:
+                    break   # deadline would be exceeded; stop adding candidates
+            # (capacity full also stops the loop; ascending order makes any
+            #  later candidate at least as expensive — matches Algorithm B1)
+        return selected
+
+    def _rep_cap_scores(
+        self,
+        eligible_ids: list[int],
+        device_states: dict[int, DeviceState],
+        reputation_scores: dict[int, float],
+    ) -> np.ndarray:
+        """Baseline B2 — reputation-capability score (Zhao et al. 2024).
+
+        score_n = γ·R_n + (1−γ)·ℓ̃_n with ℓ̃_n = 1 − (T̂_n/T_max)². Reuses the
+        system's own reputation (Algorithm 3) so the selection rule — not the
+        reputation estimator — is the experimental variable. No exploration
+        term, no utility term (that omission is the point of the baseline).
+        """
+        reputations = np.array([reputation_scores.get(cid, 0.5) for cid in eligible_ids])
+        compute_s = np.array([device_states[cid].compute_time_s for cid in eligible_ids])
+        l_feat = np.clip(1.0 - (compute_s / T_MAX_S) ** 2, 0.0, 1.0)
+        return REPCAP_GAMMA * reputations + (1.0 - REPCAP_GAMMA) * l_feat
+
+    def _fair_mab_scores(
+        self,
+        eligible_ids: list[int],
+        device_states: dict[int, DeviceState],
+        round_num: int,
+        t_stale_cap: int,
+    ) -> np.ndarray:
+        """Baseline B3 — fairness/energy MAB reward (Zhu et al. 2024).
+
+        reward_n = w_energy·b_n + w_stale·min(1, staleness_n/T_stale_cap) with
+        staleness_n = rounds since last selection. No reputation, no utility —
+        the bandit explores over fairness/energy rather than data value.
+        """
+        batteries = np.array([device_states[cid].battery for cid in eligible_ids])
+        cap = max(t_stale_cap, 1)
+        staleness = np.array([
+            min(1.0, (round_num - self._last_selected.get(cid, 0)) / cap)
+            for cid in eligible_ids
+        ])
+        return FAIRMAB_W_ENERGY * batteries + FAIRMAB_W_STALE * staleness
 
     def _greedy_assign(
         self,

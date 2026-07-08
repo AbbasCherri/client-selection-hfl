@@ -1,15 +1,24 @@
 # Full paper system simulation — §V comparison (Table III + Figures 4-8).
 #
-# Runs 6 methods × 3 N-values × 3 seeds = 54 jobs on 12 parallel workers.
-# Estimated wall-clock: ~3-5 hours on n1-standard-12 (100 rounds, full dataset).
+# Runs 9 methods × 3 N-values × 3 seeds = 81 jobs on 12 parallel workers.
+# Estimated wall-clock: ~4-7 hours on n1-standard-12 (100 rounds, full dataset).
 #
-# Methods:
+# Methods (system + ablations):
 #   proposed_hfl      — PSO placement every T_sel=5 rounds (or λ_min trigger) + UCB selection + reputation FedAvg
 #   flat_fl           — no UAVs, all clients, server aggregates directly (FedAvg baseline [27])
 #   centralized       — oracle upper bound (all data at one node)
 #   hfl_no_selection  — random client selection ablation
 #   hfl_static        — no UAV repositioning ablation
 #   hfl_no_reputation — uniform (sample-weighted) aggregation ablation
+#
+# Literature baselines (Algorithms B1-B3, REPORTS/literature_baselines.md) —
+# same PSO placement / reputation FedAvg / T_sel cadence as proposed_hfl,
+# only the selection rule differs. Report these in a table separate from the
+# ablations above ("vs. literature" and "vs. our own ablations" answer
+# different questions):
+#   fedcs             — B1: FedCS greedy deadline selection (Nishio & Yonetani, ICC 2019)
+#   rep_cap           — B2: reputation-capability ranking (Zhao et al., Chin. J. Aeronaut. 2024)
+#   fair_mab          — B3: fairness/energy MAB selection (Zhu et al., Sensors 2024)
 #
 # Requires HF_TOKEN for the real dataset. Synthetic fallback not recommended
 # for paper results — use paper_full_synthetic.yaml for quick offline checks.
@@ -66,3 +75,6 @@ methods:
   - hfl_no_selection
   - hfl_static
   - hfl_no_reputation
+  - fedcs
+  - rep_cap
+  - fair_mab
