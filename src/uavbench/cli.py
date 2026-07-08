@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .fl.federated import run_full_hfl, run_tier2
+from .fl.selection_isolation import run_selection_sweep
 from .fl.sweep import run_paper_sweep, run_sweep
 from .plotting import _last_round, analyze_dir, plot_dir, plot_sweep, plot_tier2
 from .runner import load_config, run_experiment
@@ -159,6 +160,33 @@ def cmd_run_paper_sim(args: argparse.Namespace) -> None:
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
 
+def cmd_run_selection_sim(args: argparse.Namespace) -> None:
+    cfg = load_config(_find_config(args.config))
+    out = run_selection_sweep(cfg)
+    df = out["rounds"]
+
+    print("\n=== Selection isolation summary (final round, mean across seeds) ===")
+    cols = [c for c in ("accuracy", "macro_f1", "jain_fairness",
+                        "n_unique_selected", "K_uav") if c in df.columns]
+    summary = (
+        _last_round(df, ["method", "N", "seed"])
+        .groupby(["method", "N"])[cols]
+        .mean()
+        .reset_index()
+    )
+    with pd.option_context("display.max_rows", None, "display.width", 200):
+        print(summary.round(4).to_string(index=False))
+
+    try:
+        from .plotting import plot_selection_sim
+        figs = plot_selection_sim(out["results_dir"])
+        logger.info("%d selection-isolation figures written", len(figs))
+    except Exception as exc:
+        logger.warning("Selection-isolation plotting skipped: %s", exc)
+
+    print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
+
+
 def cmd_run_sweep(args: argparse.Namespace) -> None:
     cfg = load_config(_find_config(args.config))
     out = run_sweep(cfg)
@@ -215,6 +243,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ps.add_argument("--config", default="configs/paper_full.yaml")
     p_ps.set_defaults(func=cmd_run_paper_sim)
+
+    p_si = sub.add_parser(
+        "run_selection_sim",
+        help="Selection-isolation benchmark: selection rules head-to-head with static elbow K-means UAVs (N × mode × seed, parallel)",
+    )
+    p_si.add_argument("--config", default="configs/selection_isolation.yaml")
+    p_si.set_defaults(func=cmd_run_selection_sim)
 
     p_sw = sub.add_parser("run_sweep", help="N-scalability sweep (N=30..250, all methods, 8-core parallel)")
     p_sw.add_argument("--config", default="configs/tier2_sweep.yaml")

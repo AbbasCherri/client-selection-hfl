@@ -247,6 +247,15 @@ def _evaluate(
 
     subset = Subset(dataset, indices)
     loader = DataLoader(subset, batch_size=batch_size, shuffle=False)
+    return _evaluate_loader(model, loader)
+
+
+def _evaluate_loader(model: CachedFusionModel, loader: DataLoader) -> dict:
+    """Metric computation on a prebuilt (non-empty) test loader.
+
+    Split out of ``_evaluate`` so callers that evaluate every round can build
+    the loader once instead of re-wrapping the test subset per round.
+    """
     model.eval()
     all_preds, all_labels = [], []
     with torch.no_grad():

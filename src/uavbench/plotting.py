@@ -345,3 +345,129 @@ def plot_sweep(results_dir: Path) -> list[Path]:
         pass
 
     return paths
+
+
+def plot_selection_sim(results_dir: Path) -> list[Path]:
+    """Figures for the selection-isolation benchmark (selection_sweep_rounds.parquet).
+
+    Figures produced
+    ----------------
+    selection_accuracy_vs_rounds_N{N}.png — per-N accuracy curves (mean ± 95% CI)
+    selection_f1_vs_rounds_N{N}.png       — per-N macro-F1 curves (mean ± 95% CI)
+    selection_fairness_vs_rounds_N{N}.png — per-N Jain fairness index curves
+    selection_scalability.png             — final accuracy vs N (all modes)
+    selection_summary_table.png           — accuracy/F1/fairness heat-table at N_ref
+    """
+    p = results_dir if isinstance(results_dir, Path) else Path(results_dir)
+    df = _read_table(p / "selection_sweep_rounds.parquet")
+    paths: list[Path] = []
+
+    MODE_ORDER = ["ucb", "random", "fedcs", "rep_cap", "fair_mab", "all"]
+    MODE_LABELS = {
+        "ucb":      "Proposed (UCB)",
+        "random":   "Random",
+        "fedcs":    "FedCS (Nishio & Yonetani '19)",
+        "rep_cap":  "Rep-Capability (Zhao et al. '24)",
+        "fair_mab": "Fairness MAB (Zhu et al. '24)",
+        "all":      "All Covered",
+    }
+    COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#8c564b"]
+    MODE_COLOR = {m: COLORS[i % len(COLORS)] for i, m in enumerate(MODE_ORDER)}
+
+    if "seed" not in df.columns:
+        df = df.assign(seed=0)
+    N_values = sorted(df["N"].unique())
+
+    # ── Per-N curves: accuracy, macro-F1, Jain fairness ──────────────────
+    for metric, ylabel, suffix in [
+        ("accuracy", "Accuracy", "accuracy"),
+        ("macro_f1", "Macro F1", "f1"),
+        ("jain_fairness", "Jain Fairness Index", "fairness"),
+    ]:
+        if metric not in df.columns:
+            continue
+        for N in N_values:
+            sub = df[df["N"] == N]
+            fig, ax = plt.subplots(figsize=(7, 4.5))
+            for mode in [m for m in MODE_ORDER if m in sub["method"].unique()]:
+                m_df = sub[sub["method"] == mode]
+                pivot = m_df.pivot_table(index="round", columns="seed", values=metric)
+                pivot = pivot.ffill()
+                mean = pivot.mean(axis=1)
+                n_s  = pivot.count(axis=1).clip(lower=1)
+                ci   = 1.96 * pivot.std(axis=1, ddof=1).fillna(0) / np.sqrt(n_s)
+                color = MODE_COLOR.get(mode, None)
+                ax.plot(mean.index, mean.values, label=MODE_LABELS.get(mode, mode),
+                        linewidth=1.8, color=color)
+                ax.fill_between(mean.index, (mean - ci).values, (mean + ci).values,
+                                alpha=0.15, color=color)
+            ax.set_xlabel("FL Round")
+            ax.set_ylabel(ylabel)
+            K = int(sub["K_uav"].iloc[0]) if "K_uav" in sub.columns and len(sub) else 0
+            ax.set_title(f"{ylabel} vs Round  (N={N}, K={K} static UAVs)")
+            ax.legend(frameon=False, fontsize=8)
+            fig.tight_layout()
+            out = p / f"selection_{suffix}_vs_rounds_N{N}.png"
+            fig.savefig(out, dpi=150)
+            plt.close(fig)
+            paths.append(out)
+
+    # ── Scalability: final accuracy vs N ─────────────────────────────────
+    if "accuracy" in df.columns:
+        last = (
+            _last_round(df, ["N", "method", "seed"])
+            .groupby(["N", "method"])["accuracy"]
+            .agg(["mean", "std", "count"])
+            .reset_index()
+        )
+        last["ci95"] = 1.96 * last["std"] / np.sqrt(last["count"].clip(lower=1))
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for mode in [m for m in MODE_ORDER if m in last["method"].unique()]:
+            s = last[last["method"] == mode].sort_values("N")
+            ax.errorbar(s["N"], s["mean"], yerr=s["ci95"],
+                        label=MODE_LABELS.get(mode, mode), marker="o",
+                        linewidth=1.8, color=MODE_COLOR.get(mode, None),
+                        capsize=4, markersize=5)
+        ax.set_xlabel("Number of Clients (N)")
+        ax.set_ylabel("Final Accuracy (mean ± 95% CI)")
+        ax.set_title("Selection Isolation: Final Accuracy vs N (static UAVs)")
+        ax.legend(frameon=False, fontsize=8)
+        ax.set_xticks(N_values)
+        fig.tight_layout()
+        out = p / "selection_scalability.png"
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        paths.append(out)
+
+    # ── Summary heat-table at N_ref ──────────────────────────────────────
+    N_ref = max(N_values)
+    sub_ref = df[df["N"] == N_ref]
+    metrics_cols = [c for c in ("accuracy", "macro_f1", "jain_fairness") if c in df.columns]
+    if not sub_ref.empty and metrics_cols:
+        summary = (
+            _last_round(sub_ref, ["method", "seed"])
+            .groupby("method")[metrics_cols]
+            .mean()
+            .reindex([m for m in MODE_ORDER if m in sub_ref["method"].unique()])
+        )
+        fig, ax = plt.subplots(figsize=(7, 3.5))
+        data = summary.values
+        im = ax.imshow(data.T, aspect="auto", cmap="RdYlGn", vmin=0, vmax=1)
+        ax.set_xticks(range(len(summary.index)))
+        ax.set_xticklabels([MODE_LABELS.get(m, m) for m in summary.index],
+                           rotation=30, ha="right", fontsize=8)
+        ax.set_yticks(range(len(metrics_cols)))
+        ax.set_yticklabels(["Accuracy", "Macro F1", "Jain Fairness"][:len(metrics_cols)], fontsize=9)
+        for i in range(data.shape[0]):
+            for j in range(data.shape[1]):
+                ax.text(i, j, f"{data[i, j]:.3f}", ha="center", va="center",
+                        fontsize=9, color="black")
+        plt.colorbar(im, ax=ax, label="Score")
+        ax.set_title(f"Selection Rules: Final Metrics  (N={N_ref})", fontsize=10)
+        fig.tight_layout()
+        out = p / "selection_summary_table.png"
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        paths.append(out)
+
+    return paths
