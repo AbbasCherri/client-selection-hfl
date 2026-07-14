@@ -8,9 +8,7 @@ These tests verify that property.
 
 import hashlib
 import tempfile
-from pathlib import Path
 
-import numpy as np
 import pytest
 
 

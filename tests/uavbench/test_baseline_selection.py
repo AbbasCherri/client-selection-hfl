@@ -9,19 +9,16 @@ Covers the three baselines from REPORTS/literature_baselines.md:
 import tempfile
 from collections import Counter
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from uavbench.fl.client_selection import (
-    DEFAULT_EPICENTRE,
     FAIRMAB_W_ENERGY,
     FAIRMAB_W_STALE,
     REPCAP_GAMMA,
     ClientSelector,
 )
 from uavbench.fl.device_state import T_MAX_S, DeviceState
-
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 

@@ -5,7 +5,6 @@ import pytest
 
 from hflsim.shared.value import beta_schedule, compute_utility, compute_value
 
-
 # ── beta_schedule ──────────────────────────────────────────────────────────────
 
 class TestBetaSchedule:

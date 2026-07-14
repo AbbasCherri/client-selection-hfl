@@ -219,7 +219,6 @@ class TestUavImageTraining:
     def test_proposed_hfl_img_proj_changes_from_init(self):
         """After one round of proposed_hfl, img_proj weights must differ from random init."""
         from uavbench.fl.federated import run_full_hfl
-        import torch
 
         with tempfile.TemporaryDirectory() as d:
             cfg = _minimal_cfg(d, ["proposed_hfl"], n_rounds=1)
@@ -234,10 +233,9 @@ class TestUavImageTraining:
 
     def test_uav_local_train_modifies_img_proj(self):
         """_uav_local_train on a fresh model must update img_proj weights."""
+        from uavbench.fl.dataset import CachedDataset, SyntheticClientData, make_client_loader
         from uavbench.fl.federated import _uav_local_train
         from uavbench.fl.model import CachedFusionModel
-        from uavbench.fl.dataset import SyntheticClientData, CachedDataset, make_client_loader
-        import torch
 
         data = SyntheticClientData(N=40, K=2, seed=1).build()
         base_ds = data["full_dataset"]

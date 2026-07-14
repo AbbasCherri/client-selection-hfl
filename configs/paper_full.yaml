@@ -68,6 +68,22 @@ N_values:
   - 50
   - 100
 
+# Placement literature baselines (path-loss coverage radius, see
+# uavbench/problem/path_loss.py). The link budget is calibrated to the
+# deployment scale: 145 dB at 2 GHz gives a coverage radius on the order of
+# the 20 km R_comm used by every other method at Noto Peninsula scale, so
+# the placement *rule* — not an arbitrarily tighter radio — is what's
+# compared. State this calibration explicitly in the paper.
+optimizer_params:
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+
 methods:
   - proposed_hfl
   - flat_fl
@@ -78,3 +94,5 @@ methods:
   - fedcs
   - rep_cap
   - fair_mab
+  - mozaffari2016
+  - alzenad2017

@@ -52,9 +52,11 @@ from hflsim.shared.coords import latlon_to_meters
 from .client_selection import ClientSelector
 from .dataset import CachedDataset, ClientData, make_client_loader
 from .device_state import DeviceStateManager
+from .fairness import jain_index
 from .federated import (
     _IOT_MODEL_SIZE_MB,
     _UAV_MODEL_SIZE_MB,
+    _confusion_rows,
     _covered_clients,
     _evaluate_loader,
     _load_data,
@@ -65,6 +67,7 @@ from .federated import (
 )
 from .model import CachedFusionModel, fedavg, reputation_fedavg
 from .reputation import ReputationManager, trimmed_mean
+from .seeds import sweep_job_seed
 
 logger = logging.getLogger("uavbench.fl.selection_isolation")
 
@@ -140,12 +143,9 @@ def static_uav_layout(
     return K, uav_latlon, covered
 
 
-def _jain_index(counts: np.ndarray) -> float:
-    """Jain's fairness index over cumulative selection counts (1 = perfectly fair)."""
-    total = counts.sum()
-    if total <= 0:
-        return 1.0
-    return float(total ** 2 / (len(counts) * (counts ** 2).sum()))
+# Jain's index lives in fairness.py so run_tier2/run_full_hfl report the
+# same metric; the private alias keeps this module's historical import path.
+_jain_index = jain_index
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +235,7 @@ def run_selection_isolation(cfg: dict) -> dict:
     client_by_id = {c.client_id: c for c in clients}
 
     all_rows: list[dict] = []
+    confusion_rows: list[dict] = []
 
     # ── 4. Per-mode runs — identical seed, identical everything but the rule ─
     for mode in modes:
@@ -246,7 +247,11 @@ def run_selection_isolation(cfg: dict) -> dict:
         global_model = CachedFusionModel()
         global_model.freeze_img_proj()
 
-        device_mgr = DeviceStateManager(client_ids, rng)
+        device_mgr = DeviceStateManager(
+            client_ids, rng,
+            dropout_rate=fl.get("dropout_rate", 0.0),
+            snr_degradation_db=fl.get("snr_degradation_db", 0.0),
+        )
         rep_mgr    = ReputationManager(client_ids)
         selector   = ClientSelector(client_ids, epicentre=epicentre)
 
@@ -384,7 +389,12 @@ def run_selection_isolation(cfg: dict) -> dict:
             if test_loader is not None:
                 metrics = _evaluate_loader(global_model, test_loader)
             else:
-                metrics = {"accuracy": 0.0, "macro_f1": 0.0, "f1_per_class": {}}
+                metrics = {
+                    "accuracy": 0.0,
+                    "macro_f1": 0.0,
+                    "f1_per_class": {},
+                    "confusion_matrix": np.zeros((4, 4), dtype=int),
+                }
             elapsed = time.perf_counter() - t0
 
             if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
@@ -412,6 +422,7 @@ def run_selection_isolation(cfg: dict) -> dict:
                 "round_time_s":       elapsed,
                 **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
             })
+            confusion_rows.extend(_confusion_rows(mode, rnd, metrics["confusion_matrix"]))
             if rnd % 10 == 0 or rnd == n_rounds:
                 logger.info(
                     "[%s] round %d/%d | acc=%.3f | F1=%.3f | sel=%d | jain=%.3f | %.1fs",
@@ -431,6 +442,7 @@ def run_selection_isolation(cfg: dict) -> dict:
     # ── 5. Persist ───────────────────────────────────────────────────────────
     rounds_df = pd.DataFrame(all_rows)
     _write_table(rounds_df, results_dir / "selection_rounds.parquet")
+    _write_table(pd.DataFrame(confusion_rows), results_dir / "confusion.parquet")
 
     with open(results_dir / "config.selection.resolved.yaml", "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
@@ -456,7 +468,7 @@ def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # must share model init, device heterogeneity, and the static UAV layout,
     # so the selection rule is the only cross-mode difference. (Contrast with
     # sweep._paper_job, where run_full_hfl folds in a method hash.)
-    job_cfg["fl"]["seed"] = cfg.get("optimizer_seed", 9876) + seed_idx * 7919 + N * 31
+    job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
     job_cfg["results_dir"] = str(Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / mode)
     if job_cfg["data"].get("source", "synthetic") == "real":
         job_cfg["data"]["feature_cache_path"] = str(

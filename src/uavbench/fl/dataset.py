@@ -103,11 +103,20 @@ class SyntheticClientData:
 
     Generates N building samples across K clients in the Noto Peninsula coordinate
     range, with balanced-ish damage labels and random seismic features.
+
+    ``black_chip_rate`` zeroes out that fraction of image-feature rows — an
+    artificial proxy for the real pipeline's GSI-fetch-failure black chips
+    (synthetic mode never touches the image pipeline, so this simulates the
+    *effect* of N% unusable chips, not the failure mechanism itself; state
+    this modeling choice explicitly in the paper). Drawn from a dedicated
+    RNG stream so the client partition is identical across rates — the
+    stress sweep varies image quality in isolation.
     """
 
     N: int
     K: int
     seed: int = 42
+    black_chip_rate: float = 0.0
 
     def build(self) -> dict:
         """Return the same dict shape as the real data pipeline produces."""
@@ -129,6 +138,11 @@ class SyntheticClientData:
 
         # Pre-generated image features (skip full ResNet pass for synthetic mode).
         img_features = rng.standard_normal((N, 512)).astype(np.float32)
+        if self.black_chip_rate > 0:
+            n_black = int(round(N * self.black_chip_rate))
+            chip_rng = np.random.default_rng(self.seed + 977)  # separate stream: partition unchanged
+            black_idx = chip_rng.choice(N, size=n_black, replace=False)
+            img_features[black_idx] = 0.0
 
         # Simple even client partition.
         client_coords: dict[int, tuple[float, float]] = {}

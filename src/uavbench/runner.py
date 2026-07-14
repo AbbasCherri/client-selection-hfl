@@ -18,7 +18,7 @@ import yaml
 from joblib import Parallel, delayed
 
 from .metrics.placement import compute_metrics
-from .optimizers import REGISTRY
+from .optimizers import build_optimizer
 from .problem.energy import EnergyModel
 from .problem.fitness import Fitness
 from .problem.instance import generate_instance
@@ -35,25 +35,31 @@ def load_config(path: str | Path) -> dict:
 def _build_optimizer(method: str, budget: dict, method_params: dict | None = None):
     """Instantiate an optimizer with the shared evaluation budget.
 
-    ``method_params`` carries any additional keyword arguments from the
-    ``optimizer_params.<method>`` section of the config YAML, allowing ablation
-    studies to be driven entirely by config changes rather than code edits.
-    Budget keys ``P`` and ``G_max`` always take precedence over ``method_params``.
+    Thin wrapper kept for backward compatibility; the shared construction
+    logic (including the budget-precedence rule) lives in
+    :func:`uavbench.optimizers.build_optimizer`.
     """
-    cls = REGISTRY[method]
-    params: dict = dict(method_params or {})
-    if method in ("pso", "ga"):
-        params.update(P=budget["P"], G_max=budget["G_max"])
-    return cls(**params)
+    return build_optimizer(method, params=method_params, budget=budget)
+
+
+# Stream tags disambiguate the two seed families structurally. Without them,
+# SeedSequence's trailing-zero equivalence ([b, s, i] == [b, s, i, 0]) lets an
+# optimizer stream with seed_i=0 collide with an instance stream whenever a
+# config sets instance_seed == optimizer_seed (verified by
+# tests/uavbench/test_invariants.py::TestSeedStreamDisjointness).
+_INSTANCE_STREAM = 0
+_OPTIMIZER_STREAM = 1
 
 
 def _instance_seed(base: int, scenario_idx: int, seed_i: int) -> int:
-    ss = np.random.SeedSequence([base, scenario_idx, seed_i])
+    ss = np.random.SeedSequence([base, _INSTANCE_STREAM, scenario_idx, seed_i])
     return int(ss.generate_state(1)[0])
 
 
 def _optimizer_rng(base: int, method_idx: int, scenario_idx: int, seed_i: int) -> np.random.Generator:
-    return np.random.default_rng(np.random.SeedSequence([base, method_idx, scenario_idx, seed_i]))
+    return np.random.default_rng(
+        np.random.SeedSequence([base, _OPTIMIZER_STREAM, method_idx, scenario_idx, seed_i])
+    )
 
 
 def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i: int) -> dict:
@@ -87,7 +93,7 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
 
     metrics = compute_metrics(
         instance, result, fitness_weights=fw, energy_model=EnergyModel(),
-        G_max=cfg["budget"]["G_max"],
+        G_max=cfg["budget"]["G_max"], radii=result.meta.get("radii"),
     )
     metrics.update(
         scenario=f"{scenario['distribution']}_N{scenario['N']}_K{scenario['K']}",

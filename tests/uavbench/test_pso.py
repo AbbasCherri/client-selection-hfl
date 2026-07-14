@@ -18,6 +18,14 @@ def test_constriction_factor_value():
     assert constriction_factor(4.1) == pytest.approx(0.7298, abs=1e-3)
 
 
+def test_constriction_factor_rejects_phi_at_most_4():
+    # The documented validity gate: phi <= 4 makes the discriminant
+    # non-positive (Clerc & Kennedy 2002).
+    for phi in (4.0, 3.55, 0.0, -1.0):
+        with pytest.raises(ValueError, match="phi must be > 4"):
+            constriction_factor(phi)
+
+
 def test_gbest_monotonic_nondecreasing():
     inst = _instance()
     fit = Fitness(inst)

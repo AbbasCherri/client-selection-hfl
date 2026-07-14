@@ -1,12 +1,10 @@
 """Tests for haversine and latlon_to_meters (hflsim/shared/coords.py)."""
 
-import math
 
 import numpy as np
 import pytest
 
 from hflsim.shared.coords import haversine, latlon_to_meters
-
 
 # ── haversine ─────────────────────────────────────────────────────────────────
 

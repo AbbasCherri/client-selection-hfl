@@ -64,17 +64,20 @@ def compute_metrics(
     fitness_weights: tuple[float, float, float] = (0.6, 0.3, 0.1),
     energy_model: EnergyModel | None = None,
     G_max: int | None = None,
+    radii: np.ndarray | None = None,
 ) -> dict:
     """Return a flat dict of Tier-1 metrics for one optimizer run.
 
     Re-evaluates the returned best position once (on a *fresh* Fitness so the
     run's eval budget is untouched) to recover the coverage / movement / balance
-    breakdown and the operational quantities.
+    breakdown and the operational quantities. ``radii`` carries a per-UAV
+    communication radius for methods that derive it from altitude (taken from
+    ``result.meta["radii"]`` by the runner); ``None`` uses ``instance.R_comm``.
     """
     energy_model = energy_model or EnergyModel()
     w1, w2, w3 = fitness_weights
     scorer = Fitness(instance, w1, w2, w3)
-    b = scorer.components(result.best_position)
+    b = scorer.components(result.best_position, radii=radii)
 
     joules, batt_frac = (
         energy_model.energy_joules(b.d_move),

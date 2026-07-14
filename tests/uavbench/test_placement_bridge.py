@@ -6,7 +6,6 @@ import math
 import numpy as np
 import pytest
 
-from hflsim.shared.coords import haversine
 from uavbench.fl.federated import (
     _build_problem_instance,
     _covered_clients,
@@ -187,7 +186,7 @@ class TestPlaceUavs:
     def test_returns_correct_shapes(self):
         coords = _noto_coords(10)
         rng = np.random.default_rng(0)
-        uav_pos_m, ref, fitness = _place_uavs(
+        uav_pos_m, ref, fitness, radii = _place_uavs(
             client_coords=coords,
             K=3,
             R_comm=10_000,
@@ -200,11 +199,13 @@ class TestPlaceUavs:
         )
         assert uav_pos_m.shape == (3, 3)
         assert len(ref) == 2
+        # Classic methods use the shared scalar R_comm, not per-UAV radii.
+        assert radii is None
 
     def test_fitness_is_finite(self):
         coords = _noto_coords(10)
         rng = np.random.default_rng(0)
-        _, _, fitness = _place_uavs(
+        _, _, fitness, _ = _place_uavs(
             client_coords=coords,
             K=2,
             R_comm=10_000,
@@ -220,7 +221,7 @@ class TestPlaceUavs:
     def test_uav_z_in_altitude_bounds(self):
         coords = _noto_coords(8)
         rng = np.random.default_rng(1)
-        uav_pos_m, _, _ = _place_uavs(
+        uav_pos_m, _, _, _ = _place_uavs(
             client_coords=coords,
             K=2,
             R_comm=10_000,
@@ -238,7 +239,7 @@ class TestPlaceUavs:
     def test_ga_smoketest(self):
         coords = _noto_coords(6)
         rng = np.random.default_rng(2)
-        uav_pos_m, ref, fitness = _place_uavs(
+        uav_pos_m, ref, fitness, _ = _place_uavs(
             client_coords=coords,
             K=2,
             R_comm=20_000,

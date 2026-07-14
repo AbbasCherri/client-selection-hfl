@@ -40,7 +40,7 @@ import numpy as np
 from hflsim.shared.coords import haversine
 from hflsim.shared.value import beta_schedule
 
-from .device_state import DeviceState, T_MAX_S
+from .device_state import T_MAX_S, DeviceState
 
 # Paper §IV-C priority weights
 W_BATTERY  = 0.35

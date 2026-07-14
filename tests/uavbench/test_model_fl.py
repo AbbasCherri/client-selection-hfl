@@ -1,18 +1,13 @@
-"""Tests for CachedFusionModel, fedavg, reputation_fedavg, and mixed aggregation (model.py)."""
+"""Tests for CachedFusionModel, fedavg, and reputation_fedavg (model.py)."""
 
-import numpy as np
-import pytest
 import torch
 
 from uavbench.fl.model import (
     CachedFusionModel,
     clone_model,
     fedavg,
-    mixed_fedavg,
-    mixed_reputation_fedavg,
     reputation_fedavg,
 )
-
 
 # ── CachedFusionModel ─────────────────────────────────────────────────────────
 
@@ -81,6 +76,7 @@ class TestCachedFusionModel:
         # Verify they differ after independent init
         sd1 = m1.trainable_state_dict()
         sd2 = m2.trainable_state_dict()
+        assert any(not torch.allclose(sd1[k], sd2[k]) for k in sd1)
         # Load m1's weights into m2
         m2.load_trainable_state_dict(sd1)
         sd2_after = m2.trainable_state_dict()
@@ -204,110 +200,6 @@ class TestFullTrainableStateDict:
         with torch.no_grad():
             actual = list(m.img_proj.parameters())[0]
             assert not torch.all(actual == 999.0)
-
-
-# ── mixed_fedavg ──────────────────────────────────────────────────────────────
-
-class TestMixedFedAvg:
-    def _uav_sd(self, val_img: float, val_struct: float) -> dict:
-        return {
-            "img_proj.w": torch.full((2,), val_img),
-            "struct_branch.w": torch.full((2,), val_struct),
-            "fusion.w": torch.full((2,), val_struct),
-        }
-
-    def _iot_sd(self, val: float) -> dict:
-        return {
-            "struct_branch.w": torch.full((2,), val),
-            "fusion.w": torch.full((2,), val),
-        }
-
-    def test_img_proj_from_uav_only(self):
-        uav_sd = self._uav_sd(7.0, 1.0)
-        iot_sd = self._iot_sd(0.0)
-        result = mixed_fedavg((uav_sd, 10), [(iot_sd, 10)])
-        assert torch.allclose(result["img_proj.w"], torch.full((2,), 7.0))
-
-    def test_struct_fusion_is_weighted_average(self):
-        uav_sd = self._uav_sd(0.0, 0.0)
-        iot_sd = self._iot_sd(10.0)
-        # UAV n=0, IoT n=10 → struct should be 10.0
-        result = mixed_fedavg((uav_sd, 0), [(iot_sd, 10)])
-        assert torch.allclose(result["struct_branch.w"], torch.full((2,), 10.0))
-
-    def test_uav_and_iot_equal_weight(self):
-        uav_sd = self._uav_sd(5.0, 0.0)
-        iot_sd = self._iot_sd(10.0)
-        # UAV n=1, IoT n=1 → struct = 0.5*0 + 0.5*10 = 5.0
-        result = mixed_fedavg((uav_sd, 1), [(iot_sd, 1)])
-        assert torch.allclose(result["struct_branch.w"], torch.full((2,), 5.0))
-
-    def test_zero_total_returns_uav_sd(self):
-        uav_sd = self._uav_sd(3.0, 3.0)
-        result = mixed_fedavg((uav_sd, 0), [])
-        assert torch.allclose(result["img_proj.w"], torch.full((2,), 3.0))
-
-    def test_multiple_iot_clients(self):
-        uav_sd = self._uav_sd(0.0, 6.0)
-        iot1 = self._iot_sd(0.0)
-        iot2 = self._iot_sd(12.0)
-        # UAV n=1, IoT1 n=1, IoT2 n=1 → total=3
-        # struct: (1/3)*6 + (1/3)*0 + (1/3)*12 = 6.0
-        result = mixed_fedavg((uav_sd, 1), [(iot1, 1), (iot2, 1)])
-        assert torch.allclose(result["struct_branch.w"], torch.full((2,), 6.0), atol=1e-5)
-
-
-# ── mixed_reputation_fedavg ───────────────────────────────────────────────────
-
-class TestMixedReputationFedAvg:
-    def _uav_sd(self, val_img: float, val_struct: float) -> dict:
-        return {
-            "img_proj.w": torch.full((2,), val_img),
-            "struct_branch.w": torch.full((2,), val_struct),
-            "fusion.w": torch.full((2,), val_struct),
-        }
-
-    def _iot_sd(self, val: float) -> dict:
-        return {
-            "struct_branch.w": torch.full((2,), val),
-            "fusion.w": torch.full((2,), val),
-        }
-
-    def test_img_proj_always_from_uav(self):
-        uav_sd = self._uav_sd(9.0, 0.0)
-        iot_sd = self._iot_sd(0.0)
-        result = mixed_reputation_fedavg((uav_sd, 10, 1.0), [(iot_sd, 10, 0.5)])
-        assert torch.allclose(result["img_proj.w"], torch.full((2,), 9.0))
-
-    def test_high_iot_reputation_dominates_struct(self):
-        uav_sd = self._uav_sd(0.0, 0.0)
-        iot_sd = self._iot_sd(10.0)
-        # UAV rep=0.0 means w_uav=0; IoT rep=1.0, n=10 → struct should be 10.0
-        result = mixed_reputation_fedavg((uav_sd, 10, 0.0), [(iot_sd, 10, 1.0)])
-        assert torch.allclose(result["struct_branch.w"], torch.full((2,), 10.0), atol=1e-5)
-
-    def test_zero_all_weights_falls_back_to_mixed_fedavg(self):
-        uav_sd = self._uav_sd(5.0, 5.0)
-        iot_sd = self._iot_sd(5.0)
-        # All reps 0, all n=0 → fallback; result should still have img_proj from UAV
-        result = mixed_reputation_fedavg((uav_sd, 0, 0.0), [(iot_sd, 0, 0.0)])
-        assert "img_proj.w" in result
-
-    def test_negative_reputation_clipped_to_zero(self):
-        uav_sd = self._uav_sd(0.0, 0.0)
-        iot_sd = self._iot_sd(10.0)
-        # UAV rep=-1.0 → clipped to 0; IoT gets full weight
-        result = mixed_reputation_fedavg((uav_sd, 1, -1.0), [(iot_sd, 1, 1.0)])
-        # struct should be close to 10.0 (uav struct ignored due to rep=0)
-        assert float(result["struct_branch.w"][0]) > 5.0
-
-    def test_result_has_all_expected_keys(self):
-        uav_sd = self._uav_sd(1.0, 1.0)
-        iot_sd = self._iot_sd(1.0)
-        result = mixed_reputation_fedavg((uav_sd, 1, 1.0), [(iot_sd, 1, 1.0)])
-        assert "img_proj.w" in result
-        assert "struct_branch.w" in result
-        assert "fusion.w" in result
 
 
 # ── fedavg ────────────────────────────────────────────────────────────────────

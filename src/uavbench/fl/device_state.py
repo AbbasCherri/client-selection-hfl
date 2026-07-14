@@ -52,11 +52,31 @@ class DeviceStateManager:
 
     Initial conditions are drawn once at construction; per-round noise is
     applied via ``update_round(selected_ids)`` at the end of each FL round.
+
+    Stress-test knobs (both default to 0.0 = exact historical behaviour):
+
+    ``dropout_rate``
+        Per-``get_state``-call probability of forcing ``memory_ok=False``,
+        modelling transient connectivity loss through the existing
+        four-condition eligibility gate rather than a fifth dimension.
+        Callers snapshot states once per round via ``get_all_states``, so
+        this reads as an i.i.d. per-(device, round) dropout draw.
+    ``snr_degradation_db``
+        Uniform dB subtraction from every device's SNR — an area-wide
+        aftershock-triggered channel degradation, not a per-device effect.
     """
 
-    def __init__(self, client_ids: list[int], rng: np.random.Generator) -> None:
+    def __init__(
+        self,
+        client_ids: list[int],
+        rng: np.random.Generator,
+        dropout_rate: float = 0.0,
+        snr_degradation_db: float = 0.0,
+    ) -> None:
         self._ids = list(client_ids)
         self._rng = rng
+        self._dropout_rate = float(dropout_rate)
+        self._snr_degradation_db = float(snr_degradation_db)
 
         # Initial batteries: uniform [0.5, 1.0]
         self._battery: dict[int, float] = {
@@ -103,10 +123,13 @@ class DeviceStateManager:
     def get_state(self, client_id: int) -> DeviceState:
         history = self._compute_history.get(client_id, [])
         margin = 1.96 * float(np.std(history)) if len(history) >= 3 else 0.0
+        memory_ok = self._memory_ok[client_id]
+        if self._dropout_rate > 0 and self._rng.random() < self._dropout_rate:
+            memory_ok = False  # transient dropout via the existing gate
         return DeviceState(
             battery=self._battery[client_id],
-            snr_db=self._snr_base[client_id] + self._snr_noise[client_id],
-            memory_ok=self._memory_ok[client_id],
+            snr_db=self._snr_base[client_id] + self._snr_noise[client_id] - self._snr_degradation_db,
+            memory_ok=memory_ok,
             compute_time_s=max(10.0, self._compute_base[client_id] + self._compute_noise[client_id]),
             margin_s=margin,
         )

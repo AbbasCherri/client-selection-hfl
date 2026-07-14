@@ -1,7 +1,6 @@
 """Tests for DeviceState and DeviceStateManager (device_state.py)."""
 
 import numpy as np
-import pytest
 
 from uavbench.fl.device_state import (
     B_MIN,
@@ -10,7 +9,6 @@ from uavbench.fl.device_state import (
     DeviceState,
     DeviceStateManager,
 )
-
 
 # ── DeviceState.eligible() ────────────────────────────────────────────────────
 

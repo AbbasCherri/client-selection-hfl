@@ -63,13 +63,18 @@ class Fitness:
         self.l_max = max(float(instance.N) ** 2, _EPS)
         self.eval_count = 0
 
-    def components(self, x: np.ndarray) -> FitnessBreakdown:
-        """Evaluate a candidate and return the full breakdown (counts one eval)."""
+    def components(self, x: np.ndarray, radii: np.ndarray | None = None) -> FitnessBreakdown:
+        """Evaluate a candidate and return the full breakdown (counts one eval).
+
+        ``radii`` optionally supplies a per-position ``(K,)`` communication
+        radius overriding the scalar ``instance.R_comm`` (see
+        :func:`greedy_assignment`).
+        """
         self.eval_count += 1
         inst = self.instance
         positions = inst.positions_from_vector(x)
 
-        res = greedy_assignment(inst, positions)
+        res = greedy_assignment(inst, positions, radii=radii)
 
         d_move = float(
             np.sum(np.sqrt(np.sum((positions - inst.prev_positions) ** 2, axis=1)))
@@ -97,13 +102,18 @@ class Fitness:
             assignment=res,
         )
 
-    def __call__(self, x: np.ndarray) -> float:
+    def __call__(self, x: np.ndarray, radii: np.ndarray | None = None) -> float:
         """Return the scalar fitness of candidate ``x`` (counts one evaluation)."""
-        return self.components(x).fitness
+        return self.components(x, radii=radii).fitness
 
 
 def fitness_components(
-    instance: ProblemInstance, x: np.ndarray, w1: float = 0.6, w2: float = 0.3, w3: float = 0.1
+    instance: ProblemInstance,
+    x: np.ndarray,
+    w1: float = 0.6,
+    w2: float = 0.3,
+    w3: float = 0.1,
+    radii: np.ndarray | None = None,
 ) -> FitnessBreakdown:
     """Convenience one-shot breakdown without persisting an eval counter."""
-    return Fitness(instance, w1, w2, w3).components(x)
+    return Fitness(instance, w1, w2, w3).components(x, radii=radii)

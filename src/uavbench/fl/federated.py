@@ -23,7 +23,6 @@ regenerable from saved files via the ``analyze`` CLI command.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import math
 import time
@@ -35,29 +34,33 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import yaml
-from sklearn.metrics import f1_score
+from sklearn.metrics import confusion_matrix, f1_score
 from torch.utils.data import DataLoader, Subset
 
 from hflsim.shared.coords import haversine, latlon_to_meters
 from hflsim.shared.value import compute_value
-from uavbench.optimizers import REGISTRY
+from uavbench.optimizers import build_optimizer
 from uavbench.problem.energy import EnergyModel
 from uavbench.problem.fitness import Fitness
 from uavbench.problem.instance import ProblemInstance
 
-_ENERGY_MODEL = EnergyModel()
-
 from .client_selection import ClientSelector
 from .dataset import CachedDataset, ClientData, SyntheticClientData, make_client_loader
 from .device_state import DeviceStateManager
-from .features import compute_feature_cache, synthetic_feature_cache
+from .fairness import jain_index
+from .features import compute_feature_cache
 from .model import (
-    CachedFusionModel, clone_model,
-    fedavg, reputation_fedavg,
+    CachedFusionModel,
+    clone_model,
+    fedavg,
+    reputation_fedavg,
 )
 from .reputation import ReputationManager, trimmed_mean
+from .seeds import fullsim_method_seed, tier2_seed
 
 logger = logging.getLogger("uavbench.fl.federated")
+
+_ENERGY_MODEL = EnergyModel()
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +121,8 @@ def _place_uavs(
     G_max: int,
     prev_positions_m: np.ndarray | None,
     value: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, float]:
+    method_params: dict | None = None,
+) -> tuple[np.ndarray, np.ndarray, float, np.ndarray | None]:
     """Run a placement optimizer and return UAV positions in metres.
 
     Returns
@@ -126,18 +130,22 @@ def _place_uavs(
     uav_positions_m : (K, 3) metres in the projected frame
     ref             : (lat0, lon0) reference for back-projection
     best_fitness    : placement fitness score
+    radii           : (K,) per-UAV communication radii in metres, or None for
+                      methods using the shared scalar R_comm (set by
+                      path-loss-based optimizers via ``result.meta["radii"]``)
     """
     instance, ref = _build_problem_instance(
         client_coords, K, R_comm, capacity, prev_positions_m, value=value
     )
     fitness = Fitness(instance)
 
-    cls = REGISTRY[method]
-    optimizer = cls(P=P, G_max=G_max) if method in ("pso", "ga") else cls()
+    optimizer = build_optimizer(
+        method, params=method_params, budget={"P": P, "G_max": G_max}
+    )
     result = optimizer.optimize(instance, fitness, rng)
 
     uav_pos = result.best_position.reshape(K, 3)
-    return uav_pos, np.array(ref), result.best_fitness
+    return uav_pos, np.array(ref), result.best_fitness, result.meta.get("radii")
 
 
 def _covered_clients(
@@ -145,11 +153,13 @@ def _covered_clients(
     uav_pos_m: np.ndarray,
     ref: np.ndarray,
     R_comm: float,
+    radii: np.ndarray | None = None,
 ) -> dict[int, int]:
     """Return {client_id: assigned_uav_idx} for clients within R_comm of any UAV.
 
     Converts UAV metre positions back to (lat, lon) for Haversine range check.
-    Assigns each covered client to its nearest UAV.
+    Assigns each covered client to its nearest UAV. ``radii`` optionally
+    supplies a per-UAV ``(K,)`` range (metres) overriding the scalar R_comm.
     """
     lat0, lon0 = float(ref[0]), float(ref[1])
     lat0_rad = math.radians(lat0)
@@ -165,7 +175,8 @@ def _covered_clients(
     for cid, coord in client_coords.items():
         dists = [haversine(coord, ul) for ul in uav_latlon]
         nearest = int(np.argmin(dists))
-        if dists[nearest] <= R_comm:
+        limit = float(radii[nearest]) if radii is not None else R_comm
+        if dists[nearest] <= limit:
             assignment[cid] = nearest
     return assignment
 
@@ -243,7 +254,12 @@ def _evaluate(
 ) -> dict:
     """Compute global accuracy, per-class F1, and macro-F1 on the test set."""
     if not indices:
-        return {"accuracy": 0.0, "macro_f1": 0.0, "f1_per_class": {}}
+        return {
+            "accuracy": 0.0,
+            "macro_f1": 0.0,
+            "f1_per_class": {},
+            "confusion_matrix": np.zeros((4, 4), dtype=int),
+        }
 
     subset = Subset(dataset, indices)
     loader = DataLoader(subset, batch_size=batch_size, shuffle=False)
@@ -274,7 +290,52 @@ def _evaluate_loader(model: CachedFusionModel, loader: DataLoader) -> dict:
         "accuracy": acc,
         "macro_f1": macro_f1,
         "f1_per_class": dict(zip(class_names, per_class.tolist())),
+        "confusion_matrix": confusion_matrix(labels, preds, labels=[0, 1, 2, 3]),
     }
+
+
+# Damage classes in label order 0-3 (shared by confusion reporting/plots).
+CLASS_NAMES = ["survived", "collapsed", "obstructed", "missing"]
+
+
+def _confusion_rows(method: str, rnd: int, cm: np.ndarray) -> list[dict]:
+    """Flatten a (4,4) confusion matrix into long-form rows for parquet.
+
+    The 4x4 matrix doesn't belong in the flat per-round row; long form keeps
+    the rounds table schema stable and the matrix queryable per (method, round).
+    """
+    return [
+        {
+            "method": method,
+            "round": rnd,
+            "true_label": CLASS_NAMES[t],
+            "pred_label": CLASS_NAMES[p],
+            "count": int(cm[t, p]),
+        }
+        for t in range(4)
+        for p in range(4)
+    ]
+
+
+def _report_black_chip_rate(full_dataset, cfg: dict) -> None:
+    """Log and persist the real-data black-chip rate diagnostic.
+
+    A black chip (GSI tile fetch failure) carries zero image signal; a high
+    rate silently degrades accuracy toward majority-class collapse, so the
+    measured rate is stored under ``cfg["_diagnostics"]`` — which the harness
+    already dumps to its resolved-config YAML — as auditable evidence that
+    the image modality was informative. The counters accumulate during the
+    feature-cache build (the only phase that loads images), so call this
+    after ``compute_feature_cache``. No-op for datasets without the counter
+    (synthetic mode).
+    """
+    rate_fn = getattr(full_dataset, "black_chip_rate", None)
+    if rate_fn is None:
+        return
+    rate = float(rate_fn())
+    level = logging.WARNING if rate > 0.5 else logging.INFO
+    logger.log(level, "Black-chip rate: %.1f%% of image loads", 100.0 * rate)
+    cfg.setdefault("_diagnostics", {})["black_chip_rate"] = rate
 
 
 def _write_table(df: pd.DataFrame, path: Path) -> None:
@@ -314,6 +375,10 @@ def run_tier2(cfg: dict) -> dict:
     T_sel: int = cfg["fl"].get("T_sel", 5)
     P: int = cfg["budget"]["P"]
     G_max: int = cfg["budget"]["G_max"]
+    # optimizer_params.<method> config blocks (same convention as the Tier-1
+    # runner) — placement-method kwargs like the path-loss baselines' link
+    # budget. P/G_max always come from `budget` above (build_optimizer rule).
+    optimizer_params: dict = cfg.get("optimizer_params", {})
     methods: list[str] = cfg["methods"]
     data_cfg: dict = cfg["data"]
     target_accuracy: float = cfg["fl"].get("target_accuracy", 0.70)
@@ -328,7 +393,12 @@ def run_tier2(cfg: dict) -> dict:
             "Using SYNTHETIC data (N=%d, K=%d) — no HF token required.",
             data_cfg["N_clients"], K,
         )
-        synth = SyntheticClientData(N=data_cfg["N_clients"], K=K, seed=data_cfg.get("seed", 42))
+        synth = SyntheticClientData(
+            N=data_cfg["N_clients"],
+            K=data_cfg.get("n_synthetic_clients", K),
+            seed=data_cfg.get("seed", 42),
+            black_chip_rate=data_cfg.get("black_chip_rate", 0.0),
+        )
         raw = synth.build()
 
         full_dataset = raw["full_dataset"]
@@ -340,6 +410,7 @@ def run_tier2(cfg: dict) -> dict:
     else:
         logger.info("Loading real HFL dataset (N=%d clients)…", data_cfg["N_clients"])
         import os
+
         from hflsim.data import get_hfl_data_partitions
 
         hf_token = os.environ.get("HF_TOKEN", data_cfg.get("hf_token"))
@@ -360,6 +431,7 @@ def run_tier2(cfg: dict) -> dict:
             batch_size=data_cfg.get("feature_batch_size", 32),
             num_workers=0,
         )
+        _report_black_chip_rate(full_dataset, cfg)
 
     cached_dataset = CachedDataset(full_dataset, img_features)
 
@@ -376,15 +448,14 @@ def run_tier2(cfg: dict) -> dict:
     logger.info("%d clients loaded.", len(clients))
 
     all_rows: list[dict] = []
+    confusion_rows: list[dict] = []
 
     # ------------------------------------------------------------------
     # 2. Outer loop: one full FL run per placement method
     # ------------------------------------------------------------------
     for method in methods:
         logger.info("=== Method: %s ===", method)
-        N_clients = len(clients)
-        _method_hash = int(hashlib.md5(method.encode()).hexdigest(), 16) % (2**31)
-        _seed = (cfg.get("optimizer_seed", 9876) + N_clients * 7919 + _method_hash) % (2**31)
+        _seed = tier2_seed(cfg.get("optimizer_seed", 9876), len(clients), method)
         rng = np.random.default_rng(_seed)
         torch.manual_seed(_seed)   # deterministic model init across runs
 
@@ -395,6 +466,9 @@ def run_tier2(cfg: dict) -> dict:
         last_placement_fitness: float = 0.0
         rounds_to_target: int | None = None
         cumulative_energy_j: float = 0.0
+        # Tier-2 has no selection layer: every covered client trains each
+        # round, so participation counts track coverage persistence.
+        sel_counts: dict[int, int] = {c.client_id: 0 for c in clients}
 
         method_start_idx = len(all_rows)
 
@@ -411,7 +485,7 @@ def run_tier2(cfg: dict) -> dict:
                 # Reposition only every T_sel rounds (paper §IV-E6), not per round.
                 needs_placement = (uav_pos_m is None) or ((rnd - 1) % T_sel == 0)
                 if needs_placement:
-                    uav_pos_m, ref, last_placement_fitness = _place_uavs(
+                    uav_pos_m, ref, last_placement_fitness, uav_radii = _place_uavs(
                         client_coords={c.client_id: c.coords for c in clients},
                         K=K,
                         R_comm=R_comm,
@@ -421,6 +495,7 @@ def run_tier2(cfg: dict) -> dict:
                         P=P,
                         G_max=G_max,
                         prev_positions_m=prev_uav_positions_m,
+                        method_params=optimizer_params.get(method, {}),
                     )
                     if prev_uav_positions_m is not None:
                         move_m = float(
@@ -429,7 +504,8 @@ def run_tier2(cfg: dict) -> dict:
                         cumulative_energy_j += _ENERGY_MODEL.energy_joules(move_m)
                     prev_uav_positions_m = uav_pos_m.copy()
                     covered = _covered_clients(
-                        {c.client_id: c.coords for c in clients}, uav_pos_m, ref, R_comm
+                        {c.client_id: c.coords for c in clients}, uav_pos_m, ref, R_comm,
+                        radii=uav_radii,
                     )
                 placement_fitness = last_placement_fitness
 
@@ -476,6 +552,10 @@ def run_tier2(cfg: dict) -> dict:
             if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
                 rounds_to_target = rnd
 
+            for cid in covered:
+                sel_counts[cid] += 1
+            counts_arr = np.fromiter(sel_counts.values(), dtype=np.float64)
+
             row = {
                 "method": method,
                 "round": rnd,
@@ -487,9 +567,12 @@ def run_tier2(cfg: dict) -> dict:
                 "comm_mb_round": comm_mb_round,
                 "cumulative_energy_j": cumulative_energy_j,
                 "round_time_s": elapsed,
+                "jain_fairness": jain_index(counts_arr),
+                "n_unique_selected": int((counts_arr > 0).sum()),
                 **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
             }
             all_rows.append(row)
+            confusion_rows.extend(_confusion_rows(method, rnd, metrics["confusion_matrix"]))
             logger.info(
                 "Round %d/%d | acc=%.3f | macro-F1=%.3f | covered=%d/%.0f%% | %.1fs",
                 rnd, n_rounds, metrics["accuracy"], metrics["macro_f1"],
@@ -512,6 +595,7 @@ def run_tier2(cfg: dict) -> dict:
     # ------------------------------------------------------------------
     rounds_df = pd.DataFrame(all_rows)
     _write_table(rounds_df, results_dir / "tier2_rounds.parquet")
+    _write_table(pd.DataFrame(confusion_rows), results_dir / "confusion.parquet")
 
     with open(results_dir / "config.tier2.resolved.yaml", "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
@@ -553,6 +637,12 @@ _METHOD_CFG: dict[str, tuple] = {
     "fedcs":             ("pso", "fedcs",    True, True),   # Nishio & Yonetani, ICC 2019
     "rep_cap":           ("pso", "rep_cap",  True, True),   # Zhao et al., Chin. J. Aeronaut. 2024
     "fair_mab":          ("pso", "fair_mab", True, True),   # Zhu et al., Sensors 2024
+    # Placement literature baselines: identical UCB selection, reputation
+    # FedAvg, and T_sel cadence as proposed_hfl — only the placement rule
+    # differs, isolating it as the experimental variable (mirror image of
+    # the selection baselines above).
+    "mozaffari2016":     ("mozaffari2016", "ucb", True, True),  # IEEE Comm. Lett. 2016
+    "alzenad2017":       ("alzenad2017",   "ucb", True, True),  # IEEE WCL 2017
 }
 
 
@@ -578,8 +668,14 @@ def _load_data(cfg: dict, results_dir: Path) -> tuple:
     data_source = data_cfg.get("source", "synthetic")
 
     if data_source == "synthetic":
-        K = cfg["fl"]["K"]
-        synth = SyntheticClientData(N=data_cfg["N_clients"], K=K, seed=data_cfg.get("seed", 42))
+        # n_synthetic_clients decouples the synthetic client count from the
+        # UAV count fl.K (the historical default) — the stress sweep needs
+        # more clients than UAVs for selection to be a real decision.
+        K = data_cfg.get("n_synthetic_clients", cfg["fl"]["K"])
+        synth = SyntheticClientData(
+            N=data_cfg["N_clients"], K=K, seed=data_cfg.get("seed", 42),
+            black_chip_rate=data_cfg.get("black_chip_rate", 0.0),
+        )
         raw = synth.build()
         return (
             raw["full_dataset"],
@@ -590,6 +686,7 @@ def _load_data(cfg: dict, results_dir: Path) -> tuple:
         )
 
     import os
+
     from hflsim.data import get_hfl_data_partitions
 
     hf_token = os.environ.get("HF_TOKEN", data_cfg.get("hf_token"))
@@ -611,6 +708,7 @@ def _load_data(cfg: dict, results_dir: Path) -> tuple:
         batch_size=data_cfg.get("feature_batch_size", 32),
         num_workers=0,
     )
+    _report_black_chip_rate(full_dataset, cfg)
     return full_dataset, client_train_indices, global_test_indices, client_coords, img_features
 
 
@@ -706,6 +804,7 @@ def run_full_hfl(cfg: dict) -> dict:
 
     P     = cfg["budget"]["P"]
     G_max = cfg["budget"]["G_max"]
+    optimizer_params: dict = cfg.get("optimizer_params", {})
 
     # ── 1. Load data ────────────────────────────────────────────────────────
     full_dataset, client_train_indices, global_test_indices, client_coords, img_features = (
@@ -731,7 +830,8 @@ def run_full_hfl(cfg: dict) -> dict:
     epicentre = tuple(cfg.get("epicentre", [37.488, 137.272]))   # type: ignore[assignment]
 
     all_rows: list[dict] = []
-    models_by_method: dict[str, "CachedFusionModel"] = {}
+    confusion_rows: list[dict] = []
+    models_by_method: dict[str, CachedFusionModel] = {}
 
     # ── 2. Per-method outer loop ─────────────────────────────────────────────
     for method in cfg["methods"]:
@@ -742,14 +842,18 @@ def run_full_hfl(cfg: dict) -> dict:
             continue
 
         placement_method, selection_mode, rep_weighted, dynamic = _METHOD_CFG[method]
-        if placement_method is not None and placement_override:
+        # fl.placement_method swaps the authoritative optimizer for the
+        # proposed system and its ablations. Placement-literature baselines
+        # (entries whose method name IS their placement rule) are exempt:
+        # their placement is the experimental variable being compared.
+        is_placement_baseline = placement_method == method
+        if placement_method is not None and placement_override and not is_placement_baseline:
             placement_method = placement_override
 
-        # Per-method seed: combine the run-level seed with a stable method hash.
-        # The hash is applied exactly once here; callers (e.g. _paper_job) must NOT
-        # pre-encode the method identity into run_seed to avoid double-counting.
-        _method_hash = int(hashlib.md5(method.encode()).hexdigest(), 16) % (2**16)
-        _seed = (run_seed ^ _method_hash) % (2**31)
+        # Per-method seed: run-level seed folded with a stable method hash,
+        # exactly once, inside fullsim_method_seed (see seeds.py for why
+        # sweep callers must not pre-encode the method into run_seed).
+        _seed = fullsim_method_seed(run_seed, method)
         rng = np.random.default_rng(_seed)
         torch.manual_seed(_seed)   # deterministic model init across runs
 
@@ -768,7 +872,11 @@ def run_full_hfl(cfg: dict) -> dict:
             continue
 
         # ── Federated path ───────────────────────────────────────────────
-        device_mgr  = DeviceStateManager(client_ids, rng)
+        device_mgr  = DeviceStateManager(
+            client_ids, rng,
+            dropout_rate=fl.get("dropout_rate", 0.0),
+            snr_degradation_db=fl.get("snr_degradation_db", 0.0),
+        )
         rep_mgr     = ReputationManager(client_ids)
         selector    = ClientSelector(client_ids, epicentre=epicentre)
 
@@ -786,6 +894,7 @@ def run_full_hfl(cfg: dict) -> dict:
         last_placement_fitness: float = 0.0
         cumulative_energy     = 0.0
         rounds_to_target:     int | None = None
+        sel_counts:           dict[int, int] = {cid: 0 for cid in client_ids}
         method_start_idx:     int = len(all_rows)
 
         # Pre-project client coordinates once (static ground sensors): shared by
@@ -843,7 +952,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         prev_for_value, rep_arr,
                         t=rnd, beta_mode="scheduled", R_comm=R_comm,
                     )
-                    uav_pos_m, ref, last_placement_fitness = _place_uavs(
+                    uav_pos_m, ref, last_placement_fitness, uav_radii = _place_uavs(
                         client_coords=client_coord_map,
                         K=K,
                         R_comm=R_comm,
@@ -854,6 +963,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         G_max=G_max,
                         prev_positions_m=prev_uav_pos_m,
                         value=device_values,
+                        method_params=optimizer_params.get(placement_method, {}),
                     )
                     if prev_uav_pos_m is not None:
                         move_m = float(
@@ -862,7 +972,9 @@ def run_full_hfl(cfg: dict) -> dict:
                         cumulative_energy += _ENERGY_MODEL.energy_joules(move_m)
                     prev_uav_pos_m = uav_pos_m.copy()
                     uav_latlon = _uav_pos_to_latlon(uav_pos_m, ref)
-                    covered_all = _covered_clients(client_coord_map, uav_pos_m, ref, R_comm)
+                    covered_all = _covered_clients(
+                        client_coord_map, uav_pos_m, ref, R_comm, radii=uav_radii
+                    )
                 placement_fitness = last_placement_fitness
                 # Client selection runs every T_sel rounds or on trigger (§IV-C),
                 # not every round; between selections the roster persists.
@@ -1027,6 +1139,10 @@ def run_full_hfl(cfg: dict) -> dict:
                 comm_mb = (2.0 * n_selected * _IOT_MODEL_SIZE_MB
                            + 2.0 * n_active_uavs * _UAV_MODEL_SIZE_MB)
 
+            for cid in selected:
+                sel_counts[cid] += 1
+            counts_arr = np.fromiter(sel_counts.values(), dtype=np.float64)
+
             all_rows.append({
                 "method":             method,
                 "round":              rnd,
@@ -1039,8 +1155,11 @@ def run_full_hfl(cfg: dict) -> dict:
                 "comm_mb_round":      comm_mb,
                 "cumulative_energy_j": cumulative_energy,
                 "round_time_s":       elapsed,
+                "jain_fairness":      jain_index(counts_arr),
+                "n_unique_selected":  int((counts_arr > 0).sum()),
                 **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
             })
+            confusion_rows.extend(_confusion_rows(method, rnd, metrics["confusion_matrix"]))
             logger.info(
                 "Round %d/%d | acc=%.3f | macro-F1=%.3f | selected=%d/%.0f%% | %.1fs",
                 rnd, n_rounds, metrics["accuracy"], metrics["macro_f1"],
@@ -1062,6 +1181,7 @@ def run_full_hfl(cfg: dict) -> dict:
     # ── 3. Persist ───────────────────────────────────────────────────────────
     rounds_df = pd.DataFrame(all_rows)
     _write_table(rounds_df, results_dir / "fullsim_rounds.parquet")
+    _write_table(pd.DataFrame(confusion_rows), results_dir / "confusion.parquet")
 
     with open(results_dir / "config.fullsim.resolved.yaml", "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)

@@ -5,7 +5,6 @@ import pytest
 import torch
 
 from uavbench.fl.reputation import (
-    EMA_ALPHA,
     W_ANOMALY,
     W_CONTRIB,
     W_TEMP,
@@ -21,6 +20,35 @@ def _make_sd(val: float = 1.0, size: int = 16) -> dict:
 class TestReputationWeights:
     def test_weights_sum_to_one(self):
         assert abs(W_CONTRIB + W_ANOMALY + W_TEMP - 1.0) < 1e-9
+
+
+class TestBayesianWeightAdaptation:
+    """The every-_ADAPT_EVERY-round Dirichlet posterior update must fire."""
+
+    def _run_rounds(self, mgr: ReputationManager, n: int) -> None:
+        rng = np.random.default_rng(0)
+        for _ in range(n):
+            updates = {cid: _make_sd(float(rng.normal(1.0, 0.3))) for cid in (0, 1, 2)}
+            mgr.update_batch(updates, global_update_vec=None)
+
+    def test_weights_unchanged_before_round_10(self):
+        mgr = ReputationManager([0, 1, 2])
+        w0 = mgr._weights.copy()
+        self._run_rounds(mgr, 9)
+        assert np.array_equal(mgr._weights, w0)
+
+    def test_weights_adapt_at_round_10(self):
+        mgr = ReputationManager([0, 1, 2])
+        w0 = mgr._weights.copy()
+        self._run_rounds(mgr, 10)
+        assert not np.array_equal(mgr._weights, w0)
+
+    def test_adapted_weights_stay_a_simplex(self):
+        mgr = ReputationManager([0, 1, 2])
+        self._run_rounds(mgr, 25)  # two adaptation events
+        w = mgr._weights
+        assert w.sum() == pytest.approx(1.0)
+        assert np.all(w > 0.0)
 
 
 class TestVec:

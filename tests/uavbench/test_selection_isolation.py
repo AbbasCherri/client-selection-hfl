@@ -4,15 +4,12 @@ import tempfile
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from uavbench.fl.selection_isolation import (
-    _jain_index,
     elbow_k,
     run_selection_isolation,
     static_uav_layout,
 )
-
 
 # ── elbow_k ───────────────────────────────────────────────────────────────────
 
@@ -83,18 +80,9 @@ class TestStaticLayout:
         assert out1[2] == out2[2]
 
 
-# ── _jain_index ───────────────────────────────────────────────────────────────
-
-class TestJainIndex:
-    def test_uniform_counts_is_one(self):
-        assert _jain_index(np.array([5.0, 5.0, 5.0])) == pytest.approx(1.0)
-
-    def test_single_active_client_is_1_over_n(self):
-        assert _jain_index(np.array([10.0, 0.0, 0.0, 0.0])) == pytest.approx(0.25)
-
-    def test_all_zero_returns_one(self):
-        assert _jain_index(np.zeros(5)) == pytest.approx(1.0)
-
+# Jain-index unit tests moved to tests/uavbench/test_fairness.py alongside
+# the shared fairness.py module (the _jain_index import stays: it pins the
+# alias this harness still uses).
 
 # ── run_selection_isolation (synthetic smoke) ────────────────────────────────
 

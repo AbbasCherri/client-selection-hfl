@@ -41,18 +41,33 @@ class AssignmentResult:
     n_assigned: int
 
 
-def greedy_assignment(instance: ProblemInstance, positions: np.ndarray) -> AssignmentResult:
+def greedy_assignment(
+    instance: ProblemInstance,
+    positions: np.ndarray,
+    radii: np.ndarray | None = None,
+) -> AssignmentResult:
     """Assign devices to ``positions`` greedily by descending value.
 
     For each device (highest value first): feasible positions are those in range
     (``distance <= R_comm``), not at capacity, and with battery ``>= B_min_uav``.
     The device goes to the feasible position with the smallest current load, ties
     broken by smallest distance.
+
+    ``radii`` optionally overrides the shared scalar ``instance.R_comm`` with a
+    per-position ``(K,)`` communication radius (meters), for placement methods
+    whose coverage radius is derived from each UAV's own altitude (e.g. the
+    path-loss-based literature baselines). ``None`` preserves the scalar gate.
     """
     N, K = instance.N, instance.K
     dist = instance.distances(positions)  # (N, K)
 
-    in_range = dist <= instance.R_comm
+    if radii is None:
+        in_range = dist <= instance.R_comm
+    else:
+        r = np.asarray(radii, dtype=np.float64)
+        if r.shape != (K,):
+            raise ValueError(f"radii must have shape (K,)=({K},); got {r.shape}")
+        in_range = dist <= r[None, :]
     battery_ok = instance.battery >= instance.B_min_uav  # (K,)
     feasible_static = in_range & battery_ok[None, :]      # (N, K), capacity applied live
 

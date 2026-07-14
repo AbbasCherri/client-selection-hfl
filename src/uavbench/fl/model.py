@@ -188,58 +188,11 @@ def reputation_fedavg(
     return agg
 
 
-def mixed_fedavg(
-    uav_update: tuple[dict[str, torch.Tensor], int],
-    iot_updates: list[tuple[dict[str, torch.Tensor], int]],
-) -> dict[str, torch.Tensor]:
-    """Paper §IV-A Step 6: w̃_u = (n_img·w_img + Σ n_i·w_i) / (n_img + Σ n_i).
-
-    img_proj keys come from the UAV only (n_img weight, no IoT contribution).
-    struct_branch + fusion keys are FedAvg of UAV + all IoT updates.
-    """
-    uav_sd, n_img = uav_update
-    total_n = n_img + sum(n for _, n in iot_updates)
-    if total_n == 0:
-        return {k: v.clone() for k, v in uav_sd.items()}
-    agg: dict[str, torch.Tensor] = {}
-    for k, v in uav_sd.items():
-        if k.startswith("img_proj."):
-            agg[k] = v.clone()                         # UAV owns img_proj entirely
-        else:
-            agg[k] = (n_img / total_n) * v.float()     # UAV's weighted share of struct+fusion
-    for sd, n in iot_updates:
-        w = n / total_n
-        for k, v in sd.items():                        # IoT keys: struct_branch.* / fusion.*
-            agg[k] = agg[k] + w * v.float()
-    return agg
-
-
-def mixed_reputation_fedavg(
-    uav_update: tuple[dict[str, torch.Tensor], int, float],
-    iot_updates: list[tuple[dict[str, torch.Tensor], int, float]],
-) -> dict[str, torch.Tensor]:
-    """Reputation-weighted variant of mixed_fedavg (proposed_hfl / hfl_no_selection).
-
-    UAV reputation is treated as 1.0 (trusted aggregator; paper §IV-C7).
-    img_proj comes from UAV only regardless of reputation weighting.
-    """
-    uav_sd, n_img, uav_rep = uav_update
-    weights_iot = [max(r, 0.0) * n for _, n, r in iot_updates]
-    w_uav = max(uav_rep, 0.0) * n_img
-    total_w = w_uav + sum(weights_iot)
-    if total_w < 1e-10:
-        return mixed_fedavg((uav_sd, n_img), [(sd, n) for sd, n, _ in iot_updates])
-    agg: dict[str, torch.Tensor] = {}
-    for k, v in uav_sd.items():
-        if k.startswith("img_proj."):
-            agg[k] = v.clone()
-        else:
-            agg[k] = (w_uav / total_w) * v.float()
-    for (sd, _n, _r), w in zip(iot_updates, weights_iot):
-        wn = w / total_w
-        for k, v in sd.items():
-            agg[k] = agg[k] + wn * v.float()
-    return agg
+# NOTE: mixed_fedavg / mixed_reputation_fedavg (paper §IV-A Step 6 mixed
+# aggregation) were removed 2026-07-14: the live round loop aggregates the
+# UAV image-branch and IoT struct/fusion contributions separately (see
+# run_full_hfl), and neither function had a remaining call site. Recover
+# from git history if the mixed formulation is ever revisited.
 
 
 def clone_model(model: CachedFusionModel) -> CachedFusionModel:

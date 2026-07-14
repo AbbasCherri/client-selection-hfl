@@ -23,7 +23,6 @@ import logging
 import os
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import yaml
 from joblib import Parallel, delayed
@@ -48,6 +47,7 @@ def _prefetch_all_N(cfg: dict) -> None:
         return  # synthetic data is generated in-process; nothing to pre-fetch
 
     from hflsim.data import get_hfl_data_partitions
+
     from .features import compute_feature_cache
 
     data_cfg = cfg["data"]
@@ -168,16 +168,17 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     torch.set_num_threads(1)
 
     from .federated import run_full_hfl
+    from .seeds import sweep_job_seed
 
     job_cfg = copy.deepcopy(cfg)
     job_cfg["data"]["N_clients"] = N
     job_cfg["methods"] = [method]
     # Method identity is folded into the seed exactly once, inside run_full_hfl
-    # (via its own method hash). Do NOT add a method hash here too, or every
+    # (via fullsim_method_seed). Do NOT add a method hash here too, or every
     # (N, seed_idx) job's seed double-counts the method and silently shifts
     # the per-method RNG draw in a way that is no longer reproducible from
     # this function's inputs alone.
-    job_cfg["fl"]["seed"] = cfg.get("optimizer_seed", 9876) + seed_idx * 7919 + N * 31
+    job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
     # Each (N, method, seed) gets its own sub-directory so parallel workers
     # never write to the same fullsim_rounds.parquet simultaneously.  Without
     # the method segment, all 6 methods for a given (N, seed) share one dir

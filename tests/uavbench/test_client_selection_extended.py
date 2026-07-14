@@ -14,7 +14,6 @@ from uavbench.fl.client_selection import (
 )
 from uavbench.fl.device_state import DeviceState
 
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _eligible_state(battery=0.8, snr_db=15.0):
@@ -123,6 +122,8 @@ class TestComputeUtility:
         states = self._states(cids)
         uav_coords = [(37.49, 137.28), (37.50, 137.30)]
         result = _compute_utility(cids, states, coords, uav_coords, DEFAULT_EPICENTRE)
+        assert set(result.keys()) == set(cids)
+        assert all(0.0 <= u <= 1.0 for u in result.values())
         # Compute prox reference manually
         K_uav = len(uav_coords)
         uav_client_xy = _xym(uav_coords + [coords[c] for c in cids])

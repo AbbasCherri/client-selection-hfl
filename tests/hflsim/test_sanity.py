@@ -4,22 +4,16 @@ Unit / integration sanity checks for the HFL streaming-based pipeline.
 Run with:  python test_sanity.py   (or via unittest discover)
 """
 
-import os
-import sys
 import unittest
-from pathlib import Path
-
-
 
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from hflsim.models.fusion import MultiModalFusionModel, FocalLoss
-from hflsim.data.loader import MultiModalDataset, FEATURE_COLS
-from hflsim.simulation import IoTClient, UAVAggregator, ClientSelectionCoordinator, HFLOrchestrator
-
+from hflsim.data.loader import MultiModalDataset
+from hflsim.models.fusion import FocalLoss, MultiModalFusionModel
+from hflsim.simulation import ClientSelectionCoordinator, HFLOrchestrator, IoTClient, UAVAggregator
 
 # ---------------------------------------------------------------------------
 # Shared fixture

@@ -1,0 +1,127 @@
+=== reproduce_paper.sh started 2026-07-14T14:25:54+03:00 (smoke=1) ===
+
+--- [2026-07-14T14:25:54+03:00] Tier-1 placement grid (configs/smoke.yaml) ---
+2026-07-14 14:25:59,277 INFO uavbench: Seed manifest (50 rows) at results/smoke/seed_manifest.csv
+2026-07-14 14:25:59,278 INFO uavbench.runner: Running 50 jobs (5 methods x 2 scenarios x 5 seeds) on 8 workers
+2026-07-14 14:26:05,947 INFO uavbench.runner: Wrote runs.parquet and convergence.parquet
+2026-07-14 14:26:05,947 INFO uavbench.runner: Results dir results/smoke footprint: 0.15 MB
+
+=== Tier-1 headline (mean over seeds) ===
+        scenario   method  final_fitness_mean  final_fitness_ci95  coverage_pct_mean  wall_time_s_mean
+clustered_N40_K4 centroid            0.495582            0.013627               99.0          0.001733
+clustered_N40_K4       ga            0.567778            0.005520              100.0          2.084637
+clustered_N40_K4      pso            0.571638            0.004292              100.0          1.047048
+clustered_N40_K4   random            0.514630            0.010741               99.5          0.014462
+clustered_N40_K4   static            0.477535            0.124393               78.0          0.000733
+  uniform_N40_K4 centroid            0.486944            0.033631               99.5          0.002123
+  uniform_N40_K4       ga            0.568532            0.003670              100.0          2.338526
+  uniform_N40_K4      pso            0.574709            0.005121               99.5          1.400195
+  uniform_N40_K4   random            0.525182            0.012504               96.5          0.019144
+  uniform_N40_K4   static            0.554191            0.067458               92.5          0.000887
+
+=== Wall-clock summary (per method) ===
+  method       source  mean_s  std_s  total_s  n
+centroid runs.parquet   0.002  0.001      0.0 10
+      ga runs.parquet   2.212  0.715     22.1 10
+     pso runs.parquet   1.224  1.206     12.2 10
+  random runs.parquet   0.017  0.003      0.2 10
+  static runs.parquet   0.001  0.000      0.0 10
+2026-07-14 14:26:17,765 INFO uavbench: Wrote figure results/smoke/convergence_clustered_N40_K4.png
+2026-07-14 14:26:17,766 INFO uavbench: Wrote figure results/smoke/convergence_uniform_N40_K4.png
+
+--- [2026-07-14T14:26:18+03:00] Tier-1 significance (final_fitness, paired Wilcoxon) ---
+2026-07-14 14:26:23,318 INFO uavbench: Wrote results/smoke/significance.csv
+
+=== Paired wilcoxon on 'final_fitness' (source: runs.parquet, Holm-corrected) ===
+        scenario method_a method_b  n_pairs  statistic  p_value  mean_diff  significant        metric     test correction
+clustered_N40_K4 centroid       ga        5        0.0   0.0625   -0.07220        False final_fitness wilcoxon       holm
+  uniform_N40_K4 centroid       ga        5        0.0   0.0625   -0.08159        False final_fitness wilcoxon       holm
+clustered_N40_K4 centroid      pso        5        0.0   0.0625   -0.07606        False final_fitness wilcoxon       holm
+  uniform_N40_K4 centroid      pso        5        0.0   0.0625   -0.08776        False final_fitness wilcoxon       holm
+  uniform_N40_K4 centroid   random        5        0.0   0.0625   -0.03824        False final_fitness wilcoxon       holm
+  uniform_N40_K4       ga   random        5        0.0   0.0625    0.04335        False final_fitness wilcoxon       holm
+clustered_N40_K4       ga   random        5        0.0   0.0625    0.05315        False final_fitness wilcoxon       holm
+clustered_N40_K4       ga      pso        5        0.0   0.0625   -0.00386        False final_fitness wilcoxon       holm
+clustered_N40_K4      pso   random        5        0.0   0.0625    0.05701        False final_fitness wilcoxon       holm
+  uniform_N40_K4      pso   random        5        0.0   0.0625    0.04953        False final_fitness wilcoxon       holm
+clustered_N40_K4 centroid   random        5        1.0   0.1250   -0.01905        False final_fitness wilcoxon       holm
+  uniform_N40_K4 centroid   static        5        1.0   0.1250   -0.06725        False final_fitness wilcoxon       holm
+  uniform_N40_K4       ga      pso        5        1.0   0.1250   -0.00618        False final_fitness wilcoxon       holm
+clustered_N40_K4      pso   static        5        1.0   0.1250    0.09410        False final_fitness wilcoxon       holm
+clustered_N40_K4       ga   static        5        3.0   0.3125    0.09024        False final_fitness wilcoxon       holm
+  uniform_N40_K4   random   static        5        5.0   0.6250   -0.02901        False final_fitness wilcoxon       holm
+  uniform_N40_K4       ga   static        5        6.0   0.8125    0.01434        False final_fitness wilcoxon       holm
+clustered_N40_K4 centroid   static        5        6.0   0.8125    0.01805        False final_fitness wilcoxon       holm
+  uniform_N40_K4      pso   static        5        7.0   1.0000    0.02052        False final_fitness wilcoxon       holm
+clustered_N40_K4   random   static        5        7.0   1.0000    0.03710        False final_fitness wilcoxon       holm
+
+--- [2026-07-14T14:26:24+03:00] Tier-2 smoke (synthetic) ---
+2026-07-14 14:26:28,724 INFO uavbench.fl.federated: Using SYNTHETIC data (N=20, K=3) — no HF token required.
+2026-07-14 14:26:28,730 INFO uavbench.fl.federated: 3 clients loaded.
+2026-07-14 14:26:28,730 INFO uavbench.fl.federated: === Method: pso ===
+2026-07-14 14:26:28,827 INFO uavbench.fl.federated: Round 1/5 | acc=0.333 | macro-F1=0.143 | covered=3/100% | 0.1s
+2026-07-14 14:26:28,871 INFO uavbench.fl.federated: Round 2/5 | acc=0.500 | macro-F1=0.188 | covered=3/100% | 0.0s
+2026-07-14 14:26:28,920 INFO uavbench.fl.federated: Round 3/5 | acc=0.667 | macro-F1=0.222 | covered=3/100% | 0.0s
+2026-07-14 14:26:28,962 INFO uavbench.fl.federated: Round 4/5 | acc=0.667 | macro-F1=0.222 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,015 INFO uavbench.fl.federated: Round 5/5 | acc=0.667 | macro-F1=0.222 | covered=3/100% | 0.1s
+2026-07-14 14:26:29,016 INFO uavbench.fl.federated: pso finished. Rounds to target (50%): 2 | Cumulative energy: 0.0 kJ
+2026-07-14 14:26:29,016 INFO uavbench.fl.federated: === Method: static ===
+2026-07-14 14:26:29,074 INFO uavbench.fl.federated: Round 1/5 | acc=0.167 | macro-F1=0.250 | covered=3/100% | 0.1s
+2026-07-14 14:26:29,118 INFO uavbench.fl.federated: Round 2/5 | acc=0.333 | macro-F1=0.333 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,155 INFO uavbench.fl.federated: Round 3/5 | acc=0.167 | macro-F1=0.071 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,198 INFO uavbench.fl.federated: Round 4/5 | acc=0.333 | macro-F1=0.125 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,242 INFO uavbench.fl.federated: Round 5/5 | acc=0.667 | macro-F1=0.200 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,242 INFO uavbench.fl.federated: static finished. Rounds to target (50%): 5 | Cumulative energy: 0.0 kJ
+2026-07-14 14:26:29,243 INFO uavbench.fl.federated: === Method: random ===
+2026-07-14 14:26:29,295 INFO uavbench.fl.federated: Round 1/5 | acc=0.167 | macro-F1=0.100 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,339 INFO uavbench.fl.federated: Round 2/5 | acc=0.333 | macro-F1=0.200 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,388 INFO uavbench.fl.federated: Round 3/5 | acc=0.500 | macro-F1=0.393 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,432 INFO uavbench.fl.federated: Round 4/5 | acc=0.500 | macro-F1=0.167 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,470 INFO uavbench.fl.federated: Round 5/5 | acc=0.667 | macro-F1=0.200 | covered=3/100% | 0.0s
+2026-07-14 14:26:29,470 INFO uavbench.fl.federated: random finished. Rounds to target (50%): 3 | Cumulative energy: 0.0 kJ
+2026-07-14 14:26:29,492 INFO uavbench.fl.federated: Tier-2 results at results/tier2_reduced (0.16 MB)
+2026-07-14 14:26:30,076 INFO uavbench: Tier-2 smoke finished in 0.8s; 3 figures written
+
+=== Tier-2 smoke (synthetic, final round per method) ===
+        accuracy  macro_f1  coverage_pct  n_covered
+method                                             
+pso     0.666667  0.222222         100.0          3
+random  0.666667  0.200000         100.0          3
+static  0.666667  0.200000         100.0          3
+
+Disk footprint: 0.16 MB at results/tier2_reduced
+
+--- [2026-07-14T14:26:30+03:00] Synthetic stress-test sweep (/tmp/claude-1000/-home-ody-Projects-client-selection-hfl/1256c39d-cff1-49af-b0ea-9b075cd9b5bd/scratchpad/stress_ci.yaml) ---
+2026-07-14 14:26:35,486 INFO uavbench: Seed manifest (8 rows) at results/stress_smoke_ci/seed_manifest.csv
+2026-07-14 14:26:35,486 INFO uavbench.fl.stress_sweep: Stress sweep: 2 cells × 2 methods × 2 seeds = 8 jobs — 8 workers
+[Parallel(n_jobs=8)]: Using backend LokyBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done   3 out of   8 | elapsed:    9.4s remaining:   15.6s
+[Parallel(n_jobs=8)]: Done   5 out of   8 | elapsed:    9.7s remaining:    5.8s
+[Parallel(n_jobs=8)]: Done   8 out of   8 | elapsed:   11.3s finished
+2026-07-14 14:26:46,778 INFO uavbench.fl.stress_sweep: Stress sweep complete — 0.14 MB at results/stress_smoke_ci
+
+=== Stress-test summary (final round, mean across seeds) ===
+      method  dropout_rate  snr_degradation_db  black_chip_rate  accuracy  macro_f1  coverage_pct
+     flat_fl           0.0                 0.0              0.0    0.4083    0.2133         100.0
+     flat_fl           0.3                 0.0              0.0    0.4083    0.2133         100.0
+proposed_hfl           0.0                 0.0              0.0    0.5583    0.2235         100.0
+proposed_hfl           0.3                 0.0              0.0    0.5500    0.2299         100.0
+
+=== Wall-clock summary (per method) ===
+      method                source  mean_s  std_s  total_s  n
+     flat_fl stress_rounds.parquet   0.334  0.122      4.0 12
+proposed_hfl stress_rounds.parquet   0.286  0.127      3.4 12
+
+Disk footprint: 0.14 MB at results/stress_smoke_ci
+
+--- [2026-07-14T14:26:49+03:00] Stress-sweep significance (accuracy) ---
+2026-07-14 14:26:54,477 INFO uavbench: Wrote results/stress_smoke_ci/significance.csv
+
+=== Paired wilcoxon on 'accuracy' (source: stress_rounds.parquet, Holm-corrected) ===
+_all method_a     method_b  n_pairs  statistic  p_value  mean_diff  significant   metric     test correction
+ all  flat_fl proposed_hfl        2        0.0      0.5   -0.14167        False accuracy wilcoxon       holm
+
+--- [2026-07-14T14:26:55+03:00] Staging results/paper_artifact ---
+Artifact staged at results/paper_artifact (9 files)
+
+=== reproduce_paper.sh finished 2026-07-14T14:26:55+03:00 ===

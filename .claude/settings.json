@@ -21,7 +21,10 @@
       "Bash(python3 -m pytest tests/uavbench/ -q)",
       "Bash(python3 -m uavbench smoke_tier2)",
       "Bash(python3 -c ' *)",
-      "Bash(*)"
+      "Bash(*)",
+      "Bash(python -m pytest tests/uavbench/test_seed_manifest.py tests/uavbench/test_significance.py tests/uavbench/test_reproducibility.py tests/uavbench/test_reporting.py -q)",
+      "Bash(python -m pytest tests/uavbench/test_stress_knobs.py tests/uavbench/test_device_state.py tests/uavbench/test_dataset_fl.py -q)",
+      "Bash(pip freeze *)"
     ]
   }
 }

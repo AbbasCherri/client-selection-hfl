@@ -1,0 +1,143 @@
+"""Paired statistical significance tests over multi-seed run tables.
+
+The seed design guarantees every method sees an *identical* problem
+instance per seed (Tier-1's shared instance stream; the sweeps'
+method-free ``sweep_job_seed``), so per-seed metric values are paired
+samples and a paired test (Wilcoxon signed-rank by default, paired t-test
+optionally) is the correct — and stronger — choice over an unpaired test.
+State this pairing property explicitly in the paper as the justification.
+
+Input is a final-round-per-seed table (one row per (method, group, seed)),
+typically derived from ``runs.parquet`` / ``*_rounds.parquet`` outputs.
+Multiple comparisons across method pairs are corrected with Holm-Bonferroni
+(implemented inline; scipy is the only dependency).
+"""
+
+from __future__ import annotations
+
+import itertools
+
+import numpy as np
+import pandas as pd
+from scipy import stats
+
+_TESTS = ("wilcoxon", "ttest_rel")
+
+
+def _paired_values(
+    df: pd.DataFrame, metric: str, method_a: str, method_b: str,
+    group_cols: list[str], seed_col: str,
+) -> list[tuple[tuple, np.ndarray, np.ndarray]]:
+    """Per group: seed-aligned metric arrays for the two methods.
+
+    Raises if the two methods' seed sets differ within any group — pairing
+    is only valid when both methods ran the identical seeds.
+    """
+    out = []
+    for key, sub in df.groupby(list(group_cols)):
+        a = sub[sub["method"] == method_a].set_index(seed_col)[metric].sort_index()
+        b = sub[sub["method"] == method_b].set_index(seed_col)[metric].sort_index()
+        if list(a.index) != list(b.index):
+            raise ValueError(
+                f"seed sets differ for {method_a} vs {method_b} in group {key}: "
+                f"{list(a.index)} vs {list(b.index)} — pairing invalid"
+            )
+        if a.index.has_duplicates:
+            raise ValueError(
+                f"duplicate seeds for group {key} — aggregate to one row per "
+                "(method, group, seed) before testing"
+            )
+        out.append((key if isinstance(key, tuple) else (key,), a.to_numpy(), b.to_numpy()))
+    return out
+
+
+def paired_seed_test(
+    df: pd.DataFrame,
+    metric: str,
+    method_a: str,
+    method_b: str,
+    group_cols: list[str] | tuple[str, ...] = ("scenario",),
+    seed_col: str = "seed",
+    test: str = "wilcoxon",
+) -> pd.DataFrame:
+    """Paired test of ``method_a`` vs ``method_b`` per group.
+
+    One row per group: ``{**group, n_pairs, statistic, p_value, mean_diff,
+    method_a, method_b}``. ``mean_diff > 0`` means ``method_a`` scores
+    higher on ``metric``. A Wilcoxon with all-zero differences (methods
+    literally tied on every seed) reports ``p_value = 1.0``.
+    """
+    if test not in _TESTS:
+        raise ValueError(f"test must be one of {_TESTS}; got {test!r}")
+
+    rows = []
+    for key, a, b in _paired_values(df, metric, method_a, method_b, list(group_cols), seed_col):
+        diff = a - b
+        if test == "wilcoxon":
+            if np.allclose(diff, 0.0):
+                statistic, p = 0.0, 1.0
+            else:
+                statistic, p = stats.wilcoxon(a, b)
+        else:
+            statistic, p = stats.ttest_rel(a, b)
+        rows.append({
+            **dict(zip(group_cols, key)),
+            "method_a": method_a,
+            "method_b": method_b,
+            "n_pairs": len(a),
+            "statistic": float(statistic),
+            "p_value": float(p),
+            "mean_diff": float(diff.mean()),
+        })
+    return pd.DataFrame(rows)
+
+
+def holm_correction(p_values: np.ndarray, alpha: float = 0.05) -> np.ndarray:
+    """Holm-Bonferroni step-down: boolean reject mask at family level alpha."""
+    p = np.asarray(p_values, dtype=float)
+    m = len(p)
+    order = np.argsort(p)
+    reject = np.zeros(m, dtype=bool)
+    for rank, idx in enumerate(order):
+        if p[idx] <= alpha / (m - rank):
+            reject[idx] = True
+        else:
+            break  # step-down stops at the first non-rejection
+    return reject
+
+
+def pairwise_significance_table(
+    df: pd.DataFrame,
+    metric: str,
+    methods: list[str],
+    group_cols: list[str] | tuple[str, ...] = ("scenario",),
+    seed_col: str = "seed",
+    test: str = "wilcoxon",
+    alpha: float = 0.05,
+    correction: str = "holm",
+) -> pd.DataFrame:
+    """All-pairs paired tests across ``methods``, multiplicity-corrected.
+
+    The Holm correction is applied over the whole family of (pair × group)
+    comparisons. ``significant`` reflects the corrected decision at
+    ``alpha``; raw p-values are kept alongside for transparency.
+    """
+    if correction not in ("holm", "none"):
+        raise ValueError(f"correction must be 'holm' or 'none'; got {correction!r}")
+
+    parts = [
+        paired_seed_test(df, metric, a, b, group_cols=group_cols, seed_col=seed_col, test=test)
+        for a, b in itertools.combinations(methods, 2)
+    ]
+    table = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    if table.empty:
+        return table
+
+    if correction == "holm":
+        table["significant"] = holm_correction(table["p_value"].to_numpy(), alpha=alpha)
+    else:
+        table["significant"] = table["p_value"] < alpha
+    table["metric"] = metric
+    table["test"] = test
+    table["correction"] = correction
+    return table.sort_values("p_value", ignore_index=True)

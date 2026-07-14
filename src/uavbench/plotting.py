@@ -126,6 +126,57 @@ def plot_tier2(results_dir: Path) -> list[Path]:
     return paths
 
 
+def plot_confusion_matrix(results_dir: Path) -> list[Path]:
+    """Final-round confusion-matrix heatmap per method from confusion.parquet.
+
+    Reads the long-form (method, round, true_label, pred_label, count) table
+    written by run_tier2 / run_full_hfl / run_selection_isolation and renders
+    one row-normalized 4x4 heatmap per method for its last recorded round —
+    the per-class evidence that rare classes are learned, not ignored.
+    """
+    path = results_dir / "confusion.parquet"
+    if not path.exists() and not path.with_suffix(".csv").exists():
+        return []
+    df = _read_table(path)
+    if df.empty:
+        return []
+
+    class_names = ["survived", "collapsed", "obstructed", "missing"]
+    paths: list[Path] = []
+    for method in sorted(df["method"].unique()):
+        sub = df[df["method"] == method]
+        final = sub[sub["round"] == sub["round"].max()]
+        cm = (
+            final.pivot(index="true_label", columns="pred_label", values="count")
+            .reindex(index=class_names, columns=class_names)
+            .fillna(0.0)
+            .to_numpy()
+        )
+        row_sums = cm.sum(axis=1, keepdims=True)
+        cm_norm = np.divide(cm, row_sums, out=np.zeros_like(cm, dtype=float), where=row_sums > 0)
+
+        fig, ax = plt.subplots(figsize=(5.2, 4.6))
+        im = ax.imshow(cm_norm, cmap="Blues", vmin=0.0, vmax=1.0)
+        ax.set_xticks(range(4), class_names, rotation=30, ha="right")
+        ax.set_yticks(range(4), class_names)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("True")
+        ax.set_title(f"Confusion (final round): {method}")
+        for t in range(4):
+            for p in range(4):
+                ax.text(
+                    p, t, f"{int(cm[t, p])}", ha="center", va="center",
+                    color="white" if cm_norm[t, p] > 0.5 else "black", fontsize=9,
+                )
+        fig.colorbar(im, ax=ax, label="Row fraction")
+        fig.tight_layout()
+        out = results_dir / f"confusion_{method}.png"
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        paths.append(out)
+    return paths
+
+
 def plot_paper_sim(results_dir: Path) -> list[Path]:
     """Generate the paper's §V figures from paper_sweep_rounds.parquet.
 

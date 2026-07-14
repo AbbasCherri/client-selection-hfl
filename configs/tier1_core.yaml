@@ -72,6 +72,18 @@ optimizer_params:
     tournament_size: 3
     n_elite: 2
     early_stop_frac: 0.95
+  # Placement literature baselines (path-loss-derived coverage radius; see
+  # uavbench/problem/path_loss.py). max_path_loss_db=100 at 2 GHz yields a
+  # ~200-630 m radius over the z=[20,120] band — the same order as the
+  # R_comm=500 m gate PSO/GA operate under, keeping the comparison fair.
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 100.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 100.0
 
 methods:
   - pso
@@ -79,3 +91,5 @@ methods:
   - centroid
   - static
   - random
+  - mozaffari2016
+  - alzenad2017

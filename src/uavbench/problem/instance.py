@@ -23,8 +23,9 @@ from typing import Literal
 
 import numpy as np
 
-from .value import compute_value
 from hflsim.shared.coords import latlon_to_meters  # noqa: F401 — re-exported for callers
+
+from .value import compute_value
 
 _EARTH_RADIUS_M = 6_371_000.0
 

@@ -1,7 +1,6 @@
 """Tests for CachedDataset, SyntheticClientData, and make_client_loader (dataset.py)."""
 
 import numpy as np
-import pytest
 import torch
 from torch.utils.data import DataLoader
 
@@ -12,7 +11,6 @@ from uavbench.fl.dataset import (
     SyntheticTorchDataset,
     make_client_loader,
 )
-
 
 # ── SyntheticTorchDataset ─────────────────────────────────────────────────────
 

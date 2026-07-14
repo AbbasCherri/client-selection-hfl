@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from uavbench.optimizers import REGISTRY
+from uavbench.optimizers import build_optimizer
 from uavbench.problem.fitness import Fitness
 from uavbench.problem.instance import ProblemInstance
 from hflsim.shared.coords import latlon_to_meters
@@ -97,11 +97,7 @@ def pso_place_uavs(
 
     rng = np.random.default_rng(seed)
 
-    cls = REGISTRY[method]
-    if method in ("pso", "ga"):
-        optimizer = cls(P=P, G_max=G_max)
-    else:
-        optimizer = cls()
+    optimizer = build_optimizer(method, budget={"P": P, "G_max": G_max})
 
     result = optimizer.optimize(instance, fitness, rng)
 

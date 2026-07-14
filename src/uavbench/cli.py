@@ -8,13 +8,13 @@ import shutil
 import time
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
-from .fl.federated import run_full_hfl, run_tier2
+from .fl.federated import run_tier2
 from .fl.selection_isolation import run_selection_sweep
 from .fl.sweep import run_paper_sweep, run_sweep
 from .plotting import _last_round, analyze_dir, plot_dir, plot_sweep, plot_tier2
+from .reporting import build_seed_manifest, summarize_wall_clock
 from .runner import load_config, run_experiment
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -43,8 +43,32 @@ def _print_headline(summary: pd.DataFrame) -> None:
         print(summary[cols].to_string(index=False))
 
 
+def _write_seed_manifest(cfg: dict, harness: str) -> None:
+    """Persist the exact seeds this run will use, before it starts.
+
+    Written up front so a crashed run still leaves an auditable record of
+    what it was going to execute.
+    """
+    results_dir = Path(cfg["results_dir"])
+    results_dir.mkdir(parents=True, exist_ok=True)
+    manifest = build_seed_manifest(cfg, harness)
+    manifest.to_csv(results_dir / "seed_manifest.csv", index=False)
+    logger.info("Seed manifest (%d rows) at %s", len(manifest), results_dir / "seed_manifest.csv")
+
+
+def _print_timing(results_dir: Path) -> None:
+    """Per-method wall-clock aggregate for the paper's runtime disclosure."""
+    timing = summarize_wall_clock(results_dir)
+    if timing.empty:
+        return
+    with pd.option_context("display.max_rows", None, "display.width", 160):
+        print("\n=== Wall-clock summary (per method) ===")
+        print(timing.to_string(index=False))
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     cfg = load_config(_find_config(args.config))
+    _write_seed_manifest(cfg, "tier1")
     run_experiment(cfg)
 
 
@@ -52,6 +76,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     cfg = load_config(_find_config(args.config))
     summary = analyze_dir(Path(cfg["results_dir"]))
     _print_headline(summary)
+    _print_timing(Path(cfg["results_dir"]))
 
 
 def cmd_plot(args: argparse.Namespace) -> None:
@@ -59,6 +84,69 @@ def cmd_plot(args: argparse.Namespace) -> None:
     paths = plot_dir(Path(cfg["results_dir"]))
     for p in paths:
         logger.info("Wrote figure %s", p)
+
+
+# Tables cmd_significance recognises, in probe order, with their group
+# columns (tests are paired within each group; () → single pooled group).
+# Tier-1 runs.parquet is already one row per (method, scenario, seed);
+# round tables are reduced to final-round-per-seed first.
+_SIG_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("runs.parquet", ("scenario",)),
+    ("paper_sweep_rounds.parquet", ("N",)),
+    ("stress_rounds.parquet", ("dropout_rate", "snr_degradation_db", "black_chip_rate")),
+    ("selection_rounds.parquet", ("N",)),
+    ("sweep_rounds.parquet", ("N",)),
+    ("fullsim_rounds.parquet", ()),
+    ("tier2_rounds.parquet", ()),
+)
+
+
+def cmd_significance(args: argparse.Namespace) -> None:
+    """Paired multi-seed significance tests over an existing results directory."""
+    from .analysis import pairwise_significance_table
+
+    target = Path(args.config)
+    results_dir = target if target.is_dir() else Path(load_config(_find_config(args.config))["results_dir"])
+
+    df = None
+    for fname, group_spec in _SIG_TABLES:
+        path = results_dir / fname
+        if path.exists():
+            df = pd.read_parquet(path)
+        elif path.with_suffix(".csv").exists():
+            df = pd.read_csv(path.with_suffix(".csv"))
+        if df is not None:
+            break
+    if df is None:
+        raise FileNotFoundError(f"no recognised results table in {results_dir}")
+
+    if "seed" not in df.columns:
+        raise ValueError(
+            f"{fname} has no 'seed' column — significance testing needs a "
+            "multi-seed run (rerun with n_seeds >= 2)"
+        )
+
+    group_cols = [c for c in group_spec if c in df.columns]
+
+    # Round tables → final round per (method, group, seed).
+    if "round" in df.columns:
+        df = df.sort_values("round").groupby(["method", "seed"] + group_cols, as_index=False).last()
+
+    if not group_cols:
+        df = df.assign(_all="all")
+        group_cols = ["_all"]
+
+    methods = args.methods.split(",") if args.methods else sorted(df["method"].unique())
+    table = pairwise_significance_table(
+        df, metric=args.metric, methods=methods,
+        group_cols=group_cols, test=args.test, alpha=args.alpha,
+    )
+    out_path = results_dir / "significance.csv"
+    table.to_csv(out_path, index=False)
+    with pd.option_context("display.max_rows", None, "display.width", 200):
+        print(f"\n=== Paired {args.test} on '{args.metric}' (source: {fname}, Holm-corrected) ===")
+        print(table.round(5).to_string(index=False))
+    logger.info("Wrote %s", out_path)
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
@@ -105,12 +193,14 @@ def cmd_smoke(args: argparse.Namespace) -> None:
 
 def cmd_run_tier2(args: argparse.Namespace) -> None:
     cfg = load_config(_find_config(args.config))
+    _write_seed_manifest(cfg, "tier2")
     out = run_tier2(cfg)
     df = out["rounds"]
     print("\n=== Tier-2 summary (final round per method) ===")
     last = _last_round(df, ["method"])[["method", "accuracy", "macro_f1", "coverage_pct", "cumulative_energy_j"]].set_index("method")
     with pd.option_context("display.max_rows", None, "display.width", 160):
         print(last.to_string())
+    _print_timing(out["results_dir"])
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
 
@@ -137,6 +227,7 @@ def cmd_smoke_tier2(args: argparse.Namespace) -> None:
 
 def cmd_run_paper_sim(args: argparse.Namespace) -> None:
     cfg = load_config(_find_config(args.config))
+    _write_seed_manifest(cfg, "paper_sweep")
     out = run_paper_sweep(cfg)
     df = out["rounds"]
 
@@ -157,11 +248,13 @@ def cmd_run_paper_sim(args: argparse.Namespace) -> None:
     except Exception as exc:
         logger.warning("Paper-sim plotting skipped: %s", exc)
 
+    _print_timing(out["results_dir"])
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
 
 def cmd_run_selection_sim(args: argparse.Namespace) -> None:
     cfg = load_config(_find_config(args.config))
+    _write_seed_manifest(cfg, "selection_sweep")
     out = run_selection_sweep(cfg)
     df = out["rounds"]
 
@@ -187,8 +280,32 @@ def cmd_run_selection_sim(args: argparse.Namespace) -> None:
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
 
+def cmd_run_stress_sweep(args: argparse.Namespace) -> None:
+    from .fl.stress_sweep import run_stress_sweep
+
+    cfg = load_config(_find_config(args.config))
+    _write_seed_manifest(cfg, "stress_sweep")
+    out = run_stress_sweep(cfg)
+    df = out["rounds"]
+
+    print("\n=== Stress-test summary (final round, mean across seeds) ===")
+    summary = (
+        _last_round(df, ["method", "dropout_rate", "snr_degradation_db", "black_chip_rate", "seed"])
+        .groupby(["method", "dropout_rate", "snr_degradation_db", "black_chip_rate"])
+        [["accuracy", "macro_f1", "coverage_pct"]]
+        .mean()
+        .reset_index()
+    )
+    with pd.option_context("display.max_rows", None, "display.width", 200):
+        print(summary.round(4).to_string(index=False))
+
+    _print_timing(out["results_dir"])
+    print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
+
+
 def cmd_run_sweep(args: argparse.Namespace) -> None:
     cfg = load_config(_find_config(args.config))
+    _write_seed_manifest(cfg, "sweep")
     out = run_sweep(cfg)
     df = out["rounds"]
 
@@ -254,6 +371,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_sw = sub.add_parser("run_sweep", help="N-scalability sweep (N=30..250, all methods, 8-core parallel)")
     p_sw.add_argument("--config", default="configs/tier2_sweep.yaml")
     p_sw.set_defaults(func=cmd_run_sweep)
+
+    p_st = sub.add_parser(
+        "run_stress_sweep",
+        help="synthetic stress-test sweep: dropout / SNR degradation / black-chip rate (robustness evidence for the single-event scope)",
+    )
+    p_st.add_argument("--config", default="configs/synthetic_stress_test.yaml")
+    p_st.set_defaults(func=cmd_run_stress_sweep)
+
+    p_sig = sub.add_parser(
+        "significance",
+        help="paired multi-seed significance tests (Wilcoxon/t-test, Holm-corrected) over saved results",
+    )
+    p_sig.add_argument("--config", required=True, help="results directory or config YAML")
+    p_sig.add_argument("--metric", default="accuracy")
+    p_sig.add_argument("--methods", default=None, help="comma-separated; default = all in table")
+    p_sig.add_argument("--test", default="wilcoxon", choices=["wilcoxon", "ttest_rel"])
+    p_sig.add_argument("--alpha", type=float, default=0.05)
+    p_sig.set_defaults(func=cmd_significance)
 
     p_cl = sub.add_parser("clean", help="remove results (of a config, or all)")
     p_cl.add_argument("--config", default=None)
