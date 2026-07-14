@@ -1,0 +1,38 @@
+name: paper_full_system
+results_dir: results/paper_full/N30/seed1/centralized
+n_workers: 12
+n_seeds: 3
+optimizer_seed: 9876
+epicentre:
+- 37.488
+- 137.272
+data:
+  source: real
+  subsample: 1.0
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  N_clients: 30
+  feature_cache_path: results/paper_full/N30/img_features.npy
+fl:
+  K: 20
+  R_comm: 20000.0
+  capacity: 10
+  n_rounds: 100
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  lr: 0.0005
+  uav_lr: 0.0005
+  batch_size: 32
+  target_accuracy: 0.7
+  T_sel: 5
+  seed: 18725
+budget:
+  P: 50
+  G_max: 30
+N_values:
+- 30
+- 50
+- 100
+methods:
+- centralized
