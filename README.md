@@ -16,7 +16,7 @@ tests inject a deterministic fixture through a documented seam).
 | `src/hflsim/` | Data pipeline (HF streaming, GSI imagery, partitioning) + a **legacy** standalone simulator kept only for the `hflsim` CLI and the `UAVAggregator` bridge. |
 | `configs/` | Every experiment as a YAML config (one-line ablations; resolved copies + seed manifests persisted next to results). |
 | `tests/` | 340 offline tests (`pytest`), including CI invariants that pin the fairness of the paired-comparison design. |
-| `REPORTS/` | Implementation references, data availability + hardware/runtime disclosures. |
+| `REPORTS/` | Implementation references — start at `master_implementation_reference.md` (the consolidated why-and-how for paper writing) — plus data availability + hardware/runtime disclosures. |
 | `scripts/` | Reproduction entry point and GCP wrappers. |
 
 ## Data
