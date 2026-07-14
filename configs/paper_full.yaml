@@ -20,8 +20,8 @@
 #   rep_cap           — B2: reputation-capability ranking (Zhao et al., Chin. J. Aeronaut. 2024)
 #   fair_mab          — B3: fairness/energy MAB selection (Zhu et al., Sensors 2024)
 #
-# Requires HF_TOKEN for the real dataset. Synthetic fallback not recommended
-# for paper results — use paper_full_synthetic.yaml for quick offline checks.
+# Requires HF_TOKEN for the real dataset. The pipeline is real-data only;
+# for a fast end-to-end check use `uavbench smoke_tier2` (reduced real config).
 
 name: paper_full_system
 results_dir: results/paper_full

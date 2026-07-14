@@ -62,17 +62,13 @@ class Alzenad2017(Optimizer):
             lo, hi = float(instance.lower[2]), float(instance.upper[2])
         return lo, hi
 
-    def _run(
-        self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator
-    ) -> Result:
+    def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         env = ENV_PRESETS[self.environment]
         h_lo, h_hi = self._altitude_bounds(instance)
 
         device_xy = instance.device_coords[:, :2]
         centers = weighted_kmeans(rng, device_xy, instance.K, instance.value)  # (K, 2)
-        d_to_centers = np.linalg.norm(
-            device_xy[:, None, :] - centers[None, :, :], axis=2
-        )  # (N, K)
+        d_to_centers = np.linalg.norm(device_xy[:, None, :] - centers[None, :, :], axis=2)  # (N, K)
         cluster_of = d_to_centers.argmin(axis=1)
 
         z = np.empty(instance.K)
@@ -88,8 +84,12 @@ class Alzenad2017(Optimizer):
             # falls back to the best achievable radius (partial coverage,
             # reported honestly through the shared fitness).
             h_k, r_k = min_altitude_for_radius(
-                max(req_r, 1.0), self.max_path_loss_db, self.freq_ghz * 1e9, **env,
-                h_min_m=h_lo, h_max_m=h_hi,
+                max(req_r, 1.0),
+                self.max_path_loss_db,
+                self.freq_ghz * 1e9,
+                **env,
+                h_min_m=h_lo,
+                h_max_m=h_hi,
             )
             z[k] = h_k
             radii[k] = r_k

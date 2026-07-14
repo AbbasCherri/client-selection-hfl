@@ -17,9 +17,9 @@ jobs:
       - name: Install lint tools
         run: pip install ruff black mypy numpy
       - name: ruff
-        run: ruff check src/uavbench tests
+        run: ruff check src tests
       - name: black
-        run: black --check src/uavbench
+        run: black --check src tests
       - name: mypy (uavbench only)
         run: mypy src/uavbench || true  # advisory until the baseline is captured
 

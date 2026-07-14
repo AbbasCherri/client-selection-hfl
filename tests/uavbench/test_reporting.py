@@ -4,6 +4,8 @@ import pandas as pd
 
 from uavbench.reporting import summarize_wall_clock
 
+from .synthetic_fixture import build_synthetic_raw
+
 
 def test_summarizes_tier1_runs(tmp_path):
     df = pd.DataFrame(
@@ -51,8 +53,11 @@ def test_optimizer_wall_time_is_real_perf_counter_delta():
     from uavbench.problem.instance import generate_instance
 
     inst = generate_instance(
-        "uniform", N=30, K=3,
-        area={"x": [0.0, 1000.0], "y": [0.0, 1000.0], "z": [20.0, 120.0]}, seed=0,
+        "uniform",
+        N=30,
+        K=3,
+        area={"x": [0.0, 1000.0], "y": [0.0, 1000.0], "z": [20.0, 120.0]},
+        seed=0,
     )
     t0 = time.perf_counter()
     result = Centroid().optimize(inst, Fitness(inst), np.random.default_rng(0))
@@ -66,9 +71,21 @@ def test_round_time_recorded_by_run_tier2(tmp_path):
     cfg = {
         "results_dir": str(tmp_path),
         "optimizer_seed": 42,
-        "data": {"source": "synthetic", "N_clients": 60, "n_synthetic_clients": 6, "seed": 1},
-        "fl": {"K": 2, "R_comm": 50000.0, "capacity": 5, "n_rounds": 2,
-               "n_local_epochs": 1, "lr": 1e-3, "batch_size": 8, "T_sel": 2},
+        "data": {
+            "source": "prebuilt",
+            "prebuilt": build_synthetic_raw(N=60, K=6, seed=1),
+            "seed": 1,
+        },
+        "fl": {
+            "K": 2,
+            "R_comm": 50000.0,
+            "capacity": 5,
+            "n_rounds": 2,
+            "n_local_epochs": 1,
+            "lr": 1e-3,
+            "batch_size": 8,
+            "T_sel": 2,
+        },
         "budget": {"P": 5, "G_max": 3},
         "methods": ["centroid"],
     }

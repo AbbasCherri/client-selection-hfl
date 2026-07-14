@@ -64,7 +64,9 @@ class ClientSelectionCoordinator:
                 key=lambda c: (c.battery, c.snr, c.num_samples),
                 reverse=True,
             )
-            eligible_clients = ranked_clients[: max(1, min(len(ranked_clients), len(self.uavs) or 1))]
+            eligible_clients = ranked_clients[
+                : max(1, min(len(ranked_clients), len(self.uavs) or 1))
+            ]
 
         # 2. Priority scoring and UCB exploration
         scores = {}

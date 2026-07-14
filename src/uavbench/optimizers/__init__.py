@@ -45,6 +45,15 @@ def build_optimizer(
 
 
 __all__ = [
-    "Optimizer", "Result", "PSO", "GA", "Centroid", "RandomPlacement", "Static",
-    "Mozaffari2016", "Alzenad2017", "REGISTRY", "build_optimizer",
+    "Optimizer",
+    "Result",
+    "PSO",
+    "GA",
+    "Centroid",
+    "RandomPlacement",
+    "Static",
+    "Mozaffari2016",
+    "Alzenad2017",
+    "REGISTRY",
+    "build_optimizer",
 ]

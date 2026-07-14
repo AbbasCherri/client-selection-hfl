@@ -29,8 +29,15 @@ def _last_round(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
 
 def summarize(runs_df: pd.DataFrame) -> pd.DataFrame:
     """Mean +/- std and 95% CI of key metrics per (scenario, method)."""
-    metrics = ["final_fitness", "coverage_pct", "f_cover_norm", "movement_joules",
-               "l_imb", "wall_time_s", "eval_count"]
+    metrics = [
+        "final_fitness",
+        "coverage_pct",
+        "f_cover_norm",
+        "movement_joules",
+        "l_imb",
+        "wall_time_s",
+        "eval_count",
+    ]
     metrics = [m for m in metrics if m in runs_df.columns]
     g = runs_df.groupby(["scenario", "method"])
     out = g[metrics].agg(["mean", "std", "count"])
@@ -111,7 +118,9 @@ def plot_tier2(results_dir: Path) -> list[Path]:
         fig, ax = plt.subplots(figsize=(7, 4.5))
         for method in sorted(df["method"].unique()):
             sub = df[df["method"] == method]
-            ax.plot(sub["round"], sub[metric], label=method, linewidth=1.8, marker="o", markersize=3)
+            ax.plot(
+                sub["round"], sub[metric], label=method, linewidth=1.8, marker="o", markersize=3
+            )
         ax.set_xlabel("FL Round")
         ax.set_ylabel(ylabel)
         ax.set_title(f"Tier-2: {ylabel} vs Round")
@@ -165,8 +174,13 @@ def plot_confusion_matrix(results_dir: Path) -> list[Path]:
         for t in range(4):
             for p in range(4):
                 ax.text(
-                    p, t, f"{int(cm[t, p])}", ha="center", va="center",
-                    color="white" if cm_norm[t, p] > 0.5 else "black", fontsize=9,
+                    p,
+                    t,
+                    f"{int(cm[t, p])}",
+                    ha="center",
+                    va="center",
+                    color="white" if cm_norm[t, p] > 0.5 else "black",
+                    fontsize=9,
                 )
         fig.colorbar(im, ax=ax, label="Row fraction")
         fig.tight_layout()
@@ -193,25 +207,38 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
     paths: list[Path] = []
 
     METHOD_ORDER = [
-        "proposed_hfl", "flat_fl", "centralized",
-        "hfl_no_selection", "hfl_static", "hfl_no_reputation",
-        "fedcs", "rep_cap", "fair_mab",
+        "proposed_hfl",
+        "flat_fl",
+        "centralized",
+        "hfl_no_selection",
+        "hfl_static",
+        "hfl_no_reputation",
+        "fedcs",
+        "rep_cap",
+        "fair_mab",
     ]
     METHOD_LABELS = {
-        "proposed_hfl":      "Proposed HFL",
-        "flat_fl":           "Flat FL",
-        "centralized":       "Centralized",
-        "hfl_no_selection":  "No Selection",
-        "hfl_static":        "Static UAVs",
+        "proposed_hfl": "Proposed HFL",
+        "flat_fl": "Flat FL",
+        "centralized": "Centralized",
+        "hfl_no_selection": "No Selection",
+        "hfl_static": "Static UAVs",
         "hfl_no_reputation": "No Reputation",
         # Literature baselines (Algorithms B1-B3)
-        "fedcs":             "FedCS (Nishio & Yonetani '19)",
-        "rep_cap":           "Rep-Capability (Zhao et al. '24)",
-        "fair_mab":          "Fairness MAB (Zhu et al. '24)",
+        "fedcs": "FedCS (Nishio & Yonetani '19)",
+        "rep_cap": "Rep-Capability (Zhao et al. '24)",
+        "fair_mab": "Fairness MAB (Zhu et al. '24)",
     }
     COLORS = [
-        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b",
-        "#e377c2", "#7f7f7f", "#17becf",
+        "#1f77b4",
+        "#ff7f0e",
+        "#2ca02c",
+        "#d62728",
+        "#9467bd",
+        "#8c564b",
+        "#e377c2",
+        "#7f7f7f",
+        "#17becf",
     ]
     METHOD_COLOR = {m: COLORS[i % len(COLORS)] for i, m in enumerate(METHOD_ORDER)}
 
@@ -233,13 +260,14 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
                 pivot = m_df.pivot_table(index="round", columns="seed", values=metric)
                 pivot = pivot.ffill()
                 mean = pivot.mean(axis=1)
-                n_s  = pivot.count(axis=1).clip(lower=1)
-                ci   = 1.96 * pivot.std(axis=1, ddof=1).fillna(0) / np.sqrt(n_s)
+                n_s = pivot.count(axis=1).clip(lower=1)
+                ci = 1.96 * pivot.std(axis=1, ddof=1).fillna(0) / np.sqrt(n_s)
                 color = METHOD_COLOR.get(method, None)
                 label = METHOD_LABELS.get(method, method)
                 ax.plot(mean.index, mean.values, label=label, linewidth=1.8, color=color)
-                ax.fill_between(mean.index, (mean - ci).values, (mean + ci).values,
-                                alpha=0.15, color=color)
+                ax.fill_between(
+                    mean.index, (mean - ci).values, (mean + ci).values, alpha=0.15, color=color
+                )
             ax.set_xlabel("FL Round")
             ax.set_ylabel(ylabel)
             ax.set_title(f"{ylabel} vs Round  (N={N})")
@@ -265,9 +293,17 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
             s = last[last["method"] == method].sort_values("N")
             color = METHOD_COLOR.get(method, None)
             label = METHOD_LABELS.get(method, method)
-            ax.errorbar(s["N"], s["mean"], yerr=s["ci95"],
-                        label=label, marker="o", linewidth=1.8, color=color,
-                        capsize=4, markersize=5)
+            ax.errorbar(
+                s["N"],
+                s["mean"],
+                yerr=s["ci95"],
+                label=label,
+                marker="o",
+                linewidth=1.8,
+                color=color,
+                capsize=4,
+                markersize=5,
+            )
         ax.set_xlabel("Number of Clients (N)")
         ax.set_ylabel("Final Accuracy (mean ± 95% CI)")
         ax.set_title("Scalability: Final Accuracy vs N")
@@ -284,19 +320,17 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
     sub_ref = df[df["N"] == N_ref]
     if not sub_ref.empty:
         last_ref = _last_round(sub_ref, ["method", "seed"])
-        agg_ref = last_ref.groupby("method")[
-            ["comm_mb_round", "cumulative_energy_j"]
-        ].mean()
+        agg_ref = last_ref.groupby("method")[["comm_mb_round", "cumulative_energy_j"]].mean()
 
         fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
         for ax, col, ylabel, scale, unit in [
-            (axes[0], "comm_mb_round",      "Comm. Cost / Round (MB)", 1.0,    ""),
-            (axes[1], "cumulative_energy_j", "Cumulative Energy (kJ)",  1e-3,   ""),
+            (axes[0], "comm_mb_round", "Comm. Cost / Round (MB)", 1.0, ""),
+            (axes[1], "cumulative_energy_j", "Cumulative Energy (kJ)", 1e-3, ""),
         ]:
             if col not in agg_ref.columns:
                 continue
             methods_bar = [m for m in METHOD_ORDER if m in agg_ref.index]
-            vals   = [agg_ref.loc[m, col] * scale if m in agg_ref.index else 0.0 for m in methods_bar]
+            vals = [agg_ref.loc[m, col] * scale if m in agg_ref.index else 0.0 for m in methods_bar]
             colors = [METHOD_COLOR.get(m, "grey") for m in methods_bar]
             labels = [METHOD_LABELS.get(m, m) for m in methods_bar]
             ax.bar(labels, vals, color=colors, edgecolor="black", linewidth=0.5)
@@ -322,13 +356,16 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
         data = abl.values
         im = ax.imshow(data.T, aspect="auto", cmap="RdYlGn", vmin=0, vmax=1)
         ax.set_xticks(range(len(abl.index)))
-        ax.set_xticklabels([METHOD_LABELS.get(m, m) for m in abl.index], rotation=30, ha="right", fontsize=8)
+        ax.set_xticklabels(
+            [METHOD_LABELS.get(m, m) for m in abl.index], rotation=30, ha="right", fontsize=8
+        )
         ax.set_yticks([0, 1])
         ax.set_yticklabels(["Accuracy", "Macro F1"], fontsize=9)
         for i in range(data.shape[0]):
             for j in range(data.shape[1]):
-                ax.text(i, j, f"{data[i, j]:.3f}", ha="center", va="center",
-                        fontsize=9, color="black")
+                ax.text(
+                    i, j, f"{data[i, j]:.3f}", ha="center", va="center", fontsize=9, color="black"
+                )
         plt.colorbar(im, ax=ax, label="Score")
         ax.set_title(f"Ablation: Final Accuracy & F1  (N={N_ref})", fontsize=10)
         fig.tight_layout()
@@ -358,8 +395,15 @@ def plot_sweep(results_dir: Path) -> list[Path]:
         for method in sorted(final["method"].unique()):
             sub = final[final["method"] == method].sort_values("N")
             style = "--" if method == "no_uav" else "-"
-            ax.plot(sub["N"], sub[metric], label=method, linewidth=1.8,
-                    marker="o", markersize=5, linestyle=style)
+            ax.plot(
+                sub["N"],
+                sub[metric],
+                label=method,
+                linewidth=1.8,
+                marker="o",
+                markersize=5,
+                linestyle=style,
+            )
         ax.set_xlabel("Number of Clients (N)")
         ax.set_ylabel(ylabel)
         ax.set_title(f"Scalability Sweep: {ylabel} vs N")
@@ -385,8 +429,15 @@ def plot_sweep(results_dir: Path) -> list[Path]:
         plt.colorbar(im, ax=ax, label="Accuracy")
         for i in range(len(pivot.index)):
             for j in range(len(pivot.columns)):
-                ax.text(j, i, f"{pivot.values[i, j]:.2f}", ha="center", va="center",
-                        fontsize=7, color="black")
+                ax.text(
+                    j,
+                    i,
+                    f"{pivot.values[i, j]:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    color="black",
+                )
         fig.tight_layout()
         out = results_dir / "sweep_heatmap_accuracy.png"
         fig.savefig(out, dpi=150)
@@ -415,12 +466,12 @@ def plot_selection_sim(results_dir: Path) -> list[Path]:
 
     MODE_ORDER = ["ucb", "random", "fedcs", "rep_cap", "fair_mab", "all"]
     MODE_LABELS = {
-        "ucb":      "Proposed (UCB)",
-        "random":   "Random",
-        "fedcs":    "FedCS (Nishio & Yonetani '19)",
-        "rep_cap":  "Rep-Capability (Zhao et al. '24)",
+        "ucb": "Proposed (UCB)",
+        "random": "Random",
+        "fedcs": "FedCS (Nishio & Yonetani '19)",
+        "rep_cap": "Rep-Capability (Zhao et al. '24)",
         "fair_mab": "Fairness MAB (Zhu et al. '24)",
-        "all":      "All Covered",
+        "all": "All Covered",
     }
     COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#8c564b"]
     MODE_COLOR = {m: COLORS[i % len(COLORS)] for i, m in enumerate(MODE_ORDER)}
@@ -445,13 +496,19 @@ def plot_selection_sim(results_dir: Path) -> list[Path]:
                 pivot = m_df.pivot_table(index="round", columns="seed", values=metric)
                 pivot = pivot.ffill()
                 mean = pivot.mean(axis=1)
-                n_s  = pivot.count(axis=1).clip(lower=1)
-                ci   = 1.96 * pivot.std(axis=1, ddof=1).fillna(0) / np.sqrt(n_s)
+                n_s = pivot.count(axis=1).clip(lower=1)
+                ci = 1.96 * pivot.std(axis=1, ddof=1).fillna(0) / np.sqrt(n_s)
                 color = MODE_COLOR.get(mode, None)
-                ax.plot(mean.index, mean.values, label=MODE_LABELS.get(mode, mode),
-                        linewidth=1.8, color=color)
-                ax.fill_between(mean.index, (mean - ci).values, (mean + ci).values,
-                                alpha=0.15, color=color)
+                ax.plot(
+                    mean.index,
+                    mean.values,
+                    label=MODE_LABELS.get(mode, mode),
+                    linewidth=1.8,
+                    color=color,
+                )
+                ax.fill_between(
+                    mean.index, (mean - ci).values, (mean + ci).values, alpha=0.15, color=color
+                )
             ax.set_xlabel("FL Round")
             ax.set_ylabel(ylabel)
             K = int(sub["K_uav"].iloc[0]) if "K_uav" in sub.columns and len(sub) else 0
@@ -475,10 +532,17 @@ def plot_selection_sim(results_dir: Path) -> list[Path]:
         fig, ax = plt.subplots(figsize=(8, 5))
         for mode in [m for m in MODE_ORDER if m in last["method"].unique()]:
             s = last[last["method"] == mode].sort_values("N")
-            ax.errorbar(s["N"], s["mean"], yerr=s["ci95"],
-                        label=MODE_LABELS.get(mode, mode), marker="o",
-                        linewidth=1.8, color=MODE_COLOR.get(mode, None),
-                        capsize=4, markersize=5)
+            ax.errorbar(
+                s["N"],
+                s["mean"],
+                yerr=s["ci95"],
+                label=MODE_LABELS.get(mode, mode),
+                marker="o",
+                linewidth=1.8,
+                color=MODE_COLOR.get(mode, None),
+                capsize=4,
+                markersize=5,
+            )
         ax.set_xlabel("Number of Clients (N)")
         ax.set_ylabel("Final Accuracy (mean ± 95% CI)")
         ax.set_title("Selection Isolation: Final Accuracy vs N (static UAVs)")
@@ -505,14 +569,18 @@ def plot_selection_sim(results_dir: Path) -> list[Path]:
         data = summary.values
         im = ax.imshow(data.T, aspect="auto", cmap="RdYlGn", vmin=0, vmax=1)
         ax.set_xticks(range(len(summary.index)))
-        ax.set_xticklabels([MODE_LABELS.get(m, m) for m in summary.index],
-                           rotation=30, ha="right", fontsize=8)
+        ax.set_xticklabels(
+            [MODE_LABELS.get(m, m) for m in summary.index], rotation=30, ha="right", fontsize=8
+        )
         ax.set_yticks(range(len(metrics_cols)))
-        ax.set_yticklabels(["Accuracy", "Macro F1", "Jain Fairness"][:len(metrics_cols)], fontsize=9)
+        ax.set_yticklabels(
+            ["Accuracy", "Macro F1", "Jain Fairness"][: len(metrics_cols)], fontsize=9
+        )
         for i in range(data.shape[0]):
             for j in range(data.shape[1]):
-                ax.text(i, j, f"{data[i, j]:.3f}", ha="center", va="center",
-                        fontsize=9, color="black")
+                ax.text(
+                    i, j, f"{data[i, j]:.3f}", ha="center", va="center", fontsize=9, color="black"
+                )
         plt.colorbar(im, ax=ax, label="Score")
         ax.set_title(f"Selection Rules: Final Metrics  (N={N_ref})", fontsize=10)
         fig.tight_layout()

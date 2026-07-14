@@ -28,9 +28,7 @@ class Centroid(Optimizer):
         self.altitude_frac = altitude_frac
         self.value_weighted = value_weighted
 
-    def _run(
-        self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator
-    ) -> Result:
+    def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         device_xy = instance.device_coords[:, :2]
         weights = instance.value if self.value_weighted else None
         centers = weighted_kmeans(rng, device_xy, instance.K, weights)
@@ -56,9 +54,7 @@ class RandomPlacement(Optimizer):
         super().__init__(**kw)
         self.n_draws = n_draws
 
-    def _run(
-        self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator
-    ) -> Result:
+    def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         lo, hi = self._tile_bounds(instance)
         best_x, best_f = None, -np.inf
         conv = []
@@ -85,9 +81,7 @@ class Static(Optimizer):
 
     name = "static"
 
-    def _run(
-        self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator
-    ) -> Result:
+    def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         x = instance.prev_positions.reshape(instance.dim)
         f = fitness(x)
         return Result(

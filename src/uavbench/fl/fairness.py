@@ -23,4 +23,4 @@ def jain_index(counts: np.ndarray) -> float:
     total = counts.sum()
     if total <= 0:
         return 1.0
-    return float(total ** 2 / (len(counts) * (counts ** 2).sum()))
+    return float(total**2 / (len(counts) * (counts**2).sum()))

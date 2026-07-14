@@ -2,36 +2,49 @@
 
 import numpy as np
 
-from uavbench.fl.dataset import SyntheticClientData
 from uavbench.fl.device_state import SNR_MIN_DB, DeviceStateManager
+from uavbench.fl.federated import _apply_black_chips
 from uavbench.fl.stress_sweep import build_stress_grid
 
-# ── SyntheticClientData.black_chip_rate ──────────────────────────────────────
+# ── _apply_black_chips (harness-level, data-source-agnostic) ─────────────────
 
-class TestBlackChipRate:
-    def test_default_zero_is_bit_identical_to_before(self):
-        base = SyntheticClientData(N=100, K=5, seed=7).build()
-        again = SyntheticClientData(N=100, K=5, seed=7, black_chip_rate=0.0).build()
-        assert np.array_equal(base["img_features"], again["img_features"])
-        assert base["client_train_indices"] == again["client_train_indices"]
+
+class TestApplyBlackChips:
+    def _features(self, n=200, seed=7):
+        return np.random.default_rng(seed).standard_normal((n, 512)).astype(np.float32)
+
+    def test_rate_zero_returns_input_unchanged(self):
+        feats = self._features()
+        out = _apply_black_chips(feats, 0.0, seed=7)
+        assert out is feats  # identity fast-path: no copy, no RNG draw
 
     def test_exact_black_fraction(self):
-        raw = SyntheticClientData(N=200, K=5, seed=7, black_chip_rate=0.3).build()
-        n_black = int((np.abs(raw["img_features"]).sum(axis=1) == 0.0).sum())
+        feats = self._features(n=200)
+        out = _apply_black_chips(feats, 0.3, seed=7)
+        n_black = int((np.abs(out).sum(axis=1) == 0.0).sum())
         assert n_black == round(200 * 0.3)
 
-    def test_partition_unchanged_across_rates(self):
-        # Separate chip RNG stream: varying the rate must not reshuffle clients.
-        a = SyntheticClientData(N=150, K=6, seed=3, black_chip_rate=0.0).build()
-        b = SyntheticClientData(N=150, K=6, seed=3, black_chip_rate=0.2).build()
-        assert a["client_train_indices"] == b["client_train_indices"]
-        assert a["client_coords"] == b["client_coords"]
-        # Non-black rows keep their original features.
-        black_mask = np.abs(b["img_features"]).sum(axis=1) == 0.0
-        assert np.array_equal(a["img_features"][~black_mask], b["img_features"][~black_mask])
+    def test_input_not_mutated_and_survivors_intact(self):
+        # Copy semantics keep on-disk feature caches pristine, and rows not
+        # selected for blacking keep their original values bit-for-bit.
+        feats = self._features(n=150, seed=3)
+        before = feats.copy()
+        out = _apply_black_chips(feats, 0.2, seed=3)
+        assert np.array_equal(feats, before)
+        black_mask = np.abs(out).sum(axis=1) == 0.0
+        assert np.array_equal(out[~black_mask], feats[~black_mask])
+
+    def test_deterministic_given_seed(self):
+        feats = self._features()
+        a = _apply_black_chips(feats, 0.2, seed=11)
+        b = _apply_black_chips(feats, 0.2, seed=11)
+        assert np.array_equal(a, b)
+        c = _apply_black_chips(feats, 0.2, seed=12)
+        assert not np.array_equal(a, c)
 
 
 # ── DeviceStateManager knobs ─────────────────────────────────────────────────
+
 
 class TestDeviceStressKnobs:
     def _mgr(self, **kw):
@@ -40,13 +53,18 @@ class TestDeviceStressKnobs:
     def test_defaults_reproduce_previous_behaviour(self):
         base = DeviceStateManager(list(range(20)), np.random.default_rng(5))
         knobbed = DeviceStateManager(
-            list(range(20)), np.random.default_rng(5),
-            dropout_rate=0.0, snr_degradation_db=0.0,
+            list(range(20)),
+            np.random.default_rng(5),
+            dropout_rate=0.0,
+            snr_degradation_db=0.0,
         )
         for cid in range(20):
             a, b = base.get_state(cid), knobbed.get_state(cid)
             assert (a.battery, a.snr_db, a.memory_ok, a.compute_time_s) == (
-                b.battery, b.snr_db, b.memory_ok, b.compute_time_s
+                b.battery,
+                b.snr_db,
+                b.memory_ok,
+                b.compute_time_s,
             )
 
     def test_full_dropout_blocks_everyone(self):
@@ -75,6 +93,7 @@ class TestDeviceStressKnobs:
 
 
 # ── stress grid construction ─────────────────────────────────────────────────
+
 
 class TestStressGrid:
     CFG = {

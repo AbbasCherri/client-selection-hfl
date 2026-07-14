@@ -52,9 +52,7 @@ class Optimizer(ABC):
         return result
 
     @abstractmethod
-    def _run(
-        self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator
-    ) -> Result:
+    def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         """Optimize and return a Result (wall_time/eval_count filled by caller)."""
         raise NotImplementedError
 

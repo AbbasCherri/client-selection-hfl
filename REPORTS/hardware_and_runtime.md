@@ -5,7 +5,7 @@
 | Role | Machine | CPU | RAM | Notes |
 |---|---|---|---|---|
 | Development / smoke runs | Dell Latitude 5540 | Intel i7-1355U (10c/12t) | 32 GB | CPU-only; all harnesses runnable |
-| Full experimental grids | GCP `n1-standard-12` | 12 vCPU | 45 GB | via `run_gcp.sh` / `run_paper_sim.sh` / `run_selection_gcp.sh` (self-terminating) |
+| Full experimental grids | GCP `n1-standard-12` | 12 vCPU | 45 GB | via `scripts/run_gcp.sh` / `scripts/run_paper_sim.sh` / `scripts/run_selection_gcp.sh` (self-terminating) |
 
 No GPU is used anywhere: the CPU-feasibility claim is backed by the
 measured wall-clock numbers below, not an architectural argument.
@@ -21,7 +21,7 @@ Each sweep worker pins `torch.set_num_threads(1)` so total active threads =
 | `configs/paper_full.yaml` | full paper sim (N × method × seed) | 12 |
 | `configs/selection_isolation.yaml` | selection isolation | (see config) |
 | `configs/tier2_sweep.yaml` | N-scalability sweep | (see config) |
-| `configs/synthetic_stress_test.yaml` | stress-test sweep | 8 |
+| `configs/stress_test.yaml` | stress-test sweep | 8 |
 
 `UAVBENCH_N_WORKERS` overrides the Tier-1 worker count per machine.
 

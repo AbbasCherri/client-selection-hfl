@@ -31,7 +31,7 @@ import numpy as np
 W_CONTRIB: float = 0.4
 W_ANOMALY: float = 0.3
 W_TEMP: float = 0.3
-EMA_ALPHA: float = 0.30   # legacy score-smoothing constant (kept for back-compat)
+EMA_ALPHA: float = 0.30  # legacy score-smoothing constant (kept for back-compat)
 
 # EMA on the update *vector* (paper Algorithm 3: 0.7 new / 0.3 old).
 _VEC_EMA_NEW: float = 0.7
@@ -64,7 +64,9 @@ def trimmed_mean(values: list[float] | np.ndarray, trim: float = 0.1) -> float:
 
 def _vec(state_dict: dict) -> np.ndarray:
     """Flatten a trainable state dict to a 1-D float32 numpy vector."""
-    return np.concatenate([v.detach().cpu().numpy().ravel().astype(np.float32) for v in state_dict.values()])
+    return np.concatenate(
+        [v.detach().cpu().numpy().ravel().astype(np.float32) for v in state_dict.values()]
+    )
 
 
 class ReputationManager:
@@ -79,15 +81,17 @@ class ReputationManager:
     def __init__(self, client_ids: list[int], window_size: int | None = None) -> None:
         self._R_contrib: dict[int, float] = {cid: 0.5 for cid in client_ids}
         self._R_anomaly: dict[int, float] = {cid: 1.0 for cid in client_ids}
-        self._R_temp:    dict[int, float] = {cid: 0.5 for cid in client_ids}
+        self._R_temp: dict[int, float] = {cid: 0.5 for cid in client_ids}
 
-        self._total:   dict[int, int] = {cid: 0 for cid in client_ids}
+        self._total: dict[int, int] = {cid: 0 for cid in client_ids}
         self._success: dict[int, int] = {cid: 0 for cid in client_ids}
 
         # Rolling window of update ℓ2-norms (diagnostics / back-compat). Sized to
         # hold several rounds' worth of updates so it isn't fully replaced by
         # a single round when the client pool is large (default: 10 rounds).
-        self._window_size = window_size if window_size is not None else max(100, 10 * len(client_ids))
+        self._window_size = (
+            window_size if window_size is not None else max(100, 10 * len(client_ids))
+        )
         self._norm_window: list[float] = []
         # Per-client norm history (diagnostics)
         self._norm_history: dict[int, list[float]] = {cid: [] for cid in client_ids}
@@ -112,7 +116,7 @@ class ReputationManager:
 
     def update_batch(
         self,
-        updates: dict[int, dict],          # client_id → trainable update-delta state dict
+        updates: dict[int, dict],  # client_id → trainable update-delta state dict
         global_update_vec: np.ndarray | None,
         response_times: dict[int, float] | None = None,
     ) -> None:
@@ -129,7 +133,7 @@ class ReputationManager:
 
         # Keep the global norm window (capped at self._window_size entries).
         self._norm_window.extend(norms)
-        self._norm_window = self._norm_window[-self._window_size:]
+        self._norm_window = self._norm_window[-self._window_size :]
 
         # Global per-parameter mean/variance across all clients' updates (EMA).
         for v in vecs.values():
@@ -140,7 +144,9 @@ class ReputationManager:
             else:
                 diff = v64 - self._param_mean
                 self._param_mean += _STATS_ALPHA * diff
-                self._param_var = (1.0 - _STATS_ALPHA) * (self._param_var + _STATS_ALPHA * diff * diff)
+                self._param_var = (1.0 - _STATS_ALPHA) * (
+                    self._param_var + _STATS_ALPHA * diff * diff
+                )
 
         for cid, vec in vecs.items():
             norm = float(np.linalg.norm(vec))
@@ -149,7 +155,7 @@ class ReputationManager:
             prev_ema = self._update_ema.get(cid)
             if prev_ema is None:
                 self._update_ema[cid] = vec.astype(np.float64).copy()
-                r_c = 0.5   # cold start: no history to compare against
+                r_c = 0.5  # cold start: no history to compare against
             else:
                 new_ema = _VEC_EMA_NEW * vec.astype(np.float64) + _VEC_EMA_OLD * prev_ema
                 denom = np.linalg.norm(new_ema) * np.linalg.norm(prev_ema)
@@ -163,7 +169,7 @@ class ReputationManager:
 
             # --- R_anomaly: diagonal Mahalanobis vs global per-parameter stats ---
             z = (vec.astype(np.float64) - self._param_mean) / np.sqrt(self._param_var + _EPS)
-            d = float(np.sqrt(np.mean(z * z)))   # Mahalanobis / sqrt(J)
+            d = float(np.sqrt(np.mean(z * z)))  # Mahalanobis / sqrt(J)
             r_a = 1.0 if d <= 2.0 else float(np.exp(-0.5 * (d - 2.0)))
             self._R_anomaly[cid] = r_a
 
@@ -190,7 +196,7 @@ class ReputationManager:
 
     def mark_absent(self, client_id: int) -> None:
         """Call when an eligible client failed to return an update (straggler/dropout)."""
-        self._total[client_id] += 1   # success unchanged → rate decreases
+        self._total[client_id] += 1  # success unchanged → rate decreases
         self._R_temp[client_id] = self._temporal_score(client_id)
         # Absence is evidence *against* components that scored this client highly.
         self._evidence += 1.0 - np.array(

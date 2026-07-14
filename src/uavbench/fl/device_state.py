@@ -14,9 +14,9 @@ from __future__ import annotations
 import numpy as np
 
 # Paper Table II eligibility thresholds
-B_MIN: float = 0.20       # minimum battery fraction
-SNR_MIN_DB: float = 3.0   # minimum SNR (dB)
-T_MAX_S: float = 300.0    # maximum compute time (s)
+B_MIN: float = 0.20  # minimum battery fraction
+SNR_MIN_DB: float = 3.0  # minimum SNR (dB)
+T_MAX_S: float = 300.0  # maximum compute time (s)
 
 
 class DeviceState:
@@ -79,17 +79,13 @@ class DeviceStateManager:
         self._snr_degradation_db = float(snr_degradation_db)
 
         # Initial batteries: uniform [0.5, 1.0]
-        self._battery: dict[int, float] = {
-            cid: float(rng.uniform(0.5, 1.0)) for cid in client_ids
-        }
+        self._battery: dict[int, float] = {cid: float(rng.uniform(0.5, 1.0)) for cid in client_ids}
         # Base SNR: uniform [5, 20] dB — device-specific channel quality
         self._snr_base: dict[int, float] = {
             cid: float(rng.uniform(5.0, 20.0)) for cid in client_ids
         }
         # 10% of devices have insufficient memory (permanent constraint)
-        self._memory_ok: dict[int, bool] = {
-            cid: bool(rng.random() > 0.10) for cid in client_ids
-        }
+        self._memory_ok: dict[int, bool] = {cid: bool(rng.random() > 0.10) for cid in client_ids}
         # Base compute time: uniform [50, 250] s — hardware heterogeneity
         self._compute_base: dict[int, float] = {
             cid: float(rng.uniform(50.0, 250.0)) for cid in client_ids
@@ -128,9 +124,13 @@ class DeviceStateManager:
             memory_ok = False  # transient dropout via the existing gate
         return DeviceState(
             battery=self._battery[client_id],
-            snr_db=self._snr_base[client_id] + self._snr_noise[client_id] - self._snr_degradation_db,
+            snr_db=self._snr_base[client_id]
+            + self._snr_noise[client_id]
+            - self._snr_degradation_db,
             memory_ok=memory_ok,
-            compute_time_s=max(10.0, self._compute_base[client_id] + self._compute_noise[client_id]),
+            compute_time_s=max(
+                10.0, self._compute_base[client_id] + self._compute_noise[client_id]
+            ),
             margin_s=margin,
         )
 

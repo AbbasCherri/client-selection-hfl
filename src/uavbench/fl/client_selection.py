@@ -37,23 +37,23 @@ import math
 
 import numpy as np
 
-from hflsim.shared.coords import haversine
+from hflsim.shared.coords import haversine_matrix
 from hflsim.shared.value import beta_schedule
 
 from .device_state import T_MAX_S, DeviceState
 
 # Paper §IV-C priority weights
-W_BATTERY  = 0.35
+W_BATTERY = 0.35
 W_LEARNING = 0.30
-W_UTILITY  = 0.35
+W_UTILITY = 0.35
 
 # Utility sub-weights (§IV-C3)
-W_EPI  = 0.4
-W_SNR  = 0.3
+W_EPI = 0.4
+W_SNR = 0.3
 W_DENS = 0.2
 W_PROX = 0.1
 
-UCB_C = math.sqrt(2)   # exploration constant from paper
+UCB_C = math.sqrt(2)  # exploration constant from paper
 
 # Baseline B2 (Zhao et al. 2024): trust/capability split γ·R_n + (1−γ)·ℓ̃_n.
 # γ = 0.5 is the symmetric default documented in the adaptation note.
@@ -69,7 +69,7 @@ FAIRMAB_W_STALE = 0.5
 DEFAULT_T_STALE_CAP = 5
 
 # Noto Peninsula 2024 epicentre (default; override via cfg)
-DEFAULT_EPICENTRE = (37.488, 137.272)   # (lat °N, lon °E)
+DEFAULT_EPICENTRE = (37.488, 137.272)  # (lat °N, lon °E)
 
 # Fallback UAV-IoT communication range (paper Table II) when the harness does
 # not pass its own R_comm.
@@ -111,7 +111,7 @@ def _compute_utility(
     # U_epi — Haversine distance to the epicentre, capped at the 95th percentile
     # across the currently eligible devices (paper Algorithm 2):
     #   U_epi = (d95 − min(d_n, d95)) / d95
-    epi_dists = np.array([haversine(c, epicentre) for c in coords])
+    epi_dists = haversine_matrix(np.asarray(coords), np.asarray([epicentre]))[:, 0]
     d95 = float(np.percentile(epi_dists, 95))
     if d95 > 1e-9:
         u_epi = (d95 - np.minimum(epi_dists, d95)) / d95
@@ -127,18 +127,16 @@ def _compute_utility(
     # disaster area via min-max. Vectorised O(N²) in a local metre frame.
     client_xy = _xy_metres(coords)
     if n > 1:
-        diff = client_xy[:, None, :] - client_xy[None, :, :]   # (N, N, 2)
-        sq_dists = (diff ** 2).sum(axis=2)                       # (N, N)
-        density = (sq_dists < 5_000.0 ** 2).sum(axis=1) - 1.0   # exclude self
+        diff = client_xy[:, None, :] - client_xy[None, :, :]  # (N, N, 2)
+        sq_dists = (diff**2).sum(axis=2)  # (N, N)
+        density = (sq_dists < 5_000.0**2).sum(axis=1) - 1.0  # exclude self
     else:
         density = np.zeros(n)
     u_dens = _minmax(density)
 
     # U_prox — proximity to nearest UAV (paper: max(0, 1 − d_min / R_comm)).
     if uav_coords_latlon:
-        prox_dists = np.array([
-            min(haversine(c, ul) for ul in uav_coords_latlon) for c in coords
-        ])
+        prox_dists = haversine_matrix(np.asarray(coords), np.asarray(uav_coords_latlon)).min(axis=1)
         u_prox = np.clip(1.0 - prox_dists / max(R_comm, 1e-9), 0.0, 1.0)
     else:
         u_prox = np.full(n, 0.5)
@@ -163,14 +161,14 @@ class ClientSelector:
 
     def select(
         self,
-        covered: dict[int, int],                        # {client_id: uav_idx}
+        covered: dict[int, int],  # {client_id: uav_idx}
         device_states: dict[int, DeviceState],
         reputation_scores: dict[int, float],
         client_coords: dict[int, tuple[float, float]],
         uav_coords_latlon: list[tuple[float, float]],
         round_num: int,
         uav_capacity: int,
-        mode: str = "ucb",       # "ucb" | "random" | "all" | "fedcs" | "rep_cap" | "fair_mab"
+        mode: str = "ucb",  # "ucb" | "random" | "all" | "fedcs" | "rep_cap" | "fair_mab"
         rng: np.random.Generator | None = None,
         R_comm: float = DEFAULT_R_COMM_M,
         t_stale_cap: int = DEFAULT_T_STALE_CAP,
@@ -204,12 +202,15 @@ class ClientSelector:
             if mode == "rep_cap":
                 scores = self._rep_cap_scores(eligible_ids, device_states, reputation_scores)
             else:
-                scores = self._fair_mab_scores(
-                    eligible_ids, device_states, round_num, t_stale_cap
-                )
+                scores = self._fair_mab_scores(eligible_ids, device_states, round_num, t_stale_cap)
             selected = self._greedy_assign(
-                eligible_ids, eligible, scores, uav_capacity,
-                client_coords, uav_coords_latlon, R_comm,
+                eligible_ids,
+                eligible,
+                scores,
+                uav_capacity,
+                client_coords,
+                uav_coords_latlon,
+                R_comm,
             )
             return self._record_selection(selected, round_num)
 
@@ -219,14 +220,18 @@ class ClientSelector:
         # ── UCB pipeline ────────────────────────────────────────────────
 
         utility = _compute_utility(
-            eligible_ids, device_states, client_coords, uav_coords_latlon,
-            self._epicentre, R_comm,
+            eligible_ids,
+            device_states,
+            client_coords,
+            uav_coords_latlon,
+            self._epicentre,
+            R_comm,
         )
 
-        batteries    = np.array([device_states[cid].battery            for cid in eligible_ids])
-        compute_s    = np.array([device_states[cid].compute_time_s     for cid in eligible_ids])
-        reputations  = np.array([reputation_scores.get(cid, 0.5)       for cid in eligible_ids])
-        utilities    = np.array([utility.get(cid, 0.5)                 for cid in eligible_ids])
+        batteries = np.array([device_states[cid].battery for cid in eligible_ids])
+        compute_s = np.array([device_states[cid].compute_time_s for cid in eligible_ids])
+        reputations = np.array([reputation_scores.get(cid, 0.5) for cid in eligible_ids])
+        utilities = np.array([utility.get(cid, 0.5) for cid in eligible_ids])
 
         # Paper §IV-C2: b̃ = b_n, ℓ̃ = 1 − (T̂_n/T_max)², Ũ = β·Û + (1−β)·R.
         l_feat = np.clip(1.0 - (compute_s / T_MAX_S) ** 2, 0.0, 1.0)
@@ -240,8 +245,13 @@ class ClientSelector:
         ucb = priority + UCB_C * np.sqrt(math.log(t) / (sel_cnts + 1.0))
 
         selected = self._greedy_assign(
-            eligible_ids, eligible, ucb, uav_capacity,
-            client_coords, uav_coords_latlon, R_comm,
+            eligible_ids,
+            eligible,
+            ucb,
+            uav_capacity,
+            client_coords,
+            uav_coords_latlon,
+            R_comm,
         )
         return self._record_selection(selected, round_num)
 
@@ -285,7 +295,7 @@ class ClientSelector:
                     n_sel += 1
                     self._counts[cid] += 1
                 else:
-                    break   # deadline would be exceeded; stop adding candidates
+                    break  # deadline would be exceeded; stop adding candidates
             # (capacity full also stops the loop; ascending order makes any
             #  later candidate at least as expensive — matches Algorithm B1)
         return selected
@@ -323,10 +333,9 @@ class ClientSelector:
         """
         batteries = np.array([device_states[cid].battery for cid in eligible_ids])
         cap = max(t_stale_cap, 1)
-        staleness = np.array([
-            min(1.0, (round_num - self._last_selected.get(cid, 0)) / cap)
-            for cid in eligible_ids
-        ])
+        staleness = np.array(
+            [min(1.0, (round_num - self._last_selected.get(cid, 0)) / cap) for cid in eligible_ids]
+        )
         return FAIRMAB_W_ENERGY * batteries + FAIRMAB_W_STALE * staleness
 
     def _greedy_assign(
@@ -353,10 +362,10 @@ class ClientSelector:
         # Pre-compute the (N, K) client-UAV Haversine distance matrix once.
         dist: np.ndarray | None = None
         if uav_coords_latlon:
-            dist = np.array([
-                [haversine(client_coords[cid], ul) for ul in uav_coords_latlon]
-                for cid in eligible_ids
-            ])
+            dist = haversine_matrix(
+                np.asarray([client_coords[cid] for cid in eligible_ids]),
+                np.asarray(uav_coords_latlon),
+            )
 
         for idx in order:
             cid = eligible_ids[idx]
@@ -370,11 +379,12 @@ class ClientSelector:
                 continue
 
             feasible = [
-                j for j in range(len(uav_coords_latlon))
+                j
+                for j in range(len(uav_coords_latlon))
                 if dist[idx, j] <= R_comm and fill.get(j, 0) < uav_capacity
             ]
             if not feasible:
-                continue   # skip client — no feasible UAV (Algorithm 4)
+                continue  # skip client — no feasible UAV (Algorithm 4)
             j_star = min(feasible, key=lambda j: (fill.get(j, 0), dist[idx, j]))
             selected[cid] = j_star
             fill[j_star] = fill.get(j_star, 0) + 1

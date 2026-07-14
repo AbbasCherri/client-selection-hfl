@@ -13,11 +13,11 @@ import math
 
 import numpy as np
 
+from hflsim.shared.coords import latlon_to_meters
+from hflsim.simulation.uav import UAVAggregator
 from uavbench.optimizers import build_optimizer
 from uavbench.problem.fitness import Fitness
 from uavbench.problem.instance import ProblemInstance
-from hflsim.shared.coords import latlon_to_meters
-from hflsim.simulation.uav import UAVAggregator
 
 _EARTH_RADIUS_M = 6_371_000.0
 

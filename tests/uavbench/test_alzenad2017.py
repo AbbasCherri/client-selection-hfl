@@ -45,12 +45,18 @@ def test_min_altitude_tracks_cluster_spread():
     # energy-efficient altitude than a sprawling one. Build one instance of
     # each and compare the mean chosen altitude.
     tight = generate_instance(
-        "epicenter_biased", N=80, K=2,
-        area={"x": [0.0, 1000.0], "y": [0.0, 1000.0], "z": [20.0, 500.0]}, seed=2,
+        "epicenter_biased",
+        N=80,
+        K=2,
+        area={"x": [0.0, 1000.0], "y": [0.0, 1000.0], "z": [20.0, 500.0]},
+        seed=2,
     )
     sprawl = generate_instance(
-        "uniform", N=80, K=2,
-        area={"x": [0.0, 20000.0], "y": [0.0, 20000.0], "z": [20.0, 500.0]}, seed=2,
+        "uniform",
+        N=80,
+        K=2,
+        area={"x": [0.0, 20000.0], "y": [0.0, 20000.0], "z": [20.0, 500.0]},
+        seed=2,
     )
     opt = Alzenad2017(max_path_loss_db=110.0)
     rng = np.random.default_rng(0)

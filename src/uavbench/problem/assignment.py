@@ -69,7 +69,7 @@ def greedy_assignment(
             raise ValueError(f"radii must have shape (K,)=({K},); got {r.shape}")
         in_range = dist <= r[None, :]
     battery_ok = instance.battery >= instance.B_min_uav  # (K,)
-    feasible_static = in_range & battery_ok[None, :]      # (N, K), capacity applied live
+    feasible_static = in_range & battery_ok[None, :]  # (N, K), capacity applied live
 
     capacity = instance.capacity
     loads = np.zeros(K, dtype=np.int64)

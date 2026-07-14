@@ -11,7 +11,10 @@ from uavbench.fl.selection_isolation import (
     static_uav_layout,
 )
 
+from .synthetic_fixture import build_synthetic_raw
+
 # ── elbow_k ───────────────────────────────────────────────────────────────────
+
 
 class TestElbowK:
     def _blobs(self, centres, n_per=30, spread=50.0, seed=0):
@@ -34,7 +37,7 @@ class TestElbowK:
         rng = np.random.default_rng(1)
         xy = rng.normal(0, 100, size=(5, 2))
         k, centres = elbow_k(xy, k_min=2, k_max=30, seed=0)
-        assert k <= 4   # n − 1
+        assert k <= 4  # n − 1
 
     def test_single_k_range(self):
         rng = np.random.default_rng(2)
@@ -52,6 +55,7 @@ class TestElbowK:
 
 
 # ── static_uav_layout ─────────────────────────────────────────────────────────
+
 
 class TestStaticLayout:
     def _coord_map(self, n=20):
@@ -86,6 +90,7 @@ class TestStaticLayout:
 
 # ── run_selection_isolation (synthetic smoke) ────────────────────────────────
 
+
 def _iso_cfg(results_dir: str, modes: list[str], n_rounds: int = 4) -> dict:
     return {
         "results_dir": results_dir,
@@ -108,7 +113,11 @@ def _iso_cfg(results_dir: str, modes: list[str], n_rounds: int = 4) -> dict:
             "seed": 42,
         },
         "elbow": {"k_min": 2, "k_max": 4},
-        "data": {"source": "synthetic", "N_clients": 240, "seed": 42},
+        "data": {
+            "source": "prebuilt",
+            "prebuilt": build_synthetic_raw(N=240, K=12, seed=42),
+            "seed": 42,
+        },
         "optimizer_seed": 42,
     }
 
@@ -122,9 +131,19 @@ class TestRunSelectionIsolation:
         assert isinstance(df, pd.DataFrame)
         assert len(df) == len(modes) * 4
         assert set(df["method"].unique()) == set(modes)
-        for col in ("accuracy", "macro_f1", "coverage_pct", "n_selected",
-                    "n_eligible", "K_uav", "jain_fairness", "n_unique_selected",
-                    "mean_battery", "comm_mb_round", "rounds_to_target"):
+        for col in (
+            "accuracy",
+            "macro_f1",
+            "coverage_pct",
+            "n_selected",
+            "n_eligible",
+            "K_uav",
+            "jain_fairness",
+            "n_unique_selected",
+            "mean_battery",
+            "comm_mb_round",
+            "rounds_to_target",
+        ):
             assert col in df.columns, f"missing column {col}"
         assert df["accuracy"].between(0, 1).all()
         assert df["jain_fairness"].between(0, 1).all()

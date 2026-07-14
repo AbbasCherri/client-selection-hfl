@@ -10,27 +10,29 @@ from uavbench.runner import _instance_seed
 
 # ── formula regression pins (frozen historical behaviour) ────────────────────
 
+
 class TestSeedFormulas:
     def test_method_hash_matches_md5_fold(self):
         for method in ("proposed_hfl", "fedcs", "mozaffari2016"):
             raw = int(hashlib.md5(method.encode()).hexdigest(), 16)
-            assert method_hash(method, 31) == raw % (2 ** 31)
-            assert method_hash(method, 16) == raw % (2 ** 16)
+            assert method_hash(method, 31) == raw % (2**31)
+            assert method_hash(method, 16) == raw % (2**16)
 
     def test_tier2_seed_formula(self):
         # Pin the exact pre-refactor run_tier2 expression.
-        raw = int(hashlib.md5(b"pso").hexdigest(), 16) % (2 ** 31)
-        assert tier2_seed(9876, 40, "pso") == (9876 + 40 * 7919 + raw) % (2 ** 31)
+        raw = int(hashlib.md5(b"pso").hexdigest(), 16) % (2**31)
+        assert tier2_seed(9876, 40, "pso") == (9876 + 40 * 7919 + raw) % (2**31)
 
     def test_fullsim_seed_formula(self):
-        raw = int(hashlib.md5(b"proposed_hfl").hexdigest(), 16) % (2 ** 16)
-        assert fullsim_method_seed(1234, "proposed_hfl") == (1234 ^ raw) % (2 ** 31)
+        raw = int(hashlib.md5(b"proposed_hfl").hexdigest(), 16) % (2**16)
+        assert fullsim_method_seed(1234, "proposed_hfl") == (1234 ^ raw) % (2**31)
 
     def test_sweep_job_seed_formula(self):
         assert sweep_job_seed(9876, 2, 100) == 9876 + 2 * 7919 + 100 * 31
 
 
 # ── manifest construction ─────────────────────────────────────────────────────
+
 
 def _tier1_cfg():
     return {
@@ -93,14 +95,14 @@ class TestBuildSeedManifest:
 def test_manifest_matches_live_run_tier2_seed():
     """End-to-end pin: manifest seed equals the rng seed run_tier2 derives.
 
-    run_tier2 folds len(clients) into its seed; on synthetic data every
-    client keeps a non-empty shard, so len(clients) == N_clients and the
+    run_tier2 folds len(clients) into its seed; the fixture gives every
+    client a non-empty shard, so len(clients) == N_clients and the
     manifest's assumption holds exactly.
     """
-    from uavbench.fl.dataset import SyntheticClientData
+    from .synthetic_fixture import build_synthetic_raw
 
     N = 24
-    raw = SyntheticClientData(N=200, K=N, seed=42).build()
+    raw = build_synthetic_raw(N=200, K=N, seed=42)
     n_loaded = sum(1 for cid in raw["client_coords"] if raw["client_train_indices"].get(cid))
     assert n_loaded == N  # synthetic mode never drops clients
 

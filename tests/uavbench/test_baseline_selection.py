@@ -20,20 +20,27 @@ from uavbench.fl.client_selection import (
 )
 from uavbench.fl.device_state import T_MAX_S, DeviceState
 
+from .synthetic_fixture import build_synthetic_raw
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _state(battery=0.8, snr_db=15.0, compute_time_s=100.0):
-    return DeviceState(battery=battery, snr_db=snr_db, memory_ok=True,
-                       compute_time_s=compute_time_s)
+    return DeviceState(
+        battery=battery, snr_db=snr_db, memory_ok=True, compute_time_s=compute_time_s
+    )
+
 
 def _ineligible_state():
     return DeviceState(battery=0.0, snr_db=0.0, memory_ok=False, compute_time_s=9999.0)
+
 
 def _coords(n):
     return {i: (37.488 + i * 0.01, 137.272) for i in range(n)}
 
 
 # ── FedCS (mode="fedcs") ─────────────────────────────────────────────────────
+
 
 class TestFedCS:
     def test_selects_fastest_first(self):
@@ -48,7 +55,7 @@ class TestFedCS:
     def test_respects_per_uav_capacity(self):
         n = 9
         sel = ClientSelector(list(range(n)))
-        covered = {i: i % 3 for i in range(n)}   # 3 UAVs
+        covered = {i: i % 3 for i in range(n)}  # 3 UAVs
         states = {i: _state() for i in range(n)}
         rep = {i: 0.5 for i in range(n)}
         result = sel.select(covered, states, rep, _coords(n), [], 1, 2, mode="fedcs")
@@ -73,7 +80,7 @@ class TestFedCS:
         sel = ClientSelector([0, 1])
         states = {
             0: _state(compute_time_s=100.0),
-            1: _state(compute_time_s=T_MAX_S + 50.0),   # would blow the deadline
+            1: _state(compute_time_s=T_MAX_S + 50.0),  # would blow the deadline
         }
         result = sel._fedcs_select({0: 0, 1: 0}, states, uav_capacity=10)
         assert result == {0: 0}
@@ -99,6 +106,7 @@ class TestFedCS:
 
 # ── Reputation-capability (mode="rep_cap") ───────────────────────────────────
 
+
 class TestRepCap:
     def test_high_reputation_wins_at_equal_compute(self):
         sel = ClientSelector([0, 1])
@@ -123,7 +131,7 @@ class TestRepCap:
         sel = ClientSelector(list(range(n)))
         covered = {i: 0 for i in range(n)}
         states = {i: _state(compute_time_s=100.0) for i in range(n)}
-        rep = {0: 0.9, 1: 0.8, 2: 0.7, 3: 0.5}   # device 3: neutral, never picked
+        rep = {0: 0.9, 1: 0.8, 2: 0.7, 3: 0.5}  # device 3: neutral, never picked
         picked_rounds = []
         for rnd in range(1, 11):
             result = sel.select(covered, states, rep, _coords(n), [], rnd, 2, mode="rep_cap")
@@ -144,6 +152,7 @@ class TestRepCap:
 
 
 # ── Fairness/energy MAB (mode="fair_mab") ────────────────────────────────────
+
 
 class TestFairMab:
     def test_reward_formula(self):
@@ -170,8 +179,9 @@ class TestFairMab:
         rep = {i: 0.5 for i in range(2)}
         winners = []
         for rnd in range(1, 8):
-            result = sel.select(covered, states, rep, _coords(2), [], rnd, 1,
-                                mode="fair_mab", t_stale_cap=5)
+            result = sel.select(
+                covered, states, rep, _coords(2), [], rnd, 1, mode="fair_mab", t_stale_cap=5
+            )
             winners.append(next(iter(result.keys())))
         # Device 1 must be picked at least once — fairness pressure works.
         assert 1 in winners
@@ -211,12 +221,12 @@ class TestFairMab:
 
 # ── Cross-mode behaviour ─────────────────────────────────────────────────────
 
+
 class TestModeDispatch:
     def test_unknown_mode_raises(self):
         sel = ClientSelector([0])
         with pytest.raises(ValueError, match="unknown selection mode"):
-            sel.select({0: 0}, {0: _state()}, {0: 0.5}, _coords(1), [], 1, 5,
-                       mode="bogus")
+            sel.select({0: 0}, {0: _state()}, {0: 0.5}, _coords(1), [], 1, 5, mode="bogus")
 
     def test_ucb_updates_last_selected(self):
         """Staleness bookkeeping is maintained under every mode, not just fair_mab."""
@@ -231,11 +241,12 @@ class TestModeDispatch:
 
 # ── Full-system method wiring ────────────────────────────────────────────────
 
+
 class TestMethodCfgWiring:
     def test_baselines_registered(self):
         from uavbench.fl.federated import _METHOD_CFG
-        for method, mode in [("fedcs", "fedcs"), ("rep_cap", "rep_cap"),
-                             ("fair_mab", "fair_mab")]:
+
+        for method, mode in [("fedcs", "fedcs"), ("rep_cap", "rep_cap"), ("fair_mab", "fair_mab")]:
             assert method in _METHOD_CFG
             placement, sel_mode, rep_weighted, dynamic = _METHOD_CFG[method]
             assert sel_mode == mode
@@ -247,17 +258,30 @@ class TestMethodCfgWiring:
     def test_full_hfl_smoke(self, method):
         """2-round synthetic end-to-end run for each literature baseline."""
         from uavbench.fl.federated import run_full_hfl
+
         cfg = {
             "methods": [method],
             "fl": {
-                "n_rounds": 2, "n_local_epochs": 1, "n_uav_epochs": 1,
-                "lr": 0.01, "uav_lr": 0.01, "batch_size": 4,
-                "K": 2, "R_comm": 200_000.0, "capacity": 10,
-                "T_sel": 1, "lambda_min": 0.0,
-                "target_accuracy": 0.99, "seed": 42,
+                "n_rounds": 2,
+                "n_local_epochs": 1,
+                "n_uav_epochs": 1,
+                "lr": 0.01,
+                "uav_lr": 0.01,
+                "batch_size": 4,
+                "K": 2,
+                "R_comm": 200_000.0,
+                "capacity": 10,
+                "T_sel": 1,
+                "lambda_min": 0.0,
+                "target_accuracy": 0.99,
+                "seed": 42,
             },
             "budget": {"P": 5, "G_max": 3},
-            "data": {"source": "synthetic", "N_clients": 12, "seed": 42},
+            "data": {
+                "source": "prebuilt",
+                "prebuilt": build_synthetic_raw(N=12, K=2, seed=42),
+                "seed": 42,
+            },
             "optimizer_seed": 42,
         }
         with tempfile.TemporaryDirectory() as d:

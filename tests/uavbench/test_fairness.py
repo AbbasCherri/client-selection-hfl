@@ -25,4 +25,5 @@ class TestJainIndex:
 
     def test_selection_isolation_alias_points_here(self):
         from uavbench.fl.selection_isolation import _jain_index
+
         assert _jain_index is jain_index

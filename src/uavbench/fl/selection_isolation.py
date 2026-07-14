@@ -42,7 +42,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-import yaml
 from joblib import Parallel, delayed
 from sklearn.cluster import KMeans
 from torch.utils.data import DataLoader, Subset
@@ -58,6 +57,7 @@ from .federated import (
     _UAV_MODEL_SIZE_MB,
     _confusion_rows,
     _covered_clients,
+    _dump_resolved_cfg,
     _evaluate_loader,
     _load_data,
     _local_train,
@@ -75,7 +75,7 @@ logger = logging.getLogger("uavbench.fl.selection_isolation")
 # the rest are the random ablation and literature baselines B1-B3.
 DEFAULT_MODES: list[str] = ["ucb", "random", "fedcs", "rep_cap", "fair_mab"]
 
-_UAV_ALTITUDE_M = 70.0   # hover altitude used throughout the repo
+_UAV_ALTITUDE_M = 70.0  # hover altitude used throughout the repo
 
 
 # ---------------------------------------------------------------------------
@@ -100,10 +100,7 @@ def elbow_k(
     k_max = max(k_min, min(k_max, n - 1))
     ks = list(range(k_min, k_max + 1))
 
-    fits = {
-        k: KMeans(n_clusters=k, n_init=10, random_state=seed).fit(xy_m)
-        for k in ks
-    }
+    fits = {k: KMeans(n_clusters=k, n_init=10, random_state=seed).fit(xy_m) for k in ks}
     if len(ks) == 1:
         return ks[0], fits[ks[0]].cluster_centers_
 
@@ -169,19 +166,19 @@ def run_selection_isolation(cfg: dict) -> dict:
     results_dir.mkdir(parents=True, exist_ok=True)
 
     fl = cfg["fl"]
-    n_rounds        = fl["n_rounds"]
-    n_local_epochs  = fl["n_local_epochs"]
-    lr              = fl["lr"]
-    batch_size      = fl["batch_size"]
-    R_comm          = fl["R_comm"]
-    capacity        = fl["capacity"]
-    T_sel           = fl.get("T_sel", 5)
-    lambda_min      = fl.get("lambda_min", 0.5)
-    R_min           = fl.get("R_min", 0.3)
+    n_rounds = fl["n_rounds"]
+    n_local_epochs = fl["n_local_epochs"]
+    lr = fl["lr"]
+    batch_size = fl["batch_size"]
+    R_comm = fl["R_comm"]
+    capacity = fl["capacity"]
+    T_sel = fl.get("T_sel", 5)
+    lambda_min = fl.get("lambda_min", 0.5)
+    R_min = fl.get("R_min", 0.3)
     target_accuracy = fl.get("target_accuracy", 0.70)
-    run_seed        = fl.get("seed", cfg.get("optimizer_seed", 42))
-    n_uav_epochs    = fl.get("n_uav_epochs", n_local_epochs)
-    uav_lr          = fl.get("uav_lr", lr)
+    run_seed = fl.get("seed", cfg.get("optimizer_seed", 42))
+    n_uav_epochs = fl.get("n_uav_epochs", n_local_epochs)
+    uav_lr = fl.get("uav_lr", lr)
 
     modes: list[str] = cfg.get("modes", list(DEFAULT_MODES))
     epicentre = tuple(cfg.get("epicentre", [37.488, 137.272]))
@@ -220,13 +217,17 @@ def run_selection_isolation(cfg: dict) -> dict:
     coverage_pct = 100.0 * len(covered_all) / max(N_clients, 1)
     logger.info(
         "Elbow K-means placement: K=%d UAVs (k range [%d, %d]) | coverage %.1f%%",
-        K, k_min, k_max, coverage_pct,
+        K,
+        k_min,
+        k_max,
+        coverage_pct,
     )
 
     # ── 3. Loaders built once (shard indices never change) ─────────────────
     test_loader = (
         DataLoader(Subset(cached_dataset, global_test_indices), batch_size=64, shuffle=False)
-        if global_test_indices else None
+        if global_test_indices
+        else None
     )
     client_loaders: dict[int, DataLoader] = {
         c.client_id: make_client_loader(cached_dataset, c.train_indices, batch_size)
@@ -248,12 +249,13 @@ def run_selection_isolation(cfg: dict) -> dict:
         global_model.freeze_img_proj()
 
         device_mgr = DeviceStateManager(
-            client_ids, rng,
+            client_ids,
+            rng,
             dropout_rate=fl.get("dropout_rate", 0.0),
             snr_degradation_db=fl.get("snr_degradation_db", 0.0),
         )
-        rep_mgr    = ReputationManager(client_ids)
-        selector   = ClientSelector(client_ids, epicentre=epicentre)
+        rep_mgr = ReputationManager(client_ids)
+        selector = ClientSelector(client_ids, epicentre=epicentre)
 
         selected: dict[int, int] = {}
         uav_loaders: dict[int, DataLoader] = {}
@@ -265,7 +267,7 @@ def run_selection_isolation(cfg: dict) -> dict:
             t0 = time.perf_counter()
 
             device_states = device_mgr.get_all_states()
-            rep_scores    = rep_mgr.get_all_scores()
+            rep_scores = rep_mgr.get_all_scores()
 
             # Early-reselection trigger (§IV-E6) — same rule as run_full_hfl.
             n_eligible = sum(1 for st in device_states.values() if st.eligible())
@@ -275,27 +277,26 @@ def run_selection_isolation(cfg: dict) -> dict:
             # ── Client selection (the experimental variable) ─────────────
             if reselect:
                 selected = selector.select(
-                    covered           = covered_all,
-                    device_states     = device_states,
-                    reputation_scores = rep_scores,
-                    client_coords     = client_coord_map,
-                    uav_coords_latlon = uav_latlon,
-                    round_num         = rnd,
-                    uav_capacity      = capacity,
-                    mode              = mode,
-                    rng               = rng,
-                    R_comm            = R_comm,
-                    t_stale_cap       = T_sel,
+                    covered=covered_all,
+                    device_states=device_states,
+                    reputation_scores=rep_scores,
+                    client_coords=client_coord_map,
+                    uav_coords_latlon=uav_latlon,
+                    round_num=rnd,
+                    uav_capacity=capacity,
+                    mode=mode,
+                    rng=rng,
+                    R_comm=R_comm,
+                    t_stale_cap=T_sel,
                 )
                 # Roster changed → rebuild the UAV pooled-shard loaders.
                 uav_indices: dict[int, list[int]] = {}
                 for cid, uav_idx in selected.items():
-                    uav_indices.setdefault(uav_idx, []).extend(
-                        client_by_id[cid].train_indices
-                    )
+                    uav_indices.setdefault(uav_idx, []).extend(client_by_id[cid].train_indices)
                 uav_loaders = {
                     uav_idx: make_client_loader(cached_dataset, idxs, batch_size)
-                    for uav_idx, idxs in uav_indices.items() if idxs
+                    for uav_idx, idxs in uav_indices.items()
+                    if idxs
                 }
 
             n_selected = len(selected)
@@ -318,9 +319,7 @@ def run_selection_isolation(cfg: dict) -> dict:
                 sd, n = _local_train(global_model, loader, n_local_epochs, lr)
                 rep = rep_scores.get(cid, 0.5)
                 client_updates[cid] = (sd, n, rep)
-                client_deltas[cid] = {
-                    k: v - global_trainable[k] for k, v in sd.items()
-                }
+                client_deltas[cid] = {k: v - global_trainable[k] for k, v in sd.items()}
 
             for cid in selected:
                 if cid not in client_updates:
@@ -333,7 +332,8 @@ def run_selection_isolation(cfg: dict) -> dict:
                     global_update_vec=None,
                     response_times={
                         cid: device_states[cid].compute_time_s
-                        for cid in client_deltas if cid in device_states
+                        for cid in client_deltas
+                        if cid in device_states
                     },
                 )
 
@@ -345,7 +345,7 @@ def run_selection_isolation(cfg: dict) -> dict:
             uav_updates: list[tuple[dict, int, float]] = []
             for uav_idx in range(K):
                 iot_upds = iot_by_uav.get(uav_idx, [])
-                uav_img  = uav_img_updates.get(uav_idx)
+                uav_img = uav_img_updates.get(uav_idx)
 
                 if not iot_upds and uav_img is None:
                     continue
@@ -358,16 +358,16 @@ def run_selection_isolation(cfg: dict) -> dict:
                     total_n = uav_img[1]
 
                 if uav_img is not None:
-                    img_part = {k: v for k, v in uav_img[0].items()
-                                if k.startswith("img_proj.")}
+                    img_part = {k: v for k, v in uav_img[0].items() if k.startswith("img_proj.")}
                 else:
-                    img_part = {f"img_proj.{k}": v.clone()
-                                for k, v in global_model.img_proj.state_dict().items()}
+                    img_part = {
+                        f"img_proj.{k}": v.clone()
+                        for k, v in global_model.img_proj.state_dict().items()
+                    }
                 full_agg = {**img_part, **sf_agg}
 
                 cluster_reps = [
-                    rep_scores.get(cid, 0.5)
-                    for cid, u in selected.items() if u == uav_idx
+                    rep_scores.get(cid, 0.5) for cid, u in selected.items() if u == uav_idx
                 ]
                 uav_rep = trimmed_mean(cluster_reps) if cluster_reps else 1.0
                 uav_updates.append((full_agg, total_n, uav_rep))
@@ -402,32 +402,41 @@ def run_selection_isolation(cfg: dict) -> dict:
 
             counts_arr = np.fromiter(sel_counts.values(), dtype=np.float64)
             n_active_uavs = len(uav_img_updates)
-            comm_mb = (2.0 * n_selected * _IOT_MODEL_SIZE_MB
-                       + 2.0 * n_active_uavs * _UAV_MODEL_SIZE_MB)
+            comm_mb = (
+                2.0 * n_selected * _IOT_MODEL_SIZE_MB + 2.0 * n_active_uavs * _UAV_MODEL_SIZE_MB
+            )
 
-            all_rows.append({
-                "method":             mode,
-                "round":              rnd,
-                "accuracy":           metrics["accuracy"],
-                "macro_f1":           metrics["macro_f1"],
-                "coverage_pct":       coverage_pct,
-                "participation_pct":  participation_pct,
-                "n_selected":         n_selected,
-                "n_eligible":         n_eligible,
-                "K_uav":              K,
-                "jain_fairness":      _jain_index(counts_arr),
-                "n_unique_selected":  int((counts_arr > 0).sum()),
-                "mean_battery":       float(np.mean([st.battery for st in device_states.values()])),
-                "comm_mb_round":      comm_mb,
-                "round_time_s":       elapsed,
-                **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
-            })
+            all_rows.append(
+                {
+                    "method": mode,
+                    "round": rnd,
+                    "accuracy": metrics["accuracy"],
+                    "macro_f1": metrics["macro_f1"],
+                    "coverage_pct": coverage_pct,
+                    "participation_pct": participation_pct,
+                    "n_selected": n_selected,
+                    "n_eligible": n_eligible,
+                    "K_uav": K,
+                    "jain_fairness": _jain_index(counts_arr),
+                    "n_unique_selected": int((counts_arr > 0).sum()),
+                    "mean_battery": float(np.mean([st.battery for st in device_states.values()])),
+                    "comm_mb_round": comm_mb,
+                    "round_time_s": elapsed,
+                    **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
+                }
+            )
             confusion_rows.extend(_confusion_rows(mode, rnd, metrics["confusion_matrix"]))
             if rnd % 10 == 0 or rnd == n_rounds:
                 logger.info(
                     "[%s] round %d/%d | acc=%.3f | F1=%.3f | sel=%d | jain=%.3f | %.1fs",
-                    mode, rnd, n_rounds, metrics["accuracy"], metrics["macro_f1"],
-                    n_selected, all_rows[-1]["jain_fairness"], elapsed,
+                    mode,
+                    rnd,
+                    n_rounds,
+                    metrics["accuracy"],
+                    metrics["macro_f1"],
+                    n_selected,
+                    all_rows[-1]["jain_fairness"],
+                    elapsed,
                 )
 
         for row in all_rows[method_start_idx:]:
@@ -435,7 +444,8 @@ def run_selection_isolation(cfg: dict) -> dict:
 
         logger.info(
             "%s done. Rounds to %.0f%%: %s",
-            mode, target_accuracy * 100,
+            mode,
+            target_accuracy * 100,
             rounds_to_target if rounds_to_target else "not reached",
         )
 
@@ -444,8 +454,7 @@ def run_selection_isolation(cfg: dict) -> dict:
     _write_table(rounds_df, results_dir / "selection_rounds.parquet")
     _write_table(pd.DataFrame(confusion_rows), results_dir / "confusion.parquet")
 
-    with open(results_dir / "config.selection.resolved.yaml", "w") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)
+    _dump_resolved_cfg(cfg, results_dir / "config.selection.resolved.yaml")
 
     size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
     return {"rounds": rounds_df, "results_dir": results_dir, "size_mb": size_mb, "K_uav": K}
@@ -459,7 +468,8 @@ def run_selection_isolation(cfg: dict) -> dict:
 def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     """One (N, mode, seed) run inside a joblib worker."""
     import torch as _torch
-    _torch.set_num_threads(1)   # 1 thread × n_workers = full CPU budget, no BLAS thrash
+
+    _torch.set_num_threads(1)  # 1 thread × n_workers = full CPU budget, no BLAS thrash
 
     job_cfg = copy.deepcopy(cfg)
     job_cfg["data"]["N_clients"] = N
@@ -470,7 +480,7 @@ def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # sweep._paper_job, where run_full_hfl folds in a method hash.)
     job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
     job_cfg["results_dir"] = str(Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / mode)
-    if job_cfg["data"].get("source", "synthetic") == "real":
+    if job_cfg["data"].get("source", "real") == "real":
         job_cfg["data"]["feature_cache_path"] = str(
             Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy"
         )
@@ -505,27 +515,24 @@ def run_selection_sweep(cfg: dict) -> dict:
     _prefetch_all_N(cfg)
     logger.info("Phase 1 complete — all caches ready.")
 
-    jobs = [
-        (N, mode, seed_idx)
-        for N in N_values
-        for mode in modes
-        for seed_idx in range(n_seeds)
-    ]
+    jobs = [(N, mode, seed_idx) for N in N_values for mode in modes for seed_idx in range(n_seeds)]
     logger.info(
         "Phase 2: %d N × %d modes × %d seeds = %d jobs — %d parallel workers",
-        len(N_values), len(modes), n_seeds, len(jobs), n_workers,
+        len(N_values),
+        len(modes),
+        n_seeds,
+        len(jobs),
+        n_workers,
     )
 
     dfs = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
-        delayed(_selection_job)(N, mode, seed_idx, cfg)
-        for N, mode, seed_idx in jobs
+        delayed(_selection_job)(N, mode, seed_idx, cfg) for N, mode, seed_idx in jobs
     )
 
     full_df = pd.concat(dfs, ignore_index=True)
     _write_table(full_df, results_dir / "selection_sweep_rounds.parquet")
 
-    with open(results_dir / "config.selection_sweep.resolved.yaml", "w") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)
+    _dump_resolved_cfg(cfg, results_dir / "config.selection_sweep.resolved.yaml")
 
     size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
     logger.info("Selection sweep complete — %.2f MB at %s", size_mb, results_dir)

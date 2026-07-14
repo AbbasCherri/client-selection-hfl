@@ -67,6 +67,9 @@ ignore = [
 # Legacy np.random.* in old test fixtures — determinism there doesn't feed
 # any reported result; migrate opportunistically, don't block CI on it.
 "tests/**" = ["NPY002"]
+# hflsim legacy package (see its LEGACY marker): rewriting its global-RNG
+# calls would silently change the historical CLI's reproducibility.
+"src/hflsim/**" = ["NPY002"]
 
 [tool.black]
 line-length = 100

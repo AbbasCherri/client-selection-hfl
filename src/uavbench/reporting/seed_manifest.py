@@ -10,7 +10,8 @@ every number traceable to an exact, rerunnable seed.
 Caveat (columns note it): ``run_tier2`` folds the number of *loaded*
 clients into its seed, and real-data loading can drop clients with empty
 shards — for the tier2/sweep harnesses the manifest assumes
-``n_clients == configured N``; on synthetic data this always holds.
+``n_clients == configured N`` (geographic K-means keeps all N on real data
+unless a client's shard is empty).
 """
 
 from __future__ import annotations
@@ -21,7 +22,12 @@ from uavbench.fl.seeds import fullsim_method_seed, sweep_job_seed, tier2_seed
 from uavbench.runner import _instance_seed
 
 HARNESSES = (
-    "tier1", "tier2", "full_hfl", "sweep", "paper_sweep", "selection_sweep",
+    "tier1",
+    "tier2",
+    "full_hfl",
+    "sweep",
+    "paper_sweep",
+    "selection_sweep",
     "stress_sweep",
 )
 
@@ -50,48 +56,56 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
             scen_name = f"{scen['distribution']}_N{scen['N']}_K{scen['K']}"
             for m_idx, method in enumerate(cfg["methods"]):
                 for seed_i in range(cfg["n_seeds"]):
-                    rows.append({
-                        "harness": harness,
-                        "method": method,
-                        "scenario": scen_name,
-                        "seed_idx": seed_i,
-                        "instance_seed": _instance_seed(base, s_idx, seed_i),
-                        "optimizer_stream": f"SeedSequence([{opt_base}, 1, {m_idx}, {s_idx}, {seed_i}])",
-                    })
+                    rows.append(
+                        {
+                            "harness": harness,
+                            "method": method,
+                            "scenario": scen_name,
+                            "seed_idx": seed_i,
+                            "instance_seed": _instance_seed(base, s_idx, seed_i),
+                            "optimizer_stream": f"SeedSequence([{opt_base}, 1, {m_idx}, {s_idx}, {seed_i}])",
+                        }
+                    )
 
     elif harness == "tier2":
         opt_seed = cfg.get("optimizer_seed", 9876)
         n = cfg["data"]["N_clients"]
         for method in cfg["methods"]:
-            rows.append({
-                "harness": harness,
-                "method": method,
-                "N": n,
-                "seed": tier2_seed(opt_seed, n, method),
-                "note": "assumes n_clients == N (empty shards may reduce it on real data)",
-            })
+            rows.append(
+                {
+                    "harness": harness,
+                    "method": method,
+                    "N": n,
+                    "seed": tier2_seed(opt_seed, n, method),
+                    "note": "assumes n_clients == N (empty shards may reduce it on real data)",
+                }
+            )
 
     elif harness == "full_hfl":
         run_seed = cfg["fl"].get("seed", cfg.get("optimizer_seed", 42))
         for method in cfg["methods"]:
-            rows.append({
-                "harness": harness,
-                "method": method,
-                "run_seed": run_seed,
-                "seed": fullsim_method_seed(run_seed, method),
-            })
+            rows.append(
+                {
+                    "harness": harness,
+                    "method": method,
+                    "run_seed": run_seed,
+                    "seed": fullsim_method_seed(run_seed, method),
+                }
+            )
 
     elif harness == "sweep":
         opt_seed = cfg.get("optimizer_seed", 9876)
         for N in cfg["N_values"]:
             for method in cfg["methods"]:
-                rows.append({
-                    "harness": harness,
-                    "method": method,
-                    "N": N,
-                    "seed": tier2_seed(opt_seed, N, method),
-                    "note": "assumes n_clients == N (empty shards may reduce it on real data)",
-                })
+                rows.append(
+                    {
+                        "harness": harness,
+                        "method": method,
+                        "N": N,
+                        "seed": tier2_seed(opt_seed, N, method),
+                        "note": "assumes n_clients == N (empty shards may reduce it on real data)",
+                    }
+                )
 
     elif harness == "paper_sweep":
         opt_seed = cfg.get("optimizer_seed", 9876)
@@ -99,14 +113,16 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
             for method in cfg["methods"]:
                 for seed_idx in range(cfg.get("n_seeds", 1)):
                     job_seed = sweep_job_seed(opt_seed, seed_idx, N)
-                    rows.append({
-                        "harness": harness,
-                        "method": method,
-                        "N": N,
-                        "seed_idx": seed_idx,
-                        "job_seed": job_seed,
-                        "seed": fullsim_method_seed(job_seed, method),
-                    })
+                    rows.append(
+                        {
+                            "harness": harness,
+                            "method": method,
+                            "N": N,
+                            "seed_idx": seed_idx,
+                            "job_seed": job_seed,
+                            "seed": fullsim_method_seed(job_seed, method),
+                        }
+                    )
 
     elif harness == "selection_sweep":
         opt_seed = cfg.get("optimizer_seed", 9876)
@@ -114,15 +130,17 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
         for N in cfg["N_values"]:
             for mode in modes:
                 for seed_idx in range(cfg.get("n_seeds", 1)):
-                    rows.append({
-                        "harness": harness,
-                        "method": mode,
-                        "N": N,
-                        "seed_idx": seed_idx,
-                        # Shared across modes by design: identical problem
-                        # instance per (N, seed) isolates the selection rule.
-                        "seed": sweep_job_seed(opt_seed, seed_idx, N),
-                    })
+                    rows.append(
+                        {
+                            "harness": harness,
+                            "method": mode,
+                            "N": N,
+                            "seed_idx": seed_idx,
+                            # Shared across modes by design: identical problem
+                            # instance per (N, seed) isolates the selection rule.
+                            "seed": sweep_job_seed(opt_seed, seed_idx, N),
+                        }
+                    )
 
     elif harness == "stress_sweep":
         from uavbench.fl.stress_sweep import build_stress_grid
@@ -133,18 +151,20 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
             for method in cfg["methods"]:
                 for seed_idx in range(cfg.get("n_seeds", 1)):
                     job_seed = sweep_job_seed(opt_seed, seed_idx, n)
-                    rows.append({
-                        "harness": harness,
-                        "method": method,
-                        "dropout_rate": d,
-                        "snr_degradation_db": s,
-                        "black_chip_rate": c,
-                        "seed_idx": seed_idx,
-                        # Knob-independent by design: every stress cell sees
-                        # the identical base problem per seed.
-                        "job_seed": job_seed,
-                        "seed": fullsim_method_seed(job_seed, method),
-                    })
+                    rows.append(
+                        {
+                            "harness": harness,
+                            "method": method,
+                            "dropout_rate": d,
+                            "snr_degradation_db": s,
+                            "black_chip_rate": c,
+                            "seed_idx": seed_idx,
+                            # Knob-independent by design: every stress cell sees
+                            # the identical base problem per seed.
+                            "job_seed": job_seed,
+                            "seed": fullsim_method_seed(job_seed, method),
+                        }
+                    )
 
     else:
         raise ValueError(f"unknown harness {harness!r}; expected one of {HARNESSES}")

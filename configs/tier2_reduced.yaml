@@ -1,5 +1,8 @@
-# Tier-2 reduced config: synthetic data, tiny N, few rounds.
-# Completes in minutes on CPU; no HF token required.
+# Tier-2 reduced config: REAL data at a small subsample, tiny N, few rounds.
+# The fast end-to-end check of the real pipeline (used by `uavbench smoke_tier2`).
+# Requires HF_TOKEN on first run; afterwards the metadata/partition caches under
+# ./data make it re-runnable offline. All experiments are real-data only —
+# offline unit tests use the prebuilt fixture seam instead of a config.
 name: tier2_reduced
 results_dir: results/tier2_reduced
 
@@ -7,9 +10,12 @@ n_workers: 1          # Tier-2 is run sequentially (one model per method)
 optimizer_seed: 9876
 
 data:
-  source: synthetic   # "synthetic" | "real" (real requires HF_TOKEN)
-  N_clients: 20       # number of simulated IoT clients
+  source: real
+  subsample: 0.1      # ~12.8k rows; matches the checked-in metadata cache key
+  N_clients: 20       # IoT clients (K-means geographic partition)
   seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
 
 fl:
   K: 3                # number of UAVs / hover positions

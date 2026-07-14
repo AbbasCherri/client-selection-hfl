@@ -37,9 +37,9 @@ _C = 299_792_458.0  # speed of light, m/s
 # space for LoS/NLoS links.
 # VERIFY AGAINST PAPER: exact table values before quoting absolute radii.
 ENV_PRESETS: dict[str, dict[str, float]] = {
-    "suburban":        {"a": 4.88,  "b": 0.43, "eta_los_db": 0.1, "eta_nlos_db": 21.0},
-    "urban":           {"a": 9.61,  "b": 0.16, "eta_los_db": 1.0, "eta_nlos_db": 20.0},
-    "dense_urban":     {"a": 12.08, "b": 0.11, "eta_los_db": 1.6, "eta_nlos_db": 23.0},
+    "suburban": {"a": 4.88, "b": 0.43, "eta_los_db": 0.1, "eta_nlos_db": 21.0},
+    "urban": {"a": 9.61, "b": 0.16, "eta_los_db": 1.0, "eta_nlos_db": 20.0},
+    "dense_urban": {"a": 12.08, "b": 0.11, "eta_los_db": 1.6, "eta_nlos_db": 23.0},
     "high_rise_urban": {"a": 27.23, "b": 0.08, "eta_los_db": 2.3, "eta_nlos_db": 34.0},
 }
 
@@ -84,8 +84,10 @@ def average_path_loss(
     d3d = math.hypot(distance_ground_m, altitude_m)
     elevation_deg = math.degrees(math.atan2(altitude_m, max(distance_ground_m, 1e-9)))
     p_los = los_probability(elevation_deg, a, b)
-    fspl_db = 20.0 * math.log10(max(d3d, 1e-9)) + 20.0 * math.log10(freq_hz) + 20.0 * math.log10(
-        4.0 * math.pi / _C
+    fspl_db = (
+        20.0 * math.log10(max(d3d, 1e-9))
+        + 20.0 * math.log10(freq_hz)
+        + 20.0 * math.log10(4.0 * math.pi / _C)
     )
     return fspl_db + p_los * eta_los_db + (1.0 - p_los) * eta_nlos_db
 

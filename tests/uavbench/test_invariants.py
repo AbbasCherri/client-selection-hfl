@@ -5,7 +5,6 @@ shared evaluation budget can never be desynced by config, and the instance
 and optimizer RNG streams can never receive the same SeedSequence input.
 """
 
-
 from uavbench.optimizers import build_optimizer
 from uavbench.runner import _build_optimizer, _instance_seed, _optimizer_rng
 
@@ -57,7 +56,9 @@ class TestSeedStreamDisjointness:
         inst = {_instance_seed(base, s, i) for s in range(4) for i in range(10)}
         opt_states = {
             int(_optimizer_rng(base, m, s, i).bit_generator.seed_seq.generate_state(1)[0])
-            for m in range(6) for s in range(4) for i in range(10)
+            for m in range(6)
+            for s in range(4)
+            for i in range(10)
         }
         assert not (inst & opt_states)
 
@@ -66,9 +67,7 @@ class TestSeedStreamDisjointness:
         # (m=s, s=i, seed_i=0) under a shared base.
         base = 999
         inst = _instance_seed(base, 0, 2)
-        opt = int(
-            _optimizer_rng(base, 0, 2, 0).bit_generator.seed_seq.generate_state(1)[0]
-        )
+        opt = int(_optimizer_rng(base, 0, 2, 0).bit_generator.seed_seq.generate_state(1)[0])
         assert inst != opt
 
     def test_instance_seed_is_method_independent(self):

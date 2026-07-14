@@ -7,6 +7,7 @@ from hflsim.shared.value import beta_schedule, compute_utility, compute_value
 
 # ── beta_schedule ──────────────────────────────────────────────────────────────
 
+
 class TestBetaSchedule:
     def test_at_t0_returns_1(self):
         assert beta_schedule(0) == pytest.approx(1.0)
@@ -32,13 +33,16 @@ class TestBetaSchedule:
 
 # ── compute_utility ───────────────────────────────────────────────────────────
 
+
 def _make_inputs(N=5, K=2, seed=0):
     rng = np.random.default_rng(seed)
-    device_coords = np.column_stack([
-        rng.uniform(0, 1000, N),
-        rng.uniform(0, 1000, N),
-        np.zeros(N),
-    ])
+    device_coords = np.column_stack(
+        [
+            rng.uniform(0, 1000, N),
+            rng.uniform(0, 1000, N),
+            np.zeros(N),
+        ]
+    )
     epicenter = np.array([500.0, 500.0, 0.0])
     snr = rng.uniform(0.0, 30.0, N)
     samples = rng.integers(20, 200, N).astype(float)
@@ -92,8 +96,9 @@ class TestComputeValue:
 
     def test_scheduled_at_t_decay_equals_reputation(self):
         dc, epi, snr, samp, prev, rep = _make_inputs()
-        value = compute_value(dc, epi, snr, samp, prev, rep, t=20, T_decay=20,
-                              beta_mode="scheduled")
+        value = compute_value(
+            dc, epi, snr, samp, prev, rep, t=20, T_decay=20, beta_mode="scheduled"
+        )
         assert np.allclose(value, rep), "At T_decay beta=0, value should equal reputation"
 
     def test_output_in_01(self):

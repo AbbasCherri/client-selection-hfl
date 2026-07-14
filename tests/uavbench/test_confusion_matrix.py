@@ -29,9 +29,7 @@ def _loader(labels: np.ndarray) -> DataLoader:
     img = torch.zeros(n, 512)
     struct = torch.zeros(n, 9)
     struct[:, 0] = torch.from_numpy(labels).float()
-    return DataLoader(
-        TensorDataset(img, struct, torch.from_numpy(labels).long()), batch_size=8
-    )
+    return DataLoader(TensorDataset(img, struct, torch.from_numpy(labels).long()), batch_size=8)
 
 
 def test_perfect_prediction_gives_diagonal():

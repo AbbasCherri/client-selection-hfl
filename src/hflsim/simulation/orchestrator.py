@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from .client import get_fusion_params, get_flat_fusion_weights, RandomProjection
+from .client import RandomProjection, get_flat_fusion_weights, get_fusion_params
 
 
 class HFLOrchestrator:
@@ -18,7 +18,7 @@ class HFLOrchestrator:
         selection_coordinator,
         loss_fn,
         test_loader,
-        device='cpu',
+        device="cpu",
     ):
         self.global_model = global_model
         self.clients = clients
@@ -64,9 +64,9 @@ class HFLOrchestrator:
 
         accuracy = np.mean(all_preds == all_targets)
 
-        self.last_pred_distribution = np.bincount(
-            all_preds, minlength=self.num_classes
-        ) / max(1, len(all_preds))
+        self.last_pred_distribution = np.bincount(all_preds, minlength=self.num_classes) / max(
+            1, len(all_preds)
+        )
 
         # Macro F1 computed only over classes that actually appear in the test
         # targets. Averaging over always-absent classes silently halves the reported macro-F1.
@@ -90,9 +90,9 @@ class HFLOrchestrator:
         sum_counts = np.sum(counts)
         if sum_counts == 0:
             return 1.0
-        sum_sq_counts = np.sum(counts ** 2)
+        sum_sq_counts = np.sum(counts**2)
         N = len(self.clients)
-        return (sum_counts ** 2) / (N * sum_sq_counts + 1e-8)
+        return (sum_counts**2) / (N * sum_sq_counts + 1e-8)
 
     def simulate_round(self, round_num, selection_method="proposed", epochs=3, lr=3e-4):
         """Executes one full global round of Hierarchical Federated Learning."""
@@ -103,9 +103,9 @@ class HFLOrchestrator:
 
         selected_client_ids = {client.client_id for client in selected_clients}
         for client in self.clients:
-            client.is_active = (client.client_id in selected_client_ids)
-            if hasattr(client, 'local_model_state'):
-                delattr(client, 'local_model_state')
+            client.is_active = client.client_id in selected_client_ids
+            if hasattr(client, "local_model_state"):
+                delattr(client, "local_model_state")
 
         # 2. Local training with straggler simulation
         successful_clients = []
@@ -179,8 +179,10 @@ class HFLOrchestrator:
                 r_anomaly = 1.0 if d_m <= 2.0 else np.exp(-(d_m - 2.0))
 
                 # C. Temporal score
-                var_lat = np.var(client.latency_history) if len(client.latency_history) >= 2 else 0.0
-                if not hasattr(client, 'success_history'):
+                var_lat = (
+                    np.var(client.latency_history) if len(client.latency_history) >= 2 else 0.0
+                )
+                if not hasattr(client, "success_history"):
                     client.success_history = []
                 client.success_history.append(1)
                 if len(client.success_history) > 10:
@@ -195,13 +197,15 @@ class HFLOrchestrator:
 
         for client in selected_clients:
             if client.client_id not in successful_client_ids:
-                if not hasattr(client, 'success_history'):
+                if not hasattr(client, "success_history"):
                     client.success_history = []
                 client.success_history.append(0)
                 if len(client.success_history) > 10:
                     client.success_history.pop(0)
                 success_rate = np.mean(client.success_history)
-                var_lat = np.var(client.latency_history) if len(client.latency_history) >= 2 else 0.0
+                var_lat = (
+                    np.var(client.latency_history) if len(client.latency_history) >= 2 else 0.0
+                )
                 r_temp = 0.5 * success_rate + 0.5 / (1.0 + var_lat)
                 # Recompute with the paper's 0.4/0.3/0.3 weights, carrying the
                 # client's last observed contribution/anomaly components.
@@ -218,7 +222,7 @@ class HFLOrchestrator:
                 uav_updates[uav] = (edge_state, total_samples)
 
                 assigned_reps = [
-                    c.reputation for c in uav.assigned_clients if hasattr(c, 'local_model_state')
+                    c.reputation for c in uav.assigned_clients if hasattr(c, "local_model_state")
                 ]
                 if assigned_reps:
                     # Trim exactly floor(n·0.1) from each tail (paper §IV-C7);
@@ -227,7 +231,7 @@ class HFLOrchestrator:
                     n_reps = len(assigned_reps)
                     trim_idx = int(n_reps * 0.1)
                     if trim_idx > 0 and n_reps - 2 * trim_idx >= 1:
-                        assigned_reps = assigned_reps[trim_idx:n_reps - trim_idx]
+                        assigned_reps = assigned_reps[trim_idx : n_reps - trim_idx]
                     uav.reputation = np.mean(assigned_reps)
                 else:
                     uav.reputation = 0.5
@@ -237,9 +241,7 @@ class HFLOrchestrator:
         # 5. Server global aggregation
         active_uavs = [u for u in uav_updates.keys() if u.reputation >= 0.3]
         if len(active_uavs) > 0:
-            total_weighted_samples = sum(
-                u.reputation * uav_updates[u][1] for u in active_uavs
-            )
+            total_weighted_samples = sum(u.reputation * uav_updates[u][1] for u in active_uavs)
             global_state = self.global_model.state_dict()
             # Reset only floating-point tensors. Integer buffers must stay as
             # integer tensors to avoid casting errors during aggregation.

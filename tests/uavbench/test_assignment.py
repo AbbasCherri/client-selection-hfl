@@ -41,8 +41,8 @@ def test_battery_gate_disables_position():
     # Position 0 battery below B_min_uav -> unusable.
     inst = _instance(value=[3, 2, 1], capacity=[1, 1], battery=[0.1, 1.0])
     res = greedy_assignment(inst, POSITIONS)
-    assert res.assignment[0] == 1          # device 0 falls back to position 1
-    assert res.assignment[1] == -1         # position 1 now full, position 0 unusable
+    assert res.assignment[0] == 1  # device 0 falls back to position 1
+    assert res.assignment[1] == -1  # position 1 now full, position 0 unusable
     assert res.assignment[2] == -1
     assert res.f_cover == 3.0
 
@@ -88,9 +88,9 @@ def test_per_uav_radii_changes_coverage():
     base = greedy_assignment(inst, POSITIONS)
     assert base.assignment[2] == -1
     res = greedy_assignment(inst, POSITIONS, radii=np.array([2000.0, 60.0]))
-    assert res.assignment[0] == 0   # nearer position on the load tie
-    assert res.assignment[1] == 1   # smaller load wins once pos0 holds device 0
-    assert res.assignment[2] == 0   # only in range of the widened position 0
+    assert res.assignment[0] == 0  # nearer position on the load tie
+    assert res.assignment[1] == 1  # smaller load wins once pos0 holds device 0
+    assert res.assignment[2] == 0  # only in range of the widened position 0
     assert res.n_assigned == 3
 
 
@@ -117,6 +117,6 @@ def test_value_sorted_priority():
         upper=np.array([100.0, 100.0, 120.0]),
     )
     res = greedy_assignment(inst, np.array([[0.0, 0.0, 0.0]]))
-    assert res.assignment[1] == 0          # the value-9 device is served
+    assert res.assignment[1] == 0  # the value-9 device is served
     assert res.assignment[0] == -1
     assert res.f_cover == 9.0

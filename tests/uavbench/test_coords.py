@@ -1,12 +1,12 @@
 """Tests for haversine and latlon_to_meters (hflsim/shared/coords.py)."""
 
-
 import numpy as np
 import pytest
 
-from hflsim.shared.coords import haversine, latlon_to_meters
+from hflsim.shared.coords import haversine, haversine_matrix, latlon_to_meters
 
 # ── haversine ─────────────────────────────────────────────────────────────────
+
 
 class TestHaversine:
     def test_same_point_is_zero(self):
@@ -44,6 +44,7 @@ class TestHaversine:
 
 
 # ── latlon_to_meters ──────────────────────────────────────────────────────────
+
 
 class TestLatLonToMeters:
     def test_ref_point_maps_to_origin(self):
@@ -92,7 +93,7 @@ class TestLatLonToMeters:
         b = (37.510, 137.290)
         coords = np.array([a, b])
         xy, _ = latlon_to_meters(coords)
-        eucl = float(np.sqrt(np.sum((xy[0] - xy[1])**2)))
+        eucl = float(np.sqrt(np.sum((xy[0] - xy[1]) ** 2)))
         hav = haversine(a, b)
         # Within 0.1% for short distances
         assert abs(eucl - hav) / hav < 0.001
@@ -102,3 +103,22 @@ class TestLatLonToMeters:
         _, ref = latlon_to_meters(coords)
         assert ref[0] == pytest.approx(37.0)
         assert ref[1] == pytest.approx(137.0)
+
+
+# ── haversine_matrix ─────────────────────────────────────────────────────────
+
+
+class TestHaversineMatrix:
+    def test_matches_scalar_haversine_elementwise(self):
+        rng = np.random.default_rng(0)
+        a = np.column_stack([rng.uniform(36.5, 38.0, 25), rng.uniform(136.5, 138.0, 25)])
+        b = np.column_stack([rng.uniform(36.5, 38.0, 7), rng.uniform(136.5, 138.0, 7)])
+        mat = haversine_matrix(a, b)
+        assert mat.shape == (25, 7)
+        for i in range(25):
+            for j in range(7):
+                assert mat[i, j] == pytest.approx(haversine(tuple(a[i]), tuple(b[j])), rel=1e-12)
+
+    def test_zero_distance_on_identical_points(self):
+        pts = np.array([[37.5, 137.2]])
+        assert haversine_matrix(pts, pts)[0, 0] == pytest.approx(0.0, abs=1e-6)

@@ -16,44 +16,47 @@ from uavbench.fl.federated import (
 
 def _noto_coords(n=5):
     """Spread n clients across the Noto Peninsula."""
-    return {
-        i: (37.3 + i * 0.05, 136.9 + i * 0.05)
-        for i in range(n)
-    }
+    return {i: (37.3 + i * 0.05, 136.9 + i * 0.05) for i in range(n)}
 
 
 # ── _build_problem_instance ───────────────────────────────────────────────────
 
+
 class TestBuildProblemInstance:
     def test_device_count_matches_N(self):
         coords = _noto_coords(10)
-        inst, ref = _build_problem_instance(coords, K=3, R_comm=5000, capacity=10,
-                                            prev_positions_m=None)
+        inst, ref = _build_problem_instance(
+            coords, K=3, R_comm=5000, capacity=10, prev_positions_m=None
+        )
         assert inst.N == 10
 
     def test_uav_count_matches_K(self):
         coords = _noto_coords(8)
-        inst, ref = _build_problem_instance(coords, K=4, R_comm=5000, capacity=10,
-                                            prev_positions_m=None)
+        inst, ref = _build_problem_instance(
+            coords, K=4, R_comm=5000, capacity=10, prev_positions_m=None
+        )
         assert inst.K == 4
 
     def test_ref_is_mean_latlon(self):
         coords = {0: (37.0, 137.0), 1: (38.0, 138.0)}
-        inst, ref = _build_problem_instance(coords, K=2, R_comm=5000, capacity=10,
-                                            prev_positions_m=None)
+        inst, ref = _build_problem_instance(
+            coords, K=2, R_comm=5000, capacity=10, prev_positions_m=None
+        )
         assert ref[0] == pytest.approx(37.5, abs=0.01)
         assert ref[1] == pytest.approx(137.5, abs=0.01)
 
     def test_device_z_is_zero(self):
         coords = _noto_coords(5)
-        inst, _ = _build_problem_instance(coords, K=2, R_comm=5000, capacity=10,
-                                          prev_positions_m=None)
+        inst, _ = _build_problem_instance(
+            coords, K=2, R_comm=5000, capacity=10, prev_positions_m=None
+        )
         assert np.all(inst.device_coords[:, 2] == 0.0)
 
     def test_default_prev_positions_spread_evenly(self):
         coords = _noto_coords(6)
-        inst, _ = _build_problem_instance(coords, K=3, R_comm=5000, capacity=10,
-                                          prev_positions_m=None)
+        inst, _ = _build_problem_instance(
+            coords, K=3, R_comm=5000, capacity=10, prev_positions_m=None
+        )
         # prev_positions z-values should be 70 m
         assert np.all(inst.prev_positions[:, 2] == pytest.approx(70.0))
 
@@ -61,24 +64,28 @@ class TestBuildProblemInstance:
         coords = _noto_coords(4)
         K = 2
         prev = np.array([[100.0, 200.0, 50.0], [300.0, 400.0, 50.0]])
-        inst, _ = _build_problem_instance(coords, K=K, R_comm=5000, capacity=10,
-                                          prev_positions_m=prev)
+        inst, _ = _build_problem_instance(
+            coords, K=K, R_comm=5000, capacity=10, prev_positions_m=prev
+        )
         assert np.allclose(inst.prev_positions, prev)
 
     def test_battery_is_all_ones(self):
         coords = _noto_coords(5)
-        inst, _ = _build_problem_instance(coords, K=2, R_comm=5000, capacity=10,
-                                          prev_positions_m=None)
+        inst, _ = _build_problem_instance(
+            coords, K=2, R_comm=5000, capacity=10, prev_positions_m=None
+        )
         assert np.all(inst.battery == 1.0)
 
     def test_value_is_uniform_ones(self):
         coords = _noto_coords(5)
-        inst, _ = _build_problem_instance(coords, K=2, R_comm=5000, capacity=10,
-                                          prev_positions_m=None)
+        inst, _ = _build_problem_instance(
+            coords, K=2, R_comm=5000, capacity=10, prev_positions_m=None
+        )
         assert np.all(inst.value == 1.0)
 
 
 # ── _uav_pos_to_latlon ────────────────────────────────────────────────────────
+
 
 class TestUavPosToLatLon:
     def test_zero_position_maps_to_ref(self):
@@ -112,6 +119,7 @@ class TestUavPosToLatLon:
 
     def test_roundtrip_consistency_with_latlon_to_meters(self):
         from hflsim.shared.coords import latlon_to_meters
+
         # Project some coords to metres, then back to latlon
         orig_coords = np.array([[37.488, 137.272], [37.500, 137.300]])
         xy_m, ref_tuple = latlon_to_meters(orig_coords)
@@ -126,6 +134,7 @@ class TestUavPosToLatLon:
 
 # ── _covered_clients ──────────────────────────────────────────────────────────
 
+
 class TestCoveredClients:
     def _setup(self):
         """Two UAVs at known metre positions; a few clients near/far."""
@@ -133,14 +142,17 @@ class TestCoveredClients:
         centre = (37.488, 137.272)
         coords = np.array([centre])
         from hflsim.shared.coords import latlon_to_meters
+
         _, ref_tuple = latlon_to_meters(coords)
         ref = np.array(ref_tuple)
         # UAV 0 at origin (projected metres)
         # UAV 1 displaced far away
-        uav_pos_m = np.array([
-            [0.0, 0.0, 70.0],
-            [50_000.0, 0.0, 70.0],
-        ])
+        uav_pos_m = np.array(
+            [
+                [0.0, 0.0, 70.0],
+                [50_000.0, 0.0, 70.0],
+            ]
+        )
         return ref, uav_pos_m
 
     def test_client_within_R_comm_is_covered(self):
@@ -163,7 +175,7 @@ class TestCoveredClients:
         ref, uav_pos_m = self._setup()
         # Client near UAV 0 (origin area)
         client_coords = {0: (37.488, 137.272)}
-        R_comm = 100_000.0   # wide enough to cover both UAVs
+        R_comm = 100_000.0  # wide enough to cover both UAVs
         result = _covered_clients(client_coords, uav_pos_m, ref, R_comm)
         # UAV 0 is at (0,0,70) → much closer than UAV 1 at (50km, 0, 70)
         assert result.get(0) == 0
@@ -181,6 +193,7 @@ class TestCoveredClients:
 
 
 # ── _place_uavs (smoke) ────────────────────────────────────────────────────────
+
 
 class TestPlaceUavs:
     def test_returns_correct_shapes(self):

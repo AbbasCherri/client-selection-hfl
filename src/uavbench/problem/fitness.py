@@ -76,9 +76,7 @@ class Fitness:
 
         res = greedy_assignment(inst, positions, radii=radii)
 
-        d_move = float(
-            np.sum(np.sqrt(np.sum((positions - inst.prev_positions) ** 2, axis=1)))
-        )
+        d_move = float(np.sum(np.sqrt(np.sum((positions - inst.prev_positions) ** 2, axis=1))))
 
         mean_load = res.n_assigned / inst.K
         l_imb = float(np.sum((res.loads - mean_load) ** 2))
@@ -87,9 +85,7 @@ class Fitness:
         d_move_norm = d_move / self.d_max
         l_imb_norm = l_imb / self.l_max
 
-        fitness = (
-            self.w1 * f_cover_norm - self.w2 * d_move_norm - self.w3 * l_imb_norm
-        )
+        fitness = self.w1 * f_cover_norm - self.w2 * d_move_norm - self.w3 * l_imb_norm
         return FitnessBreakdown(
             fitness=float(fitness),
             f_cover=res.f_cover,

@@ -73,8 +73,8 @@ class GA(Optimizer):
         u = rng.random(dim)
         delta = np.where(
             u < 0.5,
-            (2.0 * u) ** (1.0 / (self.eta_m + 1.0)) - 1.0,        # range [-1, 0]
-            1.0 - (2.0 * (1.0 - u)) ** (1.0 / (self.eta_m + 1.0)), # range [0,  1]
+            (2.0 * u) ** (1.0 / (self.eta_m + 1.0)) - 1.0,  # range [-1, 0]
+            1.0 - (2.0 * (1.0 - u)) ** (1.0 / (self.eta_m + 1.0)),  # range [0,  1]
         )
         x_new = np.where(
             do,
@@ -83,9 +83,7 @@ class GA(Optimizer):
         )
         return np.clip(x_new, lo, hi)
 
-    def _run(
-        self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator
-    ) -> Result:
+    def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         lo, hi = self._tile_bounds(instance)
 
         pop = self._uniform_population(rng, self.P, lo, hi)
@@ -99,7 +97,7 @@ class GA(Optimizer):
 
         for _ in range(self.G_max):
             n_iter += 1
-            elite_idx = np.argsort(fit)[-self.n_elite:]
+            elite_idx = np.argsort(fit)[-self.n_elite :]
             new_pop = [pop[i].copy() for i in elite_idx]
 
             while len(new_pop) < self.P:

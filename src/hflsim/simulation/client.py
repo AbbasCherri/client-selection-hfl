@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, Subset
 
 
 def get_fusion_params(model):
-    return [param for name, param in model.named_parameters() if 'fusion_fc' in name]
+    return [param for name, param in model.named_parameters() if "fusion_fc" in name]
 
 
 def get_flat_fusion_weights(model, fusion_params=None):
@@ -74,7 +74,7 @@ class IoTClient:
         # before any weight is ever used.
         shard_labels = dataset.labels[indices].numpy()
         class_counts = np.bincount(shard_labels, minlength=4)
-        with np.errstate(divide='ignore', invalid='ignore'):
+        with np.errstate(divide="ignore", invalid="ignore"):
             class_weights_arr = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
         sample_weights = torch.tensor(
             [class_weights_arr[int(lbl)] for lbl in shard_labels], dtype=torch.float32
@@ -139,13 +139,13 @@ class IoTClient:
 
     def train_local(self, global_model, loss_fn, lr=3e-4, epochs=3):
         """Performs local model training with entropy balancing."""
-        if not hasattr(self, '_local_model'):
+        if not hasattr(self, "_local_model"):
             self._local_model = copy.deepcopy(global_model)
         self._local_model.load_state_dict(global_model.state_dict())
         model = self._local_model.to(self.device)
 
         model.train()
-        if hasattr(model, 'image_branch') and hasattr(model.image_branch, 'backbone'):
+        if hasattr(model, "image_branch") and hasattr(model.image_branch, "backbone"):
             model.image_branch.backbone.eval()
 
         trainable_params = [p for p in model.parameters() if p.requires_grad]

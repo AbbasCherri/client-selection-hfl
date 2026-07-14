@@ -170,7 +170,9 @@ def generate_instance(
       nearly best and a good optimizer should barely move.
     """
     rng = np.random.default_rng(seed)
-    box_xy = np.array([[area["x"][0], area["y"][0]], [area["x"][1], area["y"][1]]], dtype=np.float64)
+    box_xy = np.array(
+        [[area["x"][0], area["y"][0]], [area["x"][1], area["y"][1]]], dtype=np.float64
+    )
     z_lo, z_hi = float(area["z"][0]), float(area["z"][1])
 
     epicenter = rng.uniform(box_xy[0], box_xy[1])
@@ -178,9 +180,9 @@ def generate_instance(
     device_coords = np.column_stack([xy, np.zeros(N)])
 
     # Raw per-device features feeding the utility/value score.
-    snr = rng.uniform(0.0, 30.0, size=N)            # dB, spans the 3 dB eligibility gate
+    snr = rng.uniform(0.0, 30.0, size=N)  # dB, spans the 3 dB eligibility gate
     samples = rng.integers(20, 200, size=N).astype(np.float64)
-    reputation = rng.beta(2.0, 2.0, size=N)         # synthesized history, held fixed
+    reputation = rng.beta(2.0, 2.0, size=N)  # synthesized history, held fixed
 
     # Previous UAV layout the movement penalty is measured against.
     prev_z = np.full(K, 0.5 * (z_lo + z_hi))
@@ -190,7 +192,9 @@ def generate_instance(
     elif prev_mode == "stale":
         # Layout fitted to a *prior* state: devices around a shifted epicenter.
         span = box_xy[1] - box_xy[0]
-        old_epicenter = np.clip(epicenter + rng.normal(0.0, 0.25 * span, size=2), box_xy[0], box_xy[1])
+        old_epicenter = np.clip(
+            epicenter + rng.normal(0.0, 0.25 * span, size=2), box_xy[0], box_xy[1]
+        )
         old_xy = _sample_devices(rng, distribution, max(K, 8), box_xy, old_epicenter)
         prev_centers = old_xy[rng.choice(old_xy.shape[0], size=K, replace=old_xy.shape[0] < K)]
         prev_xy = prev_centers[:, :2]

@@ -50,19 +50,20 @@ at the time of writing, and claims should be scoped accordingly: the
 real-data evaluation demonstrates feasibility and comparative method
 behaviour **on this event**, not cross-event generalization.
 
-As the controlled complement, the **synthetic stress-test sweep**
-(`configs/synthetic_stress_test.yaml`, `uavbench run_stress_sweep`) varies
-degradation axes the single event does not exhibit on demand — per-round
-device dropout, aftershock-triggered area-wide SNR degradation, and
-black-chip (unusable imagery) rate — providing robustness evidence under
-conditions beyond the recorded event. See `src/uavbench/fl/stress_sweep.py`
-for the paired seeding design.
+As the controlled complement, the **real-data stress-test sweep**
+(`configs/stress_test.yaml`, `uavbench run_stress_sweep`) varies degradation
+axes the recorded event does not exhibit on demand — per-round device
+dropout, aftershock-triggered area-wide SNR degradation, and additional
+black-chip (unusable imagery) rate applied by deterministically zeroing real
+cached image features — providing robustness evidence under conditions
+beyond the recorded event, still grounded in the real dataset. See
+`src/uavbench/fl/stress_sweep.py` for the paired seeding design.
 
-## Synthetic data
+## No synthetic experiment data
 
-`SyntheticClientData` (`src/uavbench/fl/dataset.py`) generates deterministic
-offline data: Noto-region coordinates, Gaussian seismic features, the
-empirical class imbalance (60/20/10/10), and Gaussian image features. Its
-`black_chip_rate` knob zeroes a fraction of image-feature rows — an
-artificial proxy for the effect of fetch-failure chips, not a simulation of
-the failure mechanism itself.
+The experimental pipeline is **real-data only**: no synthetic data feeds any
+config, sweep, or reported number, and the library contains no synthetic
+data generation. The offline test suite injects a deterministic fixture
+through the harnesses' documented `data.source: prebuilt` seam
+(`tests/uavbench/synthetic_fixture.py`) so CI runs without a token — that
+fixture never touches results.

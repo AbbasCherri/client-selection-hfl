@@ -24,8 +24,9 @@ import os
 from pathlib import Path
 
 import pandas as pd
-import yaml
 from joblib import Parallel, delayed
+
+from .federated import _dump_resolved_cfg
 
 logger = logging.getLogger("uavbench.fl.sweep")
 
@@ -33,6 +34,7 @@ logger = logging.getLogger("uavbench.fl.sweep")
 # ---------------------------------------------------------------------------
 # Sequential pre-fetch — runs before any parallel worker
 # ---------------------------------------------------------------------------
+
 
 def _prefetch_all_N(cfg: dict) -> None:
     """Stream + cache data for every N value sequentially.
@@ -43,8 +45,8 @@ def _prefetch_all_N(cfg: dict) -> None:
 
     After this step, parallel workers only touch local disk.
     """
-    if cfg["data"].get("source", "synthetic") == "synthetic":
-        return  # synthetic data is generated in-process; nothing to pre-fetch
+    if cfg["data"].get("source", "real") != "real":
+        return  # prebuilt test injections carry their own features; nothing to pre-fetch
 
     from hflsim.data import get_hfl_data_partitions
 
@@ -55,7 +57,10 @@ def _prefetch_all_N(cfg: dict) -> None:
     results_dir = Path(cfg["results_dir"])
 
     for N in cfg["N_values"]:
-        logger.info("[prefetch] N=%d — loading dataset (first call streams HF, subsequent calls hit disk cache) …", N)
+        logger.info(
+            "[prefetch] N=%d — loading dataset (first call streams HF, subsequent calls hit disk cache) …",
+            N,
+        )
         full_dataset, _, _, _, _ = get_hfl_data_partitions(
             csv_path=data_cfg.get("csv_path"),
             data_dir=data_cfg.get("data_dir", "./data"),
@@ -79,9 +84,11 @@ def _prefetch_all_N(cfg: dict) -> None:
 # Per-job worker
 # ---------------------------------------------------------------------------
 
+
 def _job(N: int, method: str, cfg: dict) -> pd.DataFrame:
     """Single (N, method) FL run, executed inside a joblib worker process."""
     import torch
+
     torch.set_num_threads(1)  # limit intra-op parallelism so 12 workers don't thrash BLAS
 
     from .federated import run_tier2  # import inside worker to avoid fork issues
@@ -97,10 +104,13 @@ def _job(N: int, method: str, cfg: dict) -> pd.DataFrame:
     df = out["rounds"].copy()
     df.insert(0, "N", N)
     final_acc = float(df["accuracy"].iloc[-1]) if len(df) else float("nan")
-    final_f1  = float(df["macro_f1"].iloc[-1])  if len(df) else float("nan")
+    final_f1 = float(df["macro_f1"].iloc[-1]) if len(df) else float("nan")
     logger.info(
         "[N=%d  method=%-10s] done | acc=%.3f  macro-F1=%.3f",
-        N, method, final_acc, final_f1,
+        N,
+        method,
+        final_acc,
+        final_f1,
     )
     return df
 
@@ -108,6 +118,7 @@ def _job(N: int, method: str, cfg: dict) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def run_sweep(cfg: dict) -> dict:
     """Run the full (N × method) scalability sweep and write consolidated results.
@@ -134,7 +145,10 @@ def run_sweep(cfg: dict) -> dict:
     jobs = [(N, method) for N in N_values for method in methods]
     logger.info(
         "Phase 2: %d N-values × %d methods = %d jobs — %d parallel workers",
-        len(N_values), len(methods), len(jobs), n_workers,
+        len(N_values),
+        len(methods),
+        len(jobs),
+        n_workers,
     )
 
     dfs = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
@@ -149,8 +163,7 @@ def run_sweep(cfg: dict) -> dict:
     except Exception:
         full_df.to_csv(out_path.with_suffix(".csv"), index=False)
 
-    with open(results_dir / "config.sweep.resolved.yaml", "w") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)
+    _dump_resolved_cfg(cfg, results_dir / "config.sweep.resolved.yaml")
 
     size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
     logger.info("Sweep complete — %.2f MB at %s", size_mb, results_dir)
@@ -162,9 +175,11 @@ def run_sweep(cfg: dict) -> dict:
 # Paper full-system sweep (N × method × seed)
 # ---------------------------------------------------------------------------
 
+
 def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     """Single (N, method, seed) full-system run, executed inside a joblib worker."""
     import torch
+
     torch.set_num_threads(1)
 
     from .federated import run_full_hfl
@@ -188,7 +203,7 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # Point to the shared N-level feature cache (one dir above) produced by
     # _prefetch_all_N so parallel method/seed workers don't each re-run the
     # full ResNet forward pass.
-    if job_cfg["data"].get("source", "synthetic") == "real":
+    if job_cfg["data"].get("source", "real") == "real":
         job_cfg["data"]["feature_cache_path"] = str(
             Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy"
         )
@@ -199,10 +214,14 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     df.insert(0, "seed", seed_idx)
     df.insert(0, "N", N)
     final_acc = float(df["accuracy"].iloc[-1]) if len(df) else float("nan")
-    final_f1  = float(df["macro_f1"].iloc[-1])  if len(df) else float("nan")
+    final_f1 = float(df["macro_f1"].iloc[-1]) if len(df) else float("nan")
     logger.info(
         "[N=%d  method=%-20s  seed=%d] done | acc=%.3f  macro-F1=%.3f",
-        N, method, seed_idx, final_acc, final_f1,
+        N,
+        method,
+        seed_idx,
+        final_acc,
+        final_f1,
     )
     return df
 
@@ -215,10 +234,10 @@ def run_paper_sweep(cfg: dict) -> dict:
 
     Returns dict with ``"rounds"`` (full DataFrame), ``"results_dir"``, ``"size_mb"``.
     """
-    N_values: list[int]  = cfg["N_values"]
-    methods:  list[str]  = cfg["methods"]
-    n_seeds:  int        = cfg.get("n_seeds", 1)
-    n_workers: int       = cfg.get("n_workers", 12)
+    N_values: list[int] = cfg["N_values"]
+    methods: list[str] = cfg["methods"]
+    n_seeds: int = cfg.get("n_seeds", 1)
+    n_workers: int = cfg.get("n_workers", 12)
     results_dir = Path(cfg["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -229,19 +248,19 @@ def run_paper_sweep(cfg: dict) -> dict:
 
     # --- Phase 2: parallel full-system sweep ---
     jobs = [
-        (N, method, seed_idx)
-        for N in N_values
-        for method in methods
-        for seed_idx in range(n_seeds)
+        (N, method, seed_idx) for N in N_values for method in methods for seed_idx in range(n_seeds)
     ]
     logger.info(
         "Phase 2: %d N × %d methods × %d seeds = %d jobs — %d parallel workers",
-        len(N_values), len(methods), n_seeds, len(jobs), n_workers,
+        len(N_values),
+        len(methods),
+        n_seeds,
+        len(jobs),
+        n_workers,
     )
 
     dfs = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
-        delayed(_paper_job)(N, method, seed_idx, cfg)
-        for N, method, seed_idx in jobs
+        delayed(_paper_job)(N, method, seed_idx, cfg) for N, method, seed_idx in jobs
     )
 
     full_df = pd.concat(dfs, ignore_index=True)
@@ -252,8 +271,7 @@ def run_paper_sweep(cfg: dict) -> dict:
     except Exception:
         full_df.to_csv(out_path.with_suffix(".csv"), index=False)
 
-    with open(results_dir / "config.paper_sweep.resolved.yaml", "w") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)
+    _dump_resolved_cfg(cfg, results_dir / "config.paper_sweep.resolved.yaml")
 
     size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
     logger.info("Paper sweep complete — %.2f MB at %s", size_mb, results_dir)

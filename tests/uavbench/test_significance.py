@@ -17,12 +17,14 @@ def _paired_df(effects: dict[str, float], n_seeds: int = 12, noise: float = 0.01
         base = rng.normal(0.7, 0.05, size=n_seeds)  # shared per-seed difficulty
         for method, effect in effects.items():
             for s in range(n_seeds):
-                rows.append({
-                    "method": method,
-                    "scenario": scenario,
-                    "seed": s,
-                    "accuracy": base[s] + effect + rng.normal(0, noise),
-                })
+                rows.append(
+                    {
+                        "method": method,
+                        "scenario": scenario,
+                        "seed": s,
+                        "accuracy": base[s] + effect + rng.normal(0, noise),
+                    }
+                )
     return pd.DataFrame(rows)
 
 

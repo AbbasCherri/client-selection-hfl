@@ -19,7 +19,7 @@ import hashlib
 
 def method_hash(method: str, bits: int) -> int:
     """Stable ``bits``-wide hash of a method name (md5 fold)."""
-    return int(hashlib.md5(method.encode()).hexdigest(), 16) % (2 ** bits)
+    return int(hashlib.md5(method.encode()).hexdigest(), 16) % (2**bits)
 
 
 def tier2_seed(optimizer_seed: int, n_clients: int, method: str) -> int:
@@ -29,7 +29,7 @@ def tier2_seed(optimizer_seed: int, n_clients: int, method: str) -> int:
     empty shards are dropped, so it can be below the configured N on real
     data).
     """
-    return (optimizer_seed + n_clients * 7919 + method_hash(method, 31)) % (2 ** 31)
+    return (optimizer_seed + n_clients * 7919 + method_hash(method, 31)) % (2**31)
 
 
 def fullsim_method_seed(run_seed: int, method: str) -> int:
@@ -39,7 +39,7 @@ def fullsim_method_seed(run_seed: int, method: str) -> int:
     NOT pre-encode the method into ``run_seed`` (double-counting silently
     shifts every per-method RNG draw).
     """
-    return (run_seed ^ method_hash(method, 16)) % (2 ** 31)
+    return (run_seed ^ method_hash(method, 16)) % (2**31)
 
 
 def sweep_job_seed(optimizer_seed: int, seed_idx: int, N: int) -> int:

@@ -11,6 +11,8 @@ import tempfile
 
 import pytest
 
+from .synthetic_fixture import build_synthetic_raw
+
 
 class TestMethodHashDeterminism:
     """hash(str) varies between runs; the seed formula must use a stable hash.
@@ -32,9 +34,15 @@ class TestMethodHashDeterminism:
 
     def test_different_methods_have_different_hashes(self):
         methods = [
-            "proposed_hfl", "flat_fl", "centralized",
-            "hfl_no_selection", "hfl_static", "hfl_no_reputation",
-            "fedcs", "rep_cap", "fair_mab",
+            "proposed_hfl",
+            "flat_fl",
+            "centralized",
+            "hfl_no_selection",
+            "hfl_static",
+            "hfl_no_reputation",
+            "fedcs",
+            "rep_cap",
+            "fair_mab",
         ]
         hashes = [self._method_hash_federated(m) for m in methods]
         assert len(set(hashes)) == len(methods), "Some methods share the same hash bucket"
@@ -69,6 +77,7 @@ class TestMethodHashDeterminism:
     def test_run_full_hfl_same_seed_same_accuracy(self):
         """Same config → same initial random state → identical round-1 accuracy."""
         from uavbench.fl.federated import run_full_hfl
+
         cfg_base = {
             "methods": ["proposed_hfl"],
             "fl": {
@@ -84,17 +93,23 @@ class TestMethodHashDeterminism:
                 "seed": 12345,
             },
             "budget": {"P": 3, "G_max": 2},
-            "data": {"source": "synthetic", "N_clients": 10, "seed": 0},
+            "data": {
+                "source": "prebuilt",
+                "prebuilt": build_synthetic_raw(N=10, K=2, seed=0),
+                "seed": 0,
+            },
             "optimizer_seed": 42,
         }
         results = []
         for _ in range(2):
             with tempfile.TemporaryDirectory() as d:
                 import copy
+
                 cfg = copy.deepcopy(cfg_base)
                 cfg["results_dir"] = d
                 out = run_full_hfl(cfg)
             acc = float(out["rounds"]["accuracy"].iloc[0])
             results.append(acc)
-        assert results[0] == pytest.approx(results[1]), \
-            f"Same seed produced different accuracy: {results}"
+        assert results[0] == pytest.approx(
+            results[1]
+        ), f"Same seed produced different accuracy: {results}"

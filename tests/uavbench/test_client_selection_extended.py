@@ -16,11 +16,14 @@ from uavbench.fl.device_state import DeviceState
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _eligible_state(battery=0.8, snr_db=15.0):
     return DeviceState(battery=battery, snr_db=snr_db, memory_ok=True, compute_time_s=100.0)
 
+
 def _ineligible_state():
     return DeviceState(battery=0.0, snr_db=0.0, memory_ok=False, compute_time_s=9999.0)
+
 
 def _coords_cluster(n=5):
     """n clients near the Noto Peninsula epicentre."""
@@ -30,6 +33,7 @@ def _coords_cluster(n=5):
 
 
 # ── _minmax ────────────────────────────────────────────────────────────────────
+
 
 class TestMinmax:
     def test_identical_values_returns_half(self):
@@ -46,6 +50,7 @@ class TestMinmax:
 
 
 # ── _xy_metres ────────────────────────────────────────────────────────────────
+
 
 class TestXyMetres:
     def test_centroid_is_near_origin(self):
@@ -68,6 +73,7 @@ class TestXyMetres:
 
 
 # ── _compute_utility ──────────────────────────────────────────────────────────
+
 
 class TestComputeUtility:
     def _states(self, cids):
@@ -117,6 +123,7 @@ class TestComputeUtility:
     def test_prox_vectorised_vs_loop(self):
         """Vectorised implementation must match a reference loop."""
         from uavbench.fl.client_selection import _xy_metres as _xym
+
         coords = _coords_cluster(4)
         cids = list(coords.keys())
         states = self._states(cids)
@@ -130,13 +137,15 @@ class TestComputeUtility:
         uav_xy = uav_client_xy[:K_uav]
         client_xy = uav_client_xy[K_uav:]
         for i, cid in enumerate(cids):
-            dists = [math.sqrt(float(np.sum((client_xy[i] - uav_xy[j])**2)))
-                     for j in range(K_uav)]
+            dists = [
+                math.sqrt(float(np.sum((client_xy[i] - uav_xy[j]) ** 2))) for j in range(K_uav)
+            ]
             min_dist = min(dists)
             assert min_dist >= 0  # just sanity; full check done via bounds above
 
 
 # ── ClientSelector.select ─────────────────────────────────────────────────────
+
 
 class TestClientSelectorModeAll:
     def test_mode_all_returns_entire_covered_set(self):
@@ -162,7 +171,7 @@ class TestClientSelectorModeRandom:
     def _setup(self, n=6, capacity=2):
         ids = list(range(n))
         sel = ClientSelector(ids)
-        covered = {cid: cid % 2 for cid in ids}   # 2 UAVs
+        covered = {cid: cid % 2 for cid in ids}  # 2 UAVs
         states = {cid: _eligible_state() for cid in ids}
         rep = {cid: 0.5 for cid in ids}
         coords = {cid: (37.0 + cid * 0.01, 137.0) for cid in ids}
@@ -174,6 +183,7 @@ class TestClientSelectorModeRandom:
         result = sel.select(covered, states, rep, coords, [], 1, cap, mode="random", rng=rng)
         # Each UAV can have at most 2 clients
         from collections import Counter
+
         counts = Counter(result.values())
         for uav_idx, cnt in counts.items():
             assert cnt <= cap, f"UAV {uav_idx} over capacity: {cnt}"
@@ -282,6 +292,7 @@ class TestClientSelectorModeUCB:
         cap = 2
         result = sel.select(covered, states, rep, coords, [], 1, cap, mode="ucb")
         from collections import Counter
+
         counts = Counter(result.values())
         for uav_idx, cnt in counts.items():
             assert cnt <= cap

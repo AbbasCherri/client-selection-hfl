@@ -4,7 +4,7 @@
 #
 # Usage:
 #   scripts/reproduce_paper.sh           # full grid (hours; see REPORTS/hardware_and_runtime.md)
-#   scripts/reproduce_paper.sh --smoke   # reduced end-to-end check (minutes, synthetic where possible)
+#   scripts/reproduce_paper.sh --smoke   # reduced end-to-end check (real data at small subsample)
 #
 # Requirements: the pinned environment (pip install -r requirements-lock.txt,
 # then pip install -e .) and, for the real-data harnesses, HF_TOKEN exported.
@@ -25,10 +25,10 @@ echo "=== reproduce_paper.sh started $(date -Is) (smoke=$SMOKE) ==="
 
 if [[ $SMOKE -eq 1 ]]; then
     TIER1_CFG=configs/smoke.yaml
-    STRESS_CFG=${STRESS_SMOKE_CFG:-configs/synthetic_stress_test.yaml}
+    STRESS_CFG=${STRESS_SMOKE_CFG:-configs/stress_test.yaml}
 else
     TIER1_CFG=configs/tier1_core.yaml
-    STRESS_CFG=configs/synthetic_stress_test.yaml
+    STRESS_CFG=configs/stress_test.yaml
 fi
 
 step() { echo; echo "--- [$(date -Is)] $* ---"; }
@@ -44,8 +44,8 @@ python -m uavbench significance \
     --metric final_fitness
 
 if [[ $SMOKE -eq 1 ]]; then
-    # Reduced synthetic stand-ins for the real-data harnesses.
-    step "Tier-2 smoke (synthetic)"
+    # Reduced real-data stand-ins for the full harnesses.
+    step "Tier-2 smoke (real, reduced)"
     python -m uavbench smoke_tier2
 else
     # 2. Full paper system simulation (real data; needs HF_TOKEN)
@@ -64,7 +64,7 @@ else
 fi
 
 # 5. Synthetic stress-test sweep (robustness evidence; no HF_TOKEN needed)
-step "Synthetic stress-test sweep ($STRESS_CFG)"
+step "Stress-test sweep ($STRESS_CFG)"
 python -m uavbench run_stress_sweep --config "$STRESS_CFG"
 step "Stress-sweep significance (accuracy)"
 python -m uavbench significance --config \

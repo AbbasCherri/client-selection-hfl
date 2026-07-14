@@ -1,6 +1,7 @@
 """Shared coordinate utilities used by both hflsim and uavbench.
 
-haversine()       — great-circle distance in metres between two (lat, lon) pairs
+haversine()        — great-circle distance in metres between two (lat, lon) pairs
+haversine_matrix() — vectorized (N, K) pairwise great-circle distances
 latlon_to_meters() — equirectangular projection of (lat, lon) arrays to local (x, y) metres
 """
 
@@ -29,6 +30,34 @@ def haversine(coord1: tuple[float, float], coord2: tuple[float, float]) -> float
     )
     c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return _EARTH_RADIUS_M * c
+
+
+def haversine_matrix(latlon_a: np.ndarray, latlon_b: np.ndarray) -> np.ndarray:
+    """Pairwise Haversine distances in metres between two (lat, lon) sets.
+
+    Vectorized twin of :func:`haversine` (same formula and Earth radius, so
+    results agree to float precision). Used on the hot paths — per-round
+    coverage checks and utility scoring — where a Python double loop over
+    (clients x UAVs) dominated the runtime.
+
+    Parameters
+    ----------
+    latlon_a : ``(N, 2)`` degrees.
+    latlon_b : ``(K, 2)`` degrees.
+
+    Returns
+    -------
+    ``(N, K)`` distances in metres.
+    """
+    a_rad = np.radians(np.asarray(latlon_a, dtype=np.float64)).reshape(-1, 2)
+    b_rad = np.radians(np.asarray(latlon_b, dtype=np.float64)).reshape(-1, 2)
+    phi1 = a_rad[:, 0][:, None]  # (N, 1)
+    phi2 = b_rad[:, 0][None, :]  # (1, K)
+    dphi = phi2 - phi1
+    dlmb = b_rad[:, 1][None, :] - a_rad[:, 1][:, None]
+
+    h = np.sin(dphi / 2.0) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlmb / 2.0) ** 2
+    return 2.0 * _EARTH_RADIUS_M * np.arctan2(np.sqrt(h), np.sqrt(1.0 - h))
 
 
 def latlon_to_meters(

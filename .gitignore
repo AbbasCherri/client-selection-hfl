@@ -19,3 +19,11 @@ data/.partition_cache/
 .vscode/
 .idea/
 .claude/
+
+# Logs (run artifacts, never tracked)
+*.log
+nohup.out
+
+# Data is re-fetched from the pinned HF dataset / GSI tiles — never tracked
+# (see REPORTS/data_availability.md for licensing: tiles are not redistributed)
+data/

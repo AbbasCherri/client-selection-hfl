@@ -16,8 +16,8 @@
 #   rep_cap  — B2: reputation-capability ranking (Zhao et al., CJA 2024)
 #   fair_mab — B3: fairness/energy MAB selection (Zhu et al., Sensors 2024)
 #
-# Requires HF_TOKEN for the real dataset; set data.source: synthetic for a
-# token-free offline check.
+# Requires HF_TOKEN for the real dataset; the pipeline is real-data only
+# (offline unit tests use the prebuilt fixture seam, not a config).
 
 name: selection_isolation
 results_dir: results/selection_isolation

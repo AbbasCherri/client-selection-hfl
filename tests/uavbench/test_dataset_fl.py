@@ -1,18 +1,15 @@
-"""Tests for CachedDataset, SyntheticClientData, and make_client_loader (dataset.py)."""
+"""Tests for CachedDataset / make_client_loader (dataset.py) and the offline fixture."""
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from uavbench.fl.dataset import (
-    CachedDataset,
-    ClientData,
-    SyntheticClientData,
-    SyntheticTorchDataset,
-    make_client_loader,
-)
+from uavbench.fl.dataset import CachedDataset, ClientData, make_client_loader
+
+from .synthetic_fixture import SyntheticTorchDataset, build_synthetic_raw
 
 # ── SyntheticTorchDataset ─────────────────────────────────────────────────────
+
 
 class TestSyntheticTorchDataset:
     def _make(self, n=20):
@@ -43,6 +40,7 @@ class TestSyntheticTorchDataset:
 
 
 # ── CachedDataset ─────────────────────────────────────────────────────────────
+
 
 class TestCachedDataset:
     def _make(self, n=20, feat_dim=512):
@@ -86,6 +84,7 @@ class TestCachedDataset:
 
 # ── make_client_loader ────────────────────────────────────────────────────────
 
+
 class TestMakeClientLoader:
     def _make_ds(self, n=40):
         feats = np.random.randn(n, 9).astype(np.float32)
@@ -121,16 +120,23 @@ class TestMakeClientLoader:
             assert torch.all(labels >= 0) and torch.all(labels <= 3)
 
 
-# ── SyntheticClientData ───────────────────────────────────────────────────────
+# ── build_synthetic_raw (offline test fixture) ───────────────────────────────
 
-class TestSyntheticClientData:
+
+class TestSyntheticRawFixture:
     def _build(self, N=50, K=5, seed=42):
-        return SyntheticClientData(N=N, K=K, seed=seed).build()
+        return build_synthetic_raw(N=N, K=K, seed=seed)
 
     def test_required_keys_present(self):
         raw = self._build()
-        for key in ("full_dataset", "client_train_indices", "client_test_indices",
-                    "global_test_indices", "client_coords", "img_features"):
+        for key in (
+            "full_dataset",
+            "client_train_indices",
+            "client_test_indices",
+            "global_test_indices",
+            "client_coords",
+            "img_features",
+        ):
             assert key in raw, f"Missing key: {key}"
 
     def test_client_coords_count_matches_K(self):
@@ -188,13 +194,14 @@ class TestSyntheticClientData:
 
 # ── ClientData ────────────────────────────────────────────────────────────────
 
+
 class TestClientData:
     def test_n_samples_set_from_train_indices(self):
-        c = ClientData(client_id=0, coords=(37.0, 137.0),
-                       train_indices=[0, 1, 2, 3], test_indices=[])
+        c = ClientData(
+            client_id=0, coords=(37.0, 137.0), train_indices=[0, 1, 2, 3], test_indices=[]
+        )
         assert c.n_samples == 4
 
     def test_empty_train_indices(self):
-        c = ClientData(client_id=0, coords=(37.0, 137.0),
-                       train_indices=[], test_indices=[])
+        c = ClientData(client_id=0, coords=(37.0, 137.0), train_indices=[], test_indices=[])
         assert c.n_samples == 0

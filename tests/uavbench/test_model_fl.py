@@ -11,6 +11,7 @@ from uavbench.fl.model import (
 
 # ── CachedFusionModel ─────────────────────────────────────────────────────────
 
+
 class TestCachedFusionModel:
     def _model(self):
         m = CachedFusionModel()
@@ -102,6 +103,7 @@ class TestCachedFusionModel:
 
 # ── freeze / unfreeze ────────────────────────────────────────────────────────
 
+
 class TestFreezeUnfreeze:
     def test_freeze_img_proj_disables_grad(self):
         m = CachedFusionModel()
@@ -144,6 +146,7 @@ class TestFreezeUnfreeze:
 
 
 # ── full_trainable_state_dict ─────────────────────────────────────────────────
+
 
 class TestFullTrainableStateDict:
     def test_includes_img_proj_keys(self):
@@ -204,6 +207,7 @@ class TestFullTrainableStateDict:
 
 # ── fedavg ────────────────────────────────────────────────────────────────────
 
+
 class TestFedAvg:
     def _sd(self, val: float) -> dict:
         return {"w": torch.full((4,), val)}
@@ -228,7 +232,7 @@ class TestFedAvg:
     def test_weighted_average(self):
         sd1, sd2 = self._sd(0.0), self._sd(10.0)
         result = fedavg([(sd1, 3), (sd2, 1)])  # weight 0.75 and 0.25
-        expected = 0.75 * 0.0 + 0.25 * 10.0   # = 2.5
+        expected = 0.75 * 0.0 + 0.25 * 10.0  # = 2.5
         assert torch.allclose(result["w"], torch.full((4,), expected))
 
     def test_zero_total_returns_first_copy(self):
@@ -251,6 +255,7 @@ class TestFedAvg:
 
 
 # ── reputation_fedavg ─────────────────────────────────────────────────────────
+
 
 class TestReputationFedAvg:
     def _sd(self, val: float) -> dict:

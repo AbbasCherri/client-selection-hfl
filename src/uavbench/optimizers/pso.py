@@ -37,8 +37,8 @@ class PSO(Optimizer):
         G_max: int = 200,
         c1: float = 2.05,
         c2: float = 2.05,
-        vmax_frac: float = 0.2,       # per-dim velocity clamp = vmax_frac*(hi-lo)
-        ring_k: int = 2,              # neighbours on each side of the ring (neighbourhood size = 2k+1)
+        vmax_frac: float = 0.2,  # per-dim velocity clamp = vmax_frac*(hi-lo)
+        ring_k: int = 2,  # neighbours on each side of the ring (neighbourhood size = 2k+1)
         delta_stag: float = 1e-4,
         G_stag: int = 20,
         rho: float = 0.2,
@@ -47,11 +47,11 @@ class PSO(Optimizer):
         jitter_m: float = 10.0,
         # --- design toggles (for ablations) ---
         use_constriction: bool = True,
-        topology: str = "ring",          # "ring" | "gbest"
+        topology: str = "ring",  # "ring" | "gbest"
         use_clamp: bool = True,
         use_stagnation: bool = True,
         use_turbulence: bool = True,
-        seeding: str = "value_kmeans",   # "value_kmeans" | "plain_kmeans" | "uniform"
+        seeding: str = "value_kmeans",  # "value_kmeans" | "plain_kmeans" | "uniform"
         inertia_max: float = 0.9,
         inertia_min: float = 0.4,
         **kw,
@@ -120,18 +120,16 @@ class PSO(Optimizer):
         # Vectorised lbest ring — O(P * ring_k) but entirely in NumPy.
         P = self.P
         idx = np.arange(P)
-        offsets = np.arange(-self.ring_k, self.ring_k + 1)   # shape (2k+1,)
-        neighbors = (idx[:, None] + offsets[None, :]) % P    # shape (P, 2k+1)
-        neighbor_fits = pbest_fit[neighbors]                   # shape (P, 2k+1)
-        best_col = neighbor_fits.argmax(axis=1)               # shape (P,)
-        best_idx = neighbors[idx, best_col]                   # shape (P,)
+        offsets = np.arange(-self.ring_k, self.ring_k + 1)  # shape (2k+1,)
+        neighbors = (idx[:, None] + offsets[None, :]) % P  # shape (P, 2k+1)
+        neighbor_fits = pbest_fit[neighbors]  # shape (P, 2k+1)
+        best_col = neighbor_fits.argmax(axis=1)  # shape (P,)
+        best_idx = neighbors[idx, best_col]  # shape (P,)
         return pbest[best_idx]
 
     # -- main loop -------------------------------------------------------
 
-    def _run(
-        self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator
-    ) -> Result:
+    def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         lo, hi = self._tile_bounds(instance)
         dim = instance.dim
         vmax = self.vmax_frac * (hi - lo)

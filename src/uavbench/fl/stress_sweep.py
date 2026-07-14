@@ -1,12 +1,14 @@
-"""Synthetic stress-test sweep: robustness evidence for the single-event scope.
+"""Real-data stress-test sweep: robustness evidence for the single-event scope.
 
-The paper's real-data evaluation covers one event (Noto Peninsula 2024);
-this sweep is the complementary controlled stress test over conditions
-that single event may not exhibit: per-round device dropout, aftershock-
-triggered area-wide SNR degradation, and black-chip (unusable image) rate.
-Synthetic-only by construction — the knobs plug into
-:class:`~uavbench.fl.dataset.SyntheticClientData` and
-:class:`~uavbench.fl.device_state.DeviceStateManager`.
+The paper's evaluation covers one event (Noto Peninsula 2024); this sweep
+is the complementary controlled stress test over degradation conditions
+the recorded event does not exhibit on demand, applied to the **real
+dataset**: per-round device dropout and aftershock-triggered area-wide SNR
+degradation (both in :class:`~uavbench.fl.device_state.DeviceStateManager`,
+data-independent), and additional black-chip (unusable-image) rate (a
+deterministic zeroing of real cached image features in
+``federated._apply_black_chips``, on top of the pipeline's measured
+natural fetch-failure rate).
 
 Grid modes
 ----------
@@ -28,9 +30,9 @@ import logging
 from pathlib import Path
 
 import pandas as pd
-import yaml
 from joblib import Parallel, delayed
 
+from .federated import _dump_resolved_cfg
 from .seeds import sweep_job_seed
 
 logger = logging.getLogger("uavbench.fl.stress_sweep")
@@ -61,11 +63,16 @@ def build_stress_grid(sweep_cfg: dict) -> list[tuple[float, float, float]]:
 
 
 def _job(
-    dropout: float, snr_deg: float, black_chip: float,
-    method: str, seed_idx: int, cfg: dict,
+    dropout: float,
+    snr_deg: float,
+    black_chip: float,
+    method: str,
+    seed_idx: int,
+    cfg: dict,
 ) -> pd.DataFrame:
     """One (knob-cell, method, seed) full-system run inside a joblib worker."""
     import torch
+
     torch.set_num_threads(1)
 
     from .federated import run_full_hfl
@@ -83,12 +90,18 @@ def _job(
     )
     job_cfg["results_dir"] = str(
         Path(cfg["results_dir"])
-        / f"d{dropout}_s{snr_deg}_b{black_chip}" / f"seed{seed_idx}" / method
+        / f"d{dropout}_s{snr_deg}_b{black_chip}"
+        / f"seed{seed_idx}"
+        / method
     )
 
     logger.info(
         "[d=%.2f snr-%.0fdB chip=%.2f  %-16s seed=%d] starting",
-        dropout, snr_deg, black_chip, method, seed_idx,
+        dropout,
+        snr_deg,
+        black_chip,
+        method,
+        seed_idx,
     )
     out = run_full_hfl(job_cfg)
     df = out["rounds"].copy()
@@ -99,18 +112,54 @@ def _job(
     return df
 
 
+def _prefetch(cfg: dict) -> None:
+    """Sequentially stream/cache the dataset + feature cache before the grid.
+
+    Same rationale as ``sweep._prefetch_all_N`` (avoid parallel HF calls and
+    redundant ResNet passes), but the stress sweep runs at one fixed
+    N_clients, so a single prefetch suffices. Afterwards every worker reads
+    the shared ``img_features.npy`` via ``data.feature_cache_path``.
+    """
+    if cfg["data"].get("source", "real") != "real":
+        return  # prebuilt test injections carry their own features
+
+    import os
+
+    from hflsim.data import get_hfl_data_partitions
+
+    from .features import compute_feature_cache
+
+    data_cfg = cfg["data"]
+    cache_path = Path(cfg["results_dir"]) / "img_features.npy"
+    logger.info("[prefetch] N=%d — caching dataset + features …", data_cfg["N_clients"])
+    full_dataset, _, _, _, _ = get_hfl_data_partitions(
+        csv_path=data_cfg.get("csv_path"),
+        data_dir=data_cfg.get("data_dir", "./data"),
+        N=data_cfg["N_clients"],
+        subsample=data_cfg.get("subsample", 0.05),
+        random_seed=data_cfg.get("seed", 42),
+        hf_token=os.environ.get("HF_TOKEN", data_cfg.get("hf_token")),
+    )
+    compute_feature_cache(
+        full_dataset,
+        cache_path=str(cache_path),
+        batch_size=data_cfg.get("feature_batch_size", 32),
+        num_workers=0,
+    )
+    data_cfg["feature_cache_path"] = str(cache_path)
+    logger.info("[prefetch] done.")
+
+
 def run_stress_sweep(cfg: dict) -> dict:
     """Run the (stress-cell × method × seed) grid; write stress_rounds.parquet.
 
-    Synthetic-only: raises if ``data.source`` isn't ``synthetic`` — the
-    knobs have no effect on the real pipeline and a silent no-op sweep
-    would be worse than an error.
+    Real-data by default (single sequential prefetch, then the parallel
+    grid); the ``prebuilt`` source is accepted for test injections.
     """
-    if cfg["data"].get("source", "synthetic") != "synthetic":
-        raise ValueError("stress sweep is synthetic-only; set data.source: synthetic")
-
     results_dir = Path(cfg["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
+
+    _prefetch(cfg)
 
     cells = build_stress_grid(cfg["sweep"])
     methods: list[str] = cfg["methods"]
@@ -125,12 +174,15 @@ def run_stress_sweep(cfg: dict) -> dict:
     ]
     logger.info(
         "Stress sweep: %d cells × %d methods × %d seeds = %d jobs — %d workers",
-        len(cells), len(methods), n_seeds, len(jobs), n_workers,
+        len(cells),
+        len(methods),
+        n_seeds,
+        len(jobs),
+        n_workers,
     )
 
     dfs = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
-        delayed(_job)(d, s, c, method, seed_idx, cfg)
-        for d, s, c, method, seed_idx in jobs
+        delayed(_job)(d, s, c, method, seed_idx, cfg) for d, s, c, method, seed_idx in jobs
     )
 
     full_df = pd.concat(dfs, ignore_index=True)
@@ -141,8 +193,7 @@ def run_stress_sweep(cfg: dict) -> dict:
     except Exception:
         full_df.to_csv(out_path.with_suffix(".csv"), index=False)
 
-    with open(results_dir / "config.stress.resolved.yaml", "w") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)
+    _dump_resolved_cfg(cfg, results_dir / "config.stress.resolved.yaml")
 
     size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
     logger.info("Stress sweep complete — %.2f MB at %s", size_mb, results_dir)

@@ -23,22 +23,23 @@ Key design decisions
   csv_path is now optional; when None the stream is used.
 """
 
-import io
-import os
-import math
-import pickle
 import hashlib
+import io
 import logging
+import math
+import os
+import pickle
 import time
-import requests
+
 import numpy as np
 import pandas as pd
+import requests
 import torch
 import torchvision.transforms.functional as TF
 from PIL import Image
-from torch.utils.data import Dataset, Subset
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
+from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
 

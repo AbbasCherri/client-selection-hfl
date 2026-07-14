@@ -12,6 +12,7 @@ from uavbench.fl.device_state import (
 
 # ── DeviceState.eligible() ────────────────────────────────────────────────────
 
+
 class TestDeviceStateEligible:
     def _state(self, battery=0.5, snr_db=10.0, memory_ok=True, compute_time_s=100.0):
         return DeviceState(battery, snr_db, memory_ok, compute_time_s)
@@ -57,6 +58,7 @@ class TestDeviceStateEligible:
 
 
 # ── DeviceStateManager ────────────────────────────────────────────────────────
+
 
 class TestDeviceStateManager:
     def _make(self, n=5, seed=0):

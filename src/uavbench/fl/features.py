@@ -69,9 +69,7 @@ def compute_feature_cache(
         arr = np.load(cache_path)
         return arr.astype(np.float32)
 
-    logger.info(
-        "Computing ResNet-18 features for %d samples (one-time pass, CPU)…", len(dataset)
-    )
+    logger.info("Computing ResNet-18 features for %d samples (one-time pass, CPU)…", len(dataset))
     backbone = _frozen_resnet18()
     loader = DataLoader(
         dataset,
@@ -95,9 +93,3 @@ def compute_feature_cache(
     size_mb = os.path.getsize(cache_path) / 1e6
     logger.info("Feature cache saved: %.2f MB → %s", size_mb, cache_path)
     return features_f16.astype(np.float32)
-
-
-def synthetic_feature_cache(N: int, seed: int = 0) -> np.ndarray:
-    """Return (N, 512) random float32 features for offline / synthetic runs."""
-    rng = np.random.default_rng(seed)
-    return rng.standard_normal((N, 512)).astype(np.float32)

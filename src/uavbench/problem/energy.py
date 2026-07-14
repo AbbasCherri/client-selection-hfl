@@ -48,9 +48,7 @@ class EnergyModel:
         return self.energy_joules(distance_m) / self.battery_capacity_j
 
 
-def movement_energy(
-    distance_m: float, model: EnergyModel | None = None
-) -> tuple[float, float]:
+def movement_energy(distance_m: float, model: EnergyModel | None = None) -> tuple[float, float]:
     """Return ``(joules, battery_fraction)`` for a reposition distance."""
     model = model or EnergyModel()
     return model.energy_joules(distance_m), model.battery_fraction(distance_m)

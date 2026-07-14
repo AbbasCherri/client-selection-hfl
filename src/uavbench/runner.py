@@ -56,7 +56,9 @@ def _instance_seed(base: int, scenario_idx: int, seed_i: int) -> int:
     return int(ss.generate_state(1)[0])
 
 
-def _optimizer_rng(base: int, method_idx: int, scenario_idx: int, seed_i: int) -> np.random.Generator:
+def _optimizer_rng(
+    base: int, method_idx: int, scenario_idx: int, seed_i: int
+) -> np.random.Generator:
     return np.random.default_rng(
         np.random.SeedSequence([base, _OPTIMIZER_STREAM, method_idx, scenario_idx, seed_i])
     )
@@ -92,8 +94,12 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
     result = optimizer.optimize(instance, fitness, rng)
 
     metrics = compute_metrics(
-        instance, result, fitness_weights=fw, energy_model=EnergyModel(),
-        G_max=cfg["budget"]["G_max"], radii=result.meta.get("radii"),
+        instance,
+        result,
+        fitness_weights=fw,
+        energy_model=EnergyModel(),
+        G_max=cfg["budget"]["G_max"],
+        radii=result.meta.get("radii"),
     )
     metrics.update(
         scenario=f"{scenario['distribution']}_N{scenario['N']}_K{scenario['K']}",
@@ -143,7 +149,11 @@ def run_experiment(cfg: dict) -> dict:
     ]
     logger.info(
         "Running %d jobs (%d methods x %d scenarios x %d seeds) on %d workers",
-        len(jobs), len(methods), n_scen, n_seeds, cfg["n_workers"],
+        len(jobs),
+        len(methods),
+        n_scen,
+        n_seeds,
+        cfg["n_workers"],
     )
 
     outputs = Parallel(n_jobs=cfg["n_workers"])(
@@ -156,8 +166,13 @@ def run_experiment(cfg: dict) -> dict:
         m = o["metrics"]
         for it, val in enumerate(o["convergence"]):
             conv_rows.append(
-                {"method": m["method"], "scenario": m["scenario"], "seed": m["seed"],
-                 "iteration": it, "best_fitness": val}
+                {
+                    "method": m["method"],
+                    "scenario": m["scenario"],
+                    "seed": m["seed"],
+                    "iteration": it,
+                    "best_fitness": val,
+                }
             )
 
     runs_df = pd.DataFrame(rows)

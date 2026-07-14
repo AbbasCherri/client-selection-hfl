@@ -27,7 +27,7 @@ class UAVAggregator:
 
     def edge_aggregate(self, global_model):
         """FedAvg-style aggregation of assigned clients' model states."""
-        success_clients = [c for c in self.assigned_clients if hasattr(c, 'local_model_state')]
+        success_clients = [c for c in self.assigned_clients if hasattr(c, "local_model_state")]
         if len(success_clients) == 0:
             return None
 
@@ -47,8 +47,6 @@ class UAVAggregator:
             weight = client.num_samples / total_samples
             client_state = client.local_model_state
             for key in float_keys:
-                aggregated_state[key] += (
-                    client_state[key].to(aggregated_state[key].device) * weight
-                )
+                aggregated_state[key] += client_state[key].to(aggregated_state[key].device) * weight
 
         return aggregated_state, total_samples

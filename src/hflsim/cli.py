@@ -16,11 +16,12 @@ Set HF_TOKEN when the HuggingFace repo is private:
     export HF_TOKEN=hf_xxxxxx
 """
 
+import argparse
 import copy
 import os
-import argparse
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,42 +29,52 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Subset
 
-from hflsim.data.loader import get_hfl_data_partitions, MultiModalDataset
-from hflsim.models.fusion import MultiModalFusionModel, FocalLoss
-from hflsim.simulation import IoTClient, UAVAggregator, ClientSelectionCoordinator, HFLOrchestrator
+from hflsim.data.loader import get_hfl_data_partitions
+from hflsim.models.fusion import FocalLoss, MultiModalFusionModel
+from hflsim.simulation import ClientSelectionCoordinator, HFLOrchestrator, IoTClient, UAVAggregator
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="HFL Client-Selection Simulation Runner")
 
     # ── Data source ──────────────────────────────────────────────────────── #
-    p.add_argument("--csv_path",    type=str,   default=None,
-                   help="Path to local CSV metadata file. Omit to stream from HuggingFace.")
-    p.add_argument("--data_dir",    type=str,   default="./data")
-    p.add_argument("--subsample",   type=float, default=1.0,
-                   help="Fraction of the dataset to use (0 < x ≤ 1).")
-    p.add_argument("--hf_token",    type=str,   default=None)
+    p.add_argument(
+        "--csv_path",
+        type=str,
+        default=None,
+        help="Path to local CSV metadata file. Omit to stream from HuggingFace.",
+    )
+    p.add_argument("--data_dir", type=str, default="./data")
+    p.add_argument(
+        "--subsample", type=float, default=1.0, help="Fraction of the dataset to use (0 < x ≤ 1)."
+    )
+    p.add_argument("--hf_token", type=str, default=None)
 
     # ── HFL topology ─────────────────────────────────────────────────────── #
-    p.add_argument("--N",           type=int,   default=70,
-                   help="Number of IoT clients (paper: 14/35/70/140).")
-    p.add_argument("--U",           type=int,   default=3,
-                   help="Number of UAV edge aggregators.")
-    p.add_argument("--rounds",      type=int,   default=100)
-    p.add_argument("--epochs",      type=int,   default=3)
-    p.add_argument("--lr",          type=float, default=3e-4)
-    p.add_argument("--seed",        type=int,   default=42)
+    p.add_argument("--N", type=int, default=70, help="Number of IoT clients (paper: 14/35/70/140).")
+    p.add_argument("--U", type=int, default=3, help="Number of UAV edge aggregators.")
+    p.add_argument("--rounds", type=int, default=100)
+    p.add_argument("--epochs", type=int, default=3)
+    p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--seed", type=int, default=42)
 
     # ── UAV placement ─────────────────────────────────────────────────────── #
-    p.add_argument("--use_pso_placement", action="store_true",
-                   help="Use PSO-optimized UAV positions instead of hardcoded coordinates.")
-    p.add_argument("--placement_method", type=str, default="pso",
-                   choices=["pso", "ga", "centroid", "random"],
-                   help="Placement optimizer to use when --use_pso_placement is set.")
+    p.add_argument(
+        "--use_pso_placement",
+        action="store_true",
+        help="Use PSO-optimized UAV positions instead of hardcoded coordinates.",
+    )
+    p.add_argument(
+        "--placement_method",
+        type=str,
+        default="pso",
+        choices=["pso", "ga", "centroid", "random"],
+        help="Placement optimizer to use when --use_pso_placement is set.",
+    )
 
     # ── Output ───────────────────────────────────────────────────────────── #
-    p.add_argument("--output_dir",  type=str,   default="./results")
-    p.add_argument("--plot_dir",    type=str,   default="./plots")
+    p.add_argument("--output_dir", type=str, default="./results")
+    p.add_argument("--plot_dir", type=str, default="./plots")
 
     return p.parse_args()
 
@@ -92,6 +103,7 @@ def initialize_uavs_fixed(U: int, seed: int = 42):
 def initialize_uavs_pso(client_coords: dict, U: int, seed: int = 42, method: str = "pso"):
     """Place U UAVs using PSO optimization on real client coordinates."""
     from hflsim.placement import pso_place_uavs
+
     print(f"[hflsim] Running {method.upper()} placement for {U} UAVs …")
     uavs = pso_place_uavs(client_coords, K=U, seed=seed, method=method)
     print(f"[hflsim] PSO placement complete. UAV coords: {[u.coords for u in uavs]}")
@@ -102,31 +114,30 @@ def save_comparison_plots(df_results: pd.DataFrame, plot_dir: str, N: int, round
     """Generate and save the four comparison plots."""
     methods = df_results["method"].unique()
     plt.style.use(
-        "seaborn-v0_8-whitegrid"
-        if "seaborn-v0_8-whitegrid" in plt.style.available
-        else "default"
+        "seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default"
     )
     colors = {
-        "proposed":     "#2ca02c",
-        "random":       "#7f7f7f",
+        "proposed": "#2ca02c",
+        "random": "#7f7f7f",
         "battery_only": "#d62728",
         "utility_only": "#ff7f0e",
-        "fedcs":        "#1f77b4",
+        "fedcs": "#1f77b4",
     }
     labels = {
-        "proposed":     "Proposed (UCB + Rep + Res)",
-        "random":       "Random Selection",
+        "proposed": "Proposed (UCB + Rep + Res)",
+        "random": "Random Selection",
         "battery_only": "Battery-Only",
         "utility_only": "Utility-Only",
-        "fedcs":        "FedCS Baseline",
+        "fedcs": "FedCS Baseline",
     }
 
     def _save(fig_name, xlabel, ylabel, title, col, ylim=None, legend_loc="lower right"):
         plt.figure(figsize=(8, 5))
         for m in methods:
             sub = df_results[df_results["method"] == m]
-            plt.plot(sub["round"], sub[col],
-                     label=labels.get(m, m), color=colors.get(m), linewidth=2.0)
+            plt.plot(
+                sub["round"], sub[col], label=labels.get(m, m), color=colors.get(m), linewidth=2.0
+            )
         plt.title(title, fontsize=12, fontweight="bold")
         plt.xlabel(xlabel, fontsize=10)
         plt.ylabel(ylabel, fontsize=10)
@@ -138,19 +149,40 @@ def save_comparison_plots(df_results: pd.DataFrame, plot_dir: str, N: int, round
         plt.savefig(os.path.join(plot_dir, f"{fig_name}_N{N}.png"), dpi=150)
         plt.close()
 
-    _save("accuracy", "Global Communication Round", "Test Accuracy",
-          f"Global Model Accuracy Convergence (N={N})", "accuracy")
-    _save("f1",       "Global Communication Round", "Macro F1 Score",
-          f"Global Model Macro F1 Convergence (N={N})", "macro_f1")
-    _save("fairness", "Global Communication Round", "Jain's Fairness Index",
-          f"Jain's Fairness Index Evolution (N={N})", "fairness",
-          ylim=(0.5, 1.05), legend_loc="lower left")
+    _save(
+        "accuracy",
+        "Global Communication Round",
+        "Test Accuracy",
+        f"Global Model Accuracy Convergence (N={N})",
+        "accuracy",
+    )
+    _save(
+        "f1",
+        "Global Communication Round",
+        "Macro F1 Score",
+        f"Global Model Macro F1 Convergence (N={N})",
+        "macro_f1",
+    )
+    _save(
+        "fairness",
+        "Global Communication Round",
+        "Jain's Fairness Index",
+        f"Jain's Fairness Index Evolution (N={N})",
+        "fairness",
+        ylim=(0.5, 1.05),
+        legend_loc="lower left",
+    )
 
     plt.figure(figsize=(8, 5))
     for m in methods:
         sub = df_results[df_results["method"] == m]
-        plt.plot(sub["comm_cost"], sub["accuracy"],
-                 label=labels.get(m, m), color=colors.get(m), linewidth=2.0)
+        plt.plot(
+            sub["comm_cost"],
+            sub["accuracy"],
+            label=labels.get(m, m),
+            color=colors.get(m),
+            linewidth=2.0,
+        )
     plt.title(f"Accuracy vs. Communication Cost (N={N})", fontsize=12, fontweight="bold")
     plt.xlabel("Total Communication Load (MB)", fontsize=10)
     plt.ylabel("Test Accuracy", fontsize=10)
@@ -167,9 +199,9 @@ def main():
     def _abs(p):
         return os.path.abspath(p) if p else p
 
-    args.data_dir   = _abs(args.data_dir)
+    args.data_dir = _abs(args.data_dir)
     args.output_dir = _abs(args.output_dir)
-    args.plot_dir   = _abs(args.plot_dir)
+    args.plot_dir = _abs(args.plot_dir)
     if args.csv_path:
         args.csv_path = _abs(args.csv_path)
 
@@ -183,47 +215,48 @@ def main():
     hf_token = args.hf_token or os.getenv("HF_TOKEN")
 
     print("[hflsim] Loading data partitions …")
-    full_dataset, client_train_indices, client_test_indices, \
-        global_test_indices, client_coords = get_hfl_data_partitions(
-            csv_path    = args.csv_path,
-            data_dir    = args.data_dir,
-            N           = args.N,
-            train_ratio = 0.8,
-            random_seed = args.seed,
-            subsample   = args.subsample,
-            hf_token    = hf_token,
+    full_dataset, client_train_indices, client_test_indices, global_test_indices, client_coords = (
+        get_hfl_data_partitions(
+            csv_path=args.csv_path,
+            data_dir=args.data_dir,
+            N=args.N,
+            train_ratio=0.8,
+            random_seed=args.seed,
+            subsample=args.subsample,
+            hf_token=hf_token,
         )
+    )
 
     test_subset = Subset(full_dataset, global_test_indices)
-    test_loader = DataLoader(test_subset, batch_size=64, shuffle=False,
-                             num_workers=0, pin_memory=(device.type == "cuda"))
+    test_loader = DataLoader(
+        test_subset, batch_size=64, shuffle=False, num_workers=0, pin_memory=(device.type == "cuda")
+    )
     print(f"[hflsim] Global test set: {len(test_subset)} samples.")
 
     epicenter = (37.50, 137.27)
 
     present_labels = np.unique(full_dataset.labels.numpy())
     num_classes = int(present_labels.max()) + 1
-    print(f"[hflsim] Damage classes present: {present_labels.tolist()} → model output dim {num_classes}")
+    print(
+        f"[hflsim] Damage classes present: {present_labels.tolist()} → model output dim {num_classes}"
+    )
 
     master_model = MultiModalFusionModel(num_classes=num_classes, pretrained=True)
 
     train_labels = full_dataset.labels[
         [i for idxs in client_train_indices.values() for i in idxs]
     ].numpy()
-    class_counts  = np.bincount(train_labels, minlength=num_classes)
+    class_counts = np.bincount(train_labels, minlength=num_classes)
     total_samples = len(train_labels)
-    smoothed_counts    = class_counts + 10
-    raw_weights        = total_samples / (num_classes * smoothed_counts)
+    smoothed_counts = class_counts + 10
+    raw_weights = total_samples / (num_classes * smoothed_counts)
     normalized_weights = raw_weights / np.mean(raw_weights)
-    clamped_weights    = np.clip(normalized_weights, 0.2, 5.0)
+    clamped_weights = np.clip(normalized_weights, 0.2, 5.0)
     class_weights = torch.tensor(clamped_weights, dtype=torch.float32)
     loss_fn = FocalLoss(alpha=class_weights, gamma=2.0)
     print(f"[hflsim] Class weights: {class_weights.tolist()}")
 
-    client_specs = [
-        (cid, client_coords[cid], client_train_indices[cid])
-        for cid in range(args.N)
-    ]
+    client_specs = [(cid, client_coords[cid], client_train_indices[cid]) for cid in range(args.N)]
 
     methods = ["proposed", "random", "battery_only", "utility_only", "fedcs"]
     all_records = []
@@ -252,26 +285,26 @@ def main():
             uavs = initialize_uavs_fixed(args.U, seed=args.seed)
 
         coordinator = ClientSelectionCoordinator(
-            epicenter  = epicenter,
-            clients    = clients,
-            uavs       = uavs,
-            R_comm     = 50000.0,
-            B_min_iot  = 0.2,
-            B_min_uav  = 0.3,
-            T_max      = 300.0,
-            SNR_min    = 3.0,
+            epicenter=epicenter,
+            clients=clients,
+            uavs=uavs,
+            R_comm=50000.0,
+            B_min_iot=0.2,
+            B_min_uav=0.3,
+            T_max=300.0,
+            SNR_min=3.0,
         )
 
         global_model = copy.deepcopy(master_model).to(device)
 
         orchestrator = HFLOrchestrator(
-            global_model          = global_model,
-            clients               = clients,
-            uavs                  = uavs,
-            selection_coordinator = coordinator,
-            loss_fn               = loss_fn,
-            test_loader           = test_loader,
-            device                = device,
+            global_model=global_model,
+            clients=clients,
+            uavs=uavs,
+            selection_coordinator=coordinator,
+            loss_fn=loss_fn,
+            test_loader=test_loader,
+            device=device,
         )
 
         for r in range(1, args.rounds + 1):
@@ -280,7 +313,7 @@ def main():
             fairness = orchestrator.get_jains_fairness()
 
             pred_dist = orchestrator.last_pred_distribution
-            pred_str  = "[" + " ".join(f"{p:.2f}" for p in pred_dist) + "]"
+            pred_str = "[" + " ".join(f"{p:.2f}" for p in pred_dist) + "]"
 
             print(
                 f"  Round {r:02d} | "
@@ -305,17 +338,19 @@ def main():
                         f"{np.max(pred_dist)*100:.0f}% of test samples (majority-class collapse)."
                     )
 
-            all_records.append({
-                "method":    method,
-                "round":     r,
-                "accuracy":  accuracy,
-                "macro_f1":  macro_f1,
-                "fairness":  fairness,
-                "comm_cost": orchestrator.total_comm_cost,
-            })
+            all_records.append(
+                {
+                    "method": method,
+                    "round": r,
+                    "accuracy": accuracy,
+                    "macro_f1": macro_f1,
+                    "fairness": fairness,
+                    "comm_cost": orchestrator.total_comm_cost,
+                }
+            )
 
     df_results = pd.DataFrame(all_records)
-    csv_out    = os.path.join(args.output_dir, f"simulation_results_N{args.N}.csv")
+    csv_out = os.path.join(args.output_dir, f"simulation_results_N{args.N}.csv")
     df_results.to_csv(csv_out, index=False)
     print(f"\n[hflsim] Results saved to {csv_out}")
 

@@ -127,8 +127,8 @@ class CachedFusionModel(nn.Module):
 
     def load_trainable_state_dict(self, d: dict[str, torch.Tensor]) -> None:
         """Load aggregated IoT-level parameters (struct_branch + fusion)."""
-        sb = {k[len("struct_branch."):]: v for k, v in d.items() if k.startswith("struct_branch.")}
-        fh = {k[len("fusion."):]: v for k, v in d.items() if k.startswith("fusion.")}
+        sb = {k[len("struct_branch.") :]: v for k, v in d.items() if k.startswith("struct_branch.")}
+        fh = {k[len("fusion.") :]: v for k, v in d.items() if k.startswith("fusion.")}
         if sb:
             self.struct_branch.load_state_dict(sb, strict=True)
         if fh:
@@ -149,7 +149,7 @@ class CachedFusionModel(nn.Module):
         If img_proj keys are absent (e.g. flat_fl server aggregation), only
         struct_branch and fusion are updated — img_proj stays unchanged.
         """
-        ip = {k[len("img_proj."):]: v for k, v in d.items() if k.startswith("img_proj.")}
+        ip = {k[len("img_proj.") :]: v for k, v in d.items() if k.startswith("img_proj.")}
         if ip:
             self.img_proj.load_state_dict(ip, strict=True)
         self.load_trainable_state_dict(d)

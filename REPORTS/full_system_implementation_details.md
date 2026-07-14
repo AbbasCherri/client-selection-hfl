@@ -688,6 +688,12 @@ schemes, used at different points in the hierarchy:
 
 ## 22. Dataset adapters & synthetic fallback
 
+> **Superseded (2026-07-14):** the synthetic fallback described below was
+> removed from the library — the experimental pipeline is real-data only.
+> The offline generator survives solely as a test fixture
+> (`tests/uavbench/synthetic_fixture.py`) injected via the harnesses'
+> `data.source: prebuilt` seam. Kept for historical reference.
+
 **File:** [dataset.py](../src/uavbench/fl/dataset.py).
 
 - **`ClientData`** — one client's `client_id`, `(lat,lon)`, `train_indices`,

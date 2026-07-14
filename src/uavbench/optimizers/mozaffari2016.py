@@ -67,14 +67,15 @@ class Mozaffari2016(Optimizer):
             lo, hi = float(instance.lower[2]), float(instance.upper[2])
         return lo, hi
 
-    def _run(
-        self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator
-    ) -> Result:
+    def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         env = ENV_PRESETS[self.environment]
         h_lo, h_hi = self._altitude_bounds(instance)
         h_star, r_star = optimal_altitude_mozaffari(
-            self.max_path_loss_db, self.freq_ghz * 1e9, **env,
-            h_min_m=h_lo, h_max_m=h_hi,
+            self.max_path_loss_db,
+            self.freq_ghz * 1e9,
+            **env,
+            h_min_m=h_lo,
+            h_max_m=h_hi,
         )
 
         device_xy = instance.device_coords[:, :2]

@@ -25,8 +25,12 @@ _TESTS = ("wilcoxon", "ttest_rel")
 
 
 def _paired_values(
-    df: pd.DataFrame, metric: str, method_a: str, method_b: str,
-    group_cols: list[str], seed_col: str,
+    df: pd.DataFrame,
+    metric: str,
+    method_a: str,
+    method_b: str,
+    group_cols: list[str],
+    seed_col: str,
 ) -> list[tuple[tuple, np.ndarray, np.ndarray]]:
     """Per group: seed-aligned metric arrays for the two methods.
 
@@ -80,15 +84,17 @@ def paired_seed_test(
                 statistic, p = stats.wilcoxon(a, b)
         else:
             statistic, p = stats.ttest_rel(a, b)
-        rows.append({
-            **dict(zip(group_cols, key)),
-            "method_a": method_a,
-            "method_b": method_b,
-            "n_pairs": len(a),
-            "statistic": float(statistic),
-            "p_value": float(p),
-            "mean_diff": float(diff.mean()),
-        })
+        rows.append(
+            {
+                **dict(zip(group_cols, key)),
+                "method_a": method_a,
+                "method_b": method_b,
+                "n_pairs": len(a),
+                "statistic": float(statistic),
+                "p_value": float(p),
+                "mean_diff": float(diff.mean()),
+            }
+        )
     return pd.DataFrame(rows)
 
 

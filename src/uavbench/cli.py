@@ -36,8 +36,18 @@ def _find_config(path_str: str) -> Path:
 
 
 def _print_headline(summary: pd.DataFrame) -> None:
-    cols = [c for c in ["scenario", "method", "final_fitness_mean", "final_fitness_ci95",
-                        "coverage_pct_mean", "wall_time_s_mean"] if c in summary.columns]
+    cols = [
+        c
+        for c in [
+            "scenario",
+            "method",
+            "final_fitness_mean",
+            "final_fitness_ci95",
+            "coverage_pct_mean",
+            "wall_time_s_mean",
+        ]
+        if c in summary.columns
+    ]
     with pd.option_context("display.max_rows", None, "display.width", 160):
         print("\n=== Tier-1 headline (mean over seeds) ===")
         print(summary[cols].to_string(index=False))
@@ -106,7 +116,9 @@ def cmd_significance(args: argparse.Namespace) -> None:
     from .analysis import pairwise_significance_table
 
     target = Path(args.config)
-    results_dir = target if target.is_dir() else Path(load_config(_find_config(args.config))["results_dir"])
+    results_dir = (
+        target if target.is_dir() else Path(load_config(_find_config(args.config))["results_dir"])
+    )
 
     df = None
     for fname, group_spec in _SIG_TABLES:
@@ -138,8 +150,12 @@ def cmd_significance(args: argparse.Namespace) -> None:
 
     methods = args.methods.split(",") if args.methods else sorted(df["method"].unique())
     table = pairwise_significance_table(
-        df, metric=args.metric, methods=methods,
-        group_cols=group_cols, test=args.test, alpha=args.alpha,
+        df,
+        metric=args.metric,
+        methods=methods,
+        group_cols=group_cols,
+        test=args.test,
+        alpha=args.alpha,
     )
     out_path = results_dir / "significance.csv"
     table.to_csv(out_path, index=False)
@@ -186,7 +202,8 @@ def cmd_smoke(args: argparse.Namespace) -> None:
     proj_sec = proj_evals / eps / max(1, cfg["n_workers"]) if eps == eps else float("nan")
     logger.info(
         "Projected tier1_core metaheuristic time: ~%.1f min on %d workers",
-        proj_sec / 60.0, cfg["n_workers"],
+        proj_sec / 60.0,
+        cfg["n_workers"],
     )
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
@@ -197,7 +214,9 @@ def cmd_run_tier2(args: argparse.Namespace) -> None:
     out = run_tier2(cfg)
     df = out["rounds"]
     print("\n=== Tier-2 summary (final round per method) ===")
-    last = _last_round(df, ["method"])[["method", "accuracy", "macro_f1", "coverage_pct", "cumulative_energy_j"]].set_index("method")
+    last = _last_round(df, ["method"])[
+        ["method", "accuracy", "macro_f1", "coverage_pct", "cumulative_energy_j"]
+    ].set_index("method")
     with pd.option_context("display.max_rows", None, "display.width", 160):
         print(last.to_string())
     _print_timing(out["results_dir"])
@@ -211,8 +230,10 @@ def cmd_smoke_tier2(args: argparse.Namespace) -> None:
     elapsed = time.perf_counter() - start
 
     df = out["rounds"]
-    last = _last_round(df, ["method"])[["method", "accuracy", "macro_f1", "coverage_pct", "n_covered"]].set_index("method")
-    print("\n=== Tier-2 smoke (synthetic, final round per method) ===")
+    last = _last_round(df, ["method"])[
+        ["method", "accuracy", "macro_f1", "coverage_pct", "n_covered"]
+    ].set_index("method")
+    print("\n=== Tier-2 smoke (real data, reduced subsample; final round per method) ===")
     with pd.option_context("display.max_rows", None, "display.width", 160):
         print(last.to_string())
 
@@ -234,7 +255,9 @@ def cmd_run_paper_sim(args: argparse.Namespace) -> None:
     print("\n=== Paper simulation summary (final round, mean across seeds) ===")
     summary = (
         _last_round(df, ["method", "N", "seed"])
-        .groupby(["method", "N"])[["accuracy", "macro_f1", "coverage_pct", "comm_mb_round", "cumulative_energy_j"]]
+        .groupby(["method", "N"])[
+            ["accuracy", "macro_f1", "coverage_pct", "comm_mb_round", "cumulative_energy_j"]
+        ]
         .mean()
         .reset_index()
     )
@@ -243,6 +266,7 @@ def cmd_run_paper_sim(args: argparse.Namespace) -> None:
 
     try:
         from .plotting import plot_paper_sim
+
         figs = plot_paper_sim(out["results_dir"])
         logger.info("%d paper-sim figures written", len(figs))
     except Exception as exc:
@@ -259,19 +283,20 @@ def cmd_run_selection_sim(args: argparse.Namespace) -> None:
     df = out["rounds"]
 
     print("\n=== Selection isolation summary (final round, mean across seeds) ===")
-    cols = [c for c in ("accuracy", "macro_f1", "jain_fairness",
-                        "n_unique_selected", "K_uav") if c in df.columns]
+    cols = [
+        c
+        for c in ("accuracy", "macro_f1", "jain_fairness", "n_unique_selected", "K_uav")
+        if c in df.columns
+    ]
     summary = (
-        _last_round(df, ["method", "N", "seed"])
-        .groupby(["method", "N"])[cols]
-        .mean()
-        .reset_index()
+        _last_round(df, ["method", "N", "seed"]).groupby(["method", "N"])[cols].mean().reset_index()
     )
     with pd.option_context("display.max_rows", None, "display.width", 200):
         print(summary.round(4).to_string(index=False))
 
     try:
         from .plotting import plot_selection_sim
+
         figs = plot_selection_sim(out["results_dir"])
         logger.info("%d selection-isolation figures written", len(figs))
     except Exception as exc:
@@ -291,8 +316,9 @@ def cmd_run_stress_sweep(args: argparse.Namespace) -> None:
     print("\n=== Stress-test summary (final round, mean across seeds) ===")
     summary = (
         _last_round(df, ["method", "dropout_rate", "snr_degradation_db", "black_chip_rate", "seed"])
-        .groupby(["method", "dropout_rate", "snr_degradation_db", "black_chip_rate"])
-        [["accuracy", "macro_f1", "coverage_pct"]]
+        .groupby(["method", "dropout_rate", "snr_degradation_db", "black_chip_rate"])[
+            ["accuracy", "macro_f1", "coverage_pct"]
+        ]
         .mean()
         .reset_index()
     )
@@ -351,7 +377,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_t2.add_argument("--config", required=True)
     p_t2.set_defaults(func=cmd_run_tier2)
 
-    p_s2 = sub.add_parser("smoke_tier2", help="fast Tier-2 smoke run (synthetic, no HF token)")
+    p_s2 = sub.add_parser(
+        "smoke_tier2",
+        help="fast Tier-2 smoke run on real data at reduced subsample "
+        "(HF_TOKEN needed on first run; warm ./data caches after that)",
+    )
     p_s2.set_defaults(func=cmd_smoke_tier2)
 
     p_ps = sub.add_parser(
@@ -368,15 +398,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_si.add_argument("--config", default="configs/selection_isolation.yaml")
     p_si.set_defaults(func=cmd_run_selection_sim)
 
-    p_sw = sub.add_parser("run_sweep", help="N-scalability sweep (N=30..250, all methods, 8-core parallel)")
+    p_sw = sub.add_parser(
+        "run_sweep", help="N-scalability sweep (N=30..250, all methods, 8-core parallel)"
+    )
     p_sw.add_argument("--config", default="configs/tier2_sweep.yaml")
     p_sw.set_defaults(func=cmd_run_sweep)
 
     p_st = sub.add_parser(
         "run_stress_sweep",
-        help="synthetic stress-test sweep: dropout / SNR degradation / black-chip rate (robustness evidence for the single-event scope)",
+        help="real-data stress-test sweep: dropout / SNR degradation / black-chip rate (robustness evidence for the single-event scope)",
     )
-    p_st.add_argument("--config", default="configs/synthetic_stress_test.yaml")
+    p_st.add_argument("--config", default="configs/stress_test.yaml")
     p_st.set_defaults(func=cmd_run_stress_sweep)
 
     p_sig = sub.add_parser(
