@@ -19,10 +19,16 @@
 # just paste a fresh `pip freeze` wholesale, it will reintroduce dev/test
 # tooling and, in a contaminated environment, unrelated stray packages.
 #
-# PyTorch is a CPU build (`+cpu` local version suffix, only resolvable from
-# the CPU wheel index): scripts/gcp_setup.sh installs torch/torchvision from
-# https://download.pytorch.org/whl/cpu FIRST so the pins below resolve as
-# already satisfied instead of pulling multi-GB CUDA runtimes.
+# PyTorch is a CPU build (`+cpu` local version suffix). That suffix is ONLY
+# published on the CPU wheel index, never on PyPI — a plain `pip install
+# torch==2.12.1+cpu` with no other index configured fails with "No matching
+# distribution found" (confirmed: PyPI lists 2.12.1 but not 2.12.1+cpu). The
+# --extra-index-url below makes this file self-sufficient for a single `pip
+# install -r requirements.txt`; scripts/gcp_setup.sh additionally
+# pre-installs torch/torchvision from that same index before this file so
+# the generic dependency resolution pass has less work to do, but that step
+# is now a (harmless) optimization, not a correctness requirement.
+--extra-index-url https://download.pytorch.org/whl/cpu
 
 # --- Direct dependencies (mirrors pyproject.toml's `dependencies`) ---------
 numpy==2.4.6
