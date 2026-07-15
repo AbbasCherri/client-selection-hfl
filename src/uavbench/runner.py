@@ -22,6 +22,7 @@ from .optimizers import build_optimizer
 from .problem.energy import EnergyModel
 from .problem.fitness import Fitness
 from .problem.instance import generate_instance
+from .reporting.tables import write_table as _write_table
 
 logger = logging.getLogger("uavbench.runner")
 
@@ -45,8 +46,8 @@ def _build_optimizer(method: str, budget: dict, method_params: dict | None = Non
 # Stream tags disambiguate the two seed families structurally. Without them,
 # SeedSequence's trailing-zero equivalence ([b, s, i] == [b, s, i, 0]) lets an
 # optimizer stream with seed_i=0 collide with an instance stream whenever a
-# config sets instance_seed == optimizer_seed (verified by
-# tests/uavbench/test_invariants.py::TestSeedStreamDisjointness).
+# config sets instance_seed == optimizer_seed (verified by the runtime assert
+# in _run_one and tests/sanity_checks/check_seeds_and_budget.py).
 _INSTANCE_STREAM = 0
 _OPTIMIZER_STREAM = 1
 
@@ -88,6 +89,11 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
     fw = (cfg["fitness"]["w1"], cfg["fitness"]["w2"], cfg["fitness"]["w3"])
     fitness = Fitness(instance, *fw)
     rng = _optimizer_rng(cfg["optimizer_seed"], method_idx, scenario_idx, seed_i)
+    # The two seed families must stay disjoint even when a config sets
+    # instance_seed == optimizer_seed (SeedSequence trailing-zero hazard).
+    assert inst_seed != int(rng.bit_generator.seed_seq.generate_state(1)[0]), (  # type: ignore[union-attr]
+        "instance/optimizer seed streams collided — stream tags broken"
+    )
 
     opt_params = cfg.get("optimizer_params", {}).get(method, {})
     optimizer = _build_optimizer(method, cfg["budget"], opt_params)
@@ -109,18 +115,6 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
         seed=seed_i,
     )
     return {"metrics": metrics, "convergence": result.convergence}
-
-
-def _write_table(df: pd.DataFrame, path: Path) -> Path:
-    """Write a DataFrame to Parquet, falling back to CSV if pyarrow is missing."""
-    try:
-        df.to_parquet(path, index=False)
-        return path
-    except Exception as exc:  # pragma: no cover - environment dependent
-        logger.warning("Parquet write failed (%s); falling back to CSV", exc)
-        csv = path.with_suffix(".csv")
-        df.to_csv(csv, index=False)
-        return csv
 
 
 def _dir_size_mb(path: Path) -> float:

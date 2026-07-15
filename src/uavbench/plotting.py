@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import matplotlib
@@ -10,6 +11,10 @@ matplotlib.use("Agg")  # headless / no-display CPU box
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+
+from uavbench.reporting.tables import write_table  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 def _read_table(path: Path) -> pd.DataFrame:
@@ -84,12 +89,7 @@ def analyze_dir(results_dir: Path) -> pd.DataFrame:
     """Load runs.parquet, compute the summary table, and write it next to it."""
     runs = _read_table(results_dir / "runs.parquet")
     summary = summarize(runs)
-    out = results_dir / "summary.parquet"
-    try:
-        summary.to_parquet(out, index=False)
-    except Exception:
-        out = results_dir / "summary.csv"
-        summary.to_csv(out, index=False)
+    write_table(summary, results_dir / "summary.parquet")
     return summary
 
 
@@ -443,8 +443,8 @@ def plot_sweep(results_dir: Path) -> list[Path]:
         fig.savefig(out, dpi=150)
         plt.close(fig)
         paths.append(out)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("sweep_heatmap_accuracy figure skipped: %s", exc)
 
     return paths
 

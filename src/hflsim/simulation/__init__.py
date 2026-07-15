@@ -6,7 +6,7 @@
 #   2. the standalone ``hflsim`` CLI (`python -m hflsim`), which still runs
 #      the original single-N simulation end to end.
 # Do NOT build new experiments on these classes — use ``uavbench.fl``.
-# See REPORTS/full_system_implementation_details.md for the migration story.
+# See REPORTS/master_implementation_reference.md for the migration story.
 
 from .client import IoTClient, RandomProjection, get_flat_fusion_weights, get_fusion_params
 from .coordinator import ClientSelectionCoordinator

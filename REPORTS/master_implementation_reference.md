@@ -2,15 +2,19 @@
 
 **Purpose.** Single consolidated reference for writing the research paper:
 every mechanism in the system, the design rationale behind it, the exact
-constants, and the statements the paper must make explicitly. Deeper
-line-level walkthroughs live in the companion documents
-(`full_system_implementation_details.md`, `deployment_implem_details.md`,
-`client_selection_algorithm_explained.md`, `pso_algorithm_explained.md`,
-`literature_baselines.md`, `data_availability.md`,
-`hardware_and_runtime.md`); this file is the map and the "why".
+constants, and the statements the paper must make explicitly. Sections
+1–18 are the map and the "why"; Appendices A–E hold the line-level
+algorithm walkthroughs, literature-baseline pseudocode/citations, and
+data-pipeline internals that used to live in separate companion documents.
+Which config produced which result file is tracked separately in
+`results_provenance.md`.
 
-Updated 2026-07-14. State of the codebase: 342 offline tests passing,
-ruff/black clean, real-data-only experimental pipeline.
+Updated 2026-07-15. State of the codebase: real-data-only experimental
+pipeline; correctness is verified by manually run sanity-check scripts
+(consolidated under `tests/sanity_checks/`; run `python
+tests/sanity_checks/run_all.py` before trusting a batch of results) — there
+is no CI or lint
+gate.
 
 ---
 
@@ -41,8 +45,8 @@ across all methods.
 *controlled comparison*. All placement methods score through one shared
 fitness/assignment path; all selection methods run inside the
 otherwise-identical FL pipeline; instance randomness is method-independent
-(§11). The paper's comparison-fairness argument is enforced by CI
-invariant tests, not prose (`tests/uavbench/test_invariants.py`).
+(§11). The paper's comparison-fairness argument is encoded in invariant
+checks that are run manually before results are trusted, not prose.
 
 ---
 
@@ -50,9 +54,9 @@ invariant tests, not prose (`tests/uavbench/test_invariants.py`).
 
 **Policy (state in the paper):** every config, sweep, and reported number
 derives from the real dataset. The library contains **no synthetic data
-generation**; the offline test suite injects a deterministic fixture
-through a documented seam (`data.source: "prebuilt"`,
-`tests/uavbench/synthetic_fixture.py`) that never touches results.
+generation**; the offline sanity checks inject a deterministic fixture
+through a documented seam (`data.source: "prebuilt"`) that never touches
+results, so they run without an HF token.
 `data.source` defaults to `"real"`; a config requesting `"synthetic"`
 fails loudly (`fl/federated.py::_load_data`).
 
@@ -65,7 +69,12 @@ fusion of three sources for the **2024 Noto Peninsula earthquake**:
 |---|---|---|
 | Damage survey | raw codes {0 Survived, 1 Collapsed, 9 Obstructed view, 99 Missing/inconsistent} remapped to contiguous {0..3} | 4-class label |
 | USGS ShakeMap | MMI (original+shape), PGA, PGV, SA 0.3/1.0/3.0 s + lat/lon = 9 structured features | structured branch input |
-| GSI aerial imagery | on-demand 128×128 chips from zoom-18 XYZ tiles (~0.6 m/px), disk-cached | image branch input |
+| GSI aerial imagery | on-demand 128×128 chips from zoom-18 XYZ tiles (~0.6 m/px), disk-cached under `data/tile_cache/` (`HFL_TILE_CACHE`) | image branch input |
+
+**Subsample fractions (per config):** `configs/paper_full.yaml` uses
+`subsample: 1.0` (~128k rows); the sweep/selection/stress configs use 0.1
+(~12.8k rows); `tier2_fl.yaml` uses 0.05. Subsampling is deterministic
+(`df.sample(..., random_state=seed)`) and applied after streaming.
 
 **Preprocessing:** lat/lon min-max normalized to [0,1] (raw degrees kept
 separately for tile lookups — z-scored coordinates would request
@@ -86,11 +95,16 @@ The measured rate is logged and persisted per run under
 `_diagnostics.black_chip_rate` in the resolved-config YAML — quote it next
 to the accuracy tables as evidence the image modality was informative.
 
-**Licensing / availability:** GSI tiles under the Government of Japan
-Standard Terms of Use v2.0, cached locally and **never redistributed**
-(data/ is gitignored); reruns re-fetch. `HF_TOKEN` needed on first run;
-metadata/partition/tile caches make later runs offline-capable. Full
-statement: `data_availability.md`.
+**Licensing / availability (data availability statement).** GSI aerial
+tiles are used under the **Government of Japan Standard Terms of Use
+v2.0**; cached tiles are **never redistributed** with this repository
+(data/ is gitignored) — they are re-fetched on demand from the public GSI
+service. Any use of the HF dataset must respect the upstream terms of the
+fused sources; the pinned revision hash above makes the exact evaluated
+snapshot citable and re-fetchable. `HF_TOKEN` is needed on first run for
+streaming; the metadata/partition/tile caches under `data/` are derived
+artifacts, regenerated automatically, and make later runs
+offline-capable.
 
 **Single-event limitation (mandatory paper statement).** All real-data
 results derive from one seismic event. No second real, geo-located,
@@ -162,8 +176,8 @@ flat_fl:      comm = 2·n_selected·0.271                            MB
 ```
 
 Identical accounting for every method (`comm_mb_round` column); the exact
-constants and the two-tier formula are pinned by tests
-(`test_comm_cost.py`) so the efficiency claim is auditable.
+constants and the two-tier formula are pinned by manually run sanity
+checks so the efficiency claim is auditable.
 
 **Energy (`problem/energy.py`, reporting-only by design):**
 `E(d) = P_fly·(d/v) + P_hover·t_serve` with P_fly=250 W, P_hover=200 W,
@@ -212,6 +226,19 @@ bit-for-bit, so PSO/GA/heuristics are untouched (regression-pinned).
 V_i(t) = β(t)·Û_i + (1−β(t))·R_i with β(t) = max(0, 1 − t/T_decay),
 T_decay=20 — placement weights coverage by utility early (no history) and
 by earned reputation later. Tier-1 benchmarks pin β=1 (history-free).
+Tier-1 raw feature distributions (synthesized in `generate_instance`):
+SNR ~ U(0,30) dB, samples ~ U_int(20,200), reputation R_i ~ Beta(2,2)
+held fixed within one instance.
+
+**Scenario generation (`generate_instance`):** device distributions
+`uniform` (uniform over the box), `clustered` (√N/2 Gaussian clusters,
+σ=0.06·span), `epicenter_biased` (single Gaussian at the epicenter,
+σ=0.12·span). `prev_mode` sets the movement-penalty baseline:
+**`"stale"`** (default) fits the previous layout to a *shifted* epicenter
+(offset N(0, 0.25·span)) — modelling the situation that triggers a
+reconfiguration, so `static` is a genuine floor; **`"warm"`** puts
+previous positions near current device sub-centroids (already
+near-optimal) to study the conservative regime.
 
 ---
 
@@ -230,11 +257,13 @@ Kennedy 2002; χ from φ=c1+c2=4.10, guard φ>4 raises), lbest ring topology
 value-weighted k-means++ seeding, stagnation reinit (Δ<1e-4 for 20 iters →
 re-scatter ρ=0.2 of swarm), turbulence (p=0.1, jitter 10 m), early stop at
 95% plateau. Every design choice is a config toggle → ablations are YAML
-edits.
+edits. Full update equations, enhancement rationale, and the default
+hyperparameter table: Appendix A.
 
 **GA (internal head-to-head).** Real-coded, tournament (size 3), SBX
 crossover (η_c=15, p=0.9), polynomial mutation (η_m=20), 2 elites — same
-fitness, same P·G_max budget as PSO by construction.
+fitness, same P·G_max budget as PSO by construction. Operator formulas:
+Appendix A.
 
 **Heuristic floors:** `centroid` (value-weighted k-means),
 `random` (best of 20 uniform draws), `static` (no repositioning — the
@@ -245,10 +274,10 @@ ablation that prices dynamic placement).
 *Shared channel model* (`problem/path_loss.py`): Al-Hourani et al. 2014
 probabilistic LoS — P(LoS) = 1/(1+a·exp(−b(θ−a))), mean loss = FSPL(d_3d,f)
 + P_LoS·η_LoS + (1−P_LoS)·η_NLoS; `coverage_radius(h)` by bisection
-(monotonicity tested); environment presets (suburban a=4.88, b=0.43,
+(monotonicity checked); environment presets (suburban a=4.88, b=0.43,
 η=0.1/21 dB, plus urban/dense/high-rise). Radius-vs-altitude is unimodal
 (rises while LoS gain dominates, falls when FSPL dominates) — verified
-numerically and by test.
+numerically.
 
 - **`mozaffari2016`** (IEEE Comm. Lett. 2016): compute the
   radius-maximizing altitude (h*, r*) once, then place K equal discs by
@@ -323,23 +352,32 @@ placement, reputation FedAvg, T_sel cadence as `proposed_hfl`):**
   cadence.
 
 *Adaptation constants (γ, w's) are documented inline in
-`client_selection.py` — cite them as our instantiation choices.*
+`client_selection.py` — cite them as our instantiation choices.* Full
+citations, faithful pseudocode (Algorithms B1–B3), and per-baseline
+fidelity/adaptation notes: Appendix C. Stage-by-stage selection formulas
+and the constants table: Appendix B.
 
 ---
 
 ## 9. Reputation and aggregation
 
-**Reputation (`fl/reputation.py`), three components per client:**
-contribution (does the update delta improve alignment), anomaly
-(ℓ2-norm outlier score vs the cohort), temporal reliability (success
-rate; `mark_absent` on selected-but-silent clients). Aggregate score
+**Reputation (`fl/reputation.py`), three components per client**
+(exact formulas in Appendix B §B.3):
+contribution (cosine similarity between successive EMAs of the client's
+update-*delta* vector — absolute weight vectors are ≈1-cosine-similar for
+everyone under shared init), anomaly (diagonal Mahalanobis distance of
+the update vs a global EMA-tracked per-parameter mean/variance, divided
+by √J so the fixed threshold d≤2 is dimension-independent), temporal
+reliability (success rate + response-time stability; `mark_absent` on
+selected-but-silent clients). Aggregate score
 R_n = w·[R_contrib, R_anomaly, R_temp], initial w = (0.4, 0.3, 0.3).
 
 **Bayesian weight adaptation:** w is a Dirichlet posterior updated every
 10 rounds — prior = 20·w_init pseudo-counts, evidence accumulates the
 per-round component values; posterior renormalized to the simplex.
 Absence counts as evidence *against* components that scored the client
-highly. (Covered by tests including the round-10 adaptation firing.)
+highly. (Covered by sanity checks including the round-10 adaptation
+firing.)
 
 **Aggregation (per round):**
 - UAV tier: sample-weighted FedAvg within each UAV's roster.
@@ -388,7 +426,7 @@ every method sees identical instances) and optimizer stream
 SeedSequence treats trailing-zero entropy as equivalent
 (`[b,s,i] ≡ [b,s,i,0]`), so without tags an optimizer stream at seed 0
 collides with an instance stream whenever the two bases are set equal.
-Found by, and now pinned in, the CI invariant tests.
+Found by, and now pinned in, the manually run invariant checks.
 
 **FL harnesses (`fl/seeds.py`, formulas frozen & regression-pinned):**
 - `tier2_seed = (opt_seed + n_clients·7919 + md5(method) mod 2³¹) mod 2³¹`
@@ -492,16 +530,14 @@ while `flat_fl`'s "all" mode is untouched; black-chip degrades accuracy.
 - **Per-run artifacts:** resolved config YAML (prebuilt payloads elided),
   `seed_manifest.csv` (written before the run), rounds/runs parquet,
   `confusion.parquet`, figures.
-- **CI (`.github/workflows/ci.yml`):** pytest (342 offline tests — no
-  token; the fixture seam) + ruff + black + advisory mypy. Invariant tests
-  encode the fairness-of-comparison claims: PSO/GA always share P/G_max
-  regardless of config; instance/optimizer seed streams are disjoint even
-  under equal bases.
-- **Hardware:** Dell Latitude 5540 (i7-1355U, 32 GB) for development; GCP
-  n1-standard-12 for grids; workers pin `torch.set_num_threads(1)`; HF
-  streaming is prefetched sequentially before any parallel phase (rate
-  limits), features computed once per N. Fill the wall-clock table in
-  `hardware_and_runtime.md` from the final grid run.
+- **Sanity checks (manual):** offline checks run without a token via the
+  fixture seam; they are run manually before results are trusted (the
+  suite is being consolidated into `tests/sanity_checks/` scripts).
+  Invariant checks encode the fairness-of-comparison claims: PSO/GA
+  always share P/G_max regardless of config; instance/optimizer seed
+  streams are disjoint even under equal bases.
+- **Hardware:** see §18 for the full machine/parallelism/runtime
+  disclosure; fill its wall-clock table from the final grid run.
 
 ---
 
@@ -515,12 +551,6 @@ while `flat_fl`'s "all" mode is untouched; black-chip degrades accuracy.
   scalar, equivalence-pinned) replaced Python double loops in coverage
   checks and selection scoring — ~17× on `_covered_clients` at N=500,
   K=20 with byte-identical output.
-- **Dead code policy:** unused aggregation variants deleted (git history
-  preserves them); the pre-`uavbench` simulator is explicitly marked
-  LEGACY and excluded from lint/type gates.
-- **Repo hygiene:** no data, logs, or caches tracked in git (GSI tiles
-  must not be redistributed); results of the published baseline remain
-  tracked.
 
 ---
 
@@ -544,6 +574,535 @@ while `flat_fl`'s "all" mode is untouched; black-chip degrades accuracy.
 9. **Load imbalance ≠ selection fairness** — both reported, labeled as
    assignment balance vs selection-frequency fairness (§12).
 10. **Wall-clock numbers** behind the CPU-feasibility claim; hardware
-    disclosure (§15).
-11. Data availability + GSI licensing statement (§2;
-    `data_availability.md`).
+    disclosure (§15, §18).
+11. Data availability + GSI licensing statement (§2).
+
+---
+
+## 18. Hardware and runtime disclosure
+
+### Machines
+
+| Role | Machine | CPU | RAM | Notes |
+|---|---|---|---|---|
+| Development / smoke runs | Dell Latitude 5540 | Intel i7-1355U (10c/12t) | 32 GB | CPU-only; all harnesses runnable |
+| Full experimental grids | GCP `n1-standard-12` | 12 vCPU | 45 GB | via `scripts/run_gcp.sh` / `scripts/run_paper_sim.sh` / `scripts/run_selection_gcp.sh` (self-terminating) |
+
+No GPU is used anywhere: the CPU-feasibility claim is backed by measured
+wall-clock numbers, not an architectural argument.
+
+### Parallelism per harness
+
+Each sweep worker pins `torch.set_num_threads(1)` so total active threads
+= `n_workers` × 1 (no BLAS thrash). `n_workers` per checked-in config:
+
+| Config | Harness | n_workers |
+|---|---|---|
+| `configs/tier1_core.yaml` | Tier-1 placement grid | 8 |
+| `configs/paper_full.yaml` | full paper sim (N × method × seed) | 12 |
+| `configs/selection_isolation.yaml` | selection isolation | (see config) |
+| `configs/tier2_sweep.yaml` | N-scalability sweep | (see config) |
+| `configs/stress_test.yaml` | stress-test sweep | 8 |
+
+`UAVBENCH_N_WORKERS` overrides the Tier-1 worker count per machine.
+
+### Where the timing numbers come from
+
+Wall-clock is instrumented at two levels and persisted with every run:
+
+- **Per optimizer run** — `wall_time_s` column in Tier-1 `runs.parquet`
+  (timed around `Optimizer.optimize`).
+- **Per FL round** — `round_time_s` column in every rounds table
+  (`tier2_rounds.parquet`, `fullsim_rounds.parquet`,
+  `selection_rounds.parquet`, `stress_rounds.parquet`).
+
+The per-method aggregate (mean/std/total seconds) is printed by
+`uavbench analyze` / `run_tier2` / `run_paper_sim` / `run_stress_sweep`
+via `uavbench.reporting.summarize_wall_clock`, and should be quoted in
+the paper's runtime disclosure.
+
+### Fill in after the final grid run
+
+Record the totals from `results/reproduce_paper.log` and the wall-clock
+summaries here before submission:
+
+| Harness | Grid size | Total wall-clock |
+|---|---|---|
+| Tier-1 core (`tier1_core.yaml`) | 7 methods × 3 scenarios × 30 seeds | _TBD_ |
+| Paper full sim (`paper_full.yaml`) | 11 methods × 3 N × 3 seeds | _TBD (previous 9-method run: ~4–7 h on n1-standard-12)_ |
+| Selection isolation | modes × N × seeds | _TBD_ |
+| N-scalability sweep | methods × 6 N | _TBD_ |
+| Stress-test sweep | 11 cells × 4 methods × 5 seeds | _TBD_ |
+
+---
+
+# Appendix A — Optimizer mechanics in detail
+
+Line-level reference for the placement optimizers. Everything here is
+read directly from `src/uavbench/optimizers/` and `src/uavbench/problem/`.
+
+## A.1 Encoding and fitness internals
+
+Each particle/individual is a flat vector **X ∈ ℝ³ᴷ** — K UAV positions
+concatenated as (x₁,y₁,z₁,…,x_K,y_K,z_K); per-dimension bounds are the
+area box tiled K times; `positions_from_vector` reshapes back to (K,3).
+A nuance of the imbalance term: `L_imb` uses `n_assigned/K` (the mean
+load *among served devices*), not `N/K`, so it penalizes imbalance among
+served devices only. The theoretical fitness ceiling is `F ≤ w1 = 0.6`
+(full coverage, zero movement, zero imbalance); PSO and GA both
+early-stop at `0.95·w1 = 0.57`. `Fitness` tracks an `eval_count` so the
+runner can verify every optimizer spends the identical budget — no
+optimizer may implement its own scoring. Assignment cost per evaluation:
+`O(N log N)` sort + `O(N·K)` sweep, with the `(N,K)` distance matrix
+vectorized.
+
+## A.2 PSO (`optimizers/pso.py`)
+
+**Constriction factor**, derived (never hardcoded) from `c1, c2`:
+
+```
+phi = c1 + c2                      # must be > 4; raises ValueError otherwise
+chi = 2 / |2 − phi − sqrt(phi² − 4·phi)|
+```
+Defaults `c1 = c2 = 2.05` → `phi = 4.1` → `chi ≈ 0.7298`. Deriving χ at
+construction means an ablation that changes the acceleration
+coefficients cannot silently break the convergence guarantee.
+
+**Velocity update** (constriction mode, default):
+```
+V ← chi · (V + c1·r1⊙(pbest − X) + c2·r2⊙(nbest − X))
+```
+**Inertia-mode fallback** (`use_constriction=False`, ablation only):
+```
+w = inertia_max − (inertia_max − inertia_min) · (tau / G_max)   # 0.9 → 0.4
+V ← w·V + c1·r1⊙(pbest − X) + c2·r2⊙(nbest − X)
+```
+
+**Ring topology** (default): each particle's neighborhood best is the
+best `pbest` among `2·ring_k+1` particles on a ring (`ring_k=2` →
+5-particle neighborhoods), fully vectorized; information about a good
+region spreads gradually, preserving diversity on a multimodal coverage
+landscape. `topology="gbest"` shares one global best instead.
+
+**Initialization** (`seeding="value_kmeans"`, default): half the swarm
+seeded by value-weighted k-means++ centers over device (x,y), jittered
+N(0, jitter_m=10 m), uniform random altitude; the other half uniform.
+`"plain_kmeans"` drops value weighting; `"uniform"` seeds all uniformly.
+Initial velocity `0.5·U(−vmax, vmax)`. Rationale: a good placement
+almost certainly hovers UAVs over high-value clusters, so the swarm
+starts with diverse, already-plausible layouts.
+
+**Safeguards:** per-dimension velocity clamp
+`vmax[d] = vmax_frac·(hi[d]−lo[d])` (default 0.2); **absorbing walls**
+(out-of-bound positions clamped, violating velocity component zeroed —
+no bounce); **turbulence** (each iteration a random `p_turb=0.1`
+fraction of particles gets a kick ~U(−0.1·vmax, 0.1·vmax) before
+clamping — prevents micro-stagnation); **stagnation reinit** (gbest
+improvement < `delta_stag=1e-4` for `G_stag=20` consecutive generations
+→ worst `floor(rho·P)` particles replaced with fresh uniform samples,
+velocities/pbests reset, gbest re-checked; incumbents untouched).
+`gbest` updates only on strict improvement. Early stop once
+`gbest ≥ early_stop_frac·w1`.
+
+**Full loop:**
+```
+1. Bounds ← tile(lower, upper) K times;  vmax ← 0.2·(hi−lo)
+2. Init: P/2 value-weighted k-means++ + P/2 uniform;  Vel ~ 0.5·U(−vmax,vmax)
+3. Evaluate all; set pbest, gbest
+4. For tau = 1..G_max:
+   a. nbest ← ring-neighborhood best
+   b. V ← chi·(V + cognitive + social); turbulence kicks; clamp to ±vmax
+   c. X ← X+V; absorbing walls
+   d. Evaluate; update pbest, gbest (monotonic)
+   e. Stagnation counter → reinit worst 20% at G_stag=20
+   f. Early stop if gbest ≥ 0.95·w1
+5. Return gbest position/fitness/convergence/eval_count/chi/phi
+```
+
+**Default hyperparameters:**
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `P` | 100 | swarm size |
+| `G_max` | 200 | max generations |
+| `c1`, `c2` | 2.05, 2.05 | cognitive / social coefficients |
+| `vmax_frac` | 0.2 | per-dim velocity clamp fraction |
+| `ring_k` | 2 | ring half-width (neighborhood = 5) |
+| `delta_stag` | 1e-4 | stagnation improvement threshold |
+| `G_stag` | 20 | stagnation window (iterations) |
+| `rho` | 0.2 | fraction of worst particles reinitialized |
+| `p_turb` | 0.1 | turbulence probability per particle |
+| `early_stop_frac` | 0.95 | fraction of theoretical max for early exit |
+| `jitter_m` | 10.0 | seeding jitter std-dev (m) |
+| `inertia_max/min` | 0.9 / 0.4 | inertia range (inertia mode only) |
+
+## A.3 GA (`optimizers/ga.py`)
+
+Real-coded GA (SBX + polynomial mutation, Deb & Agrawal 1999),
+uniform-random init (no warm start, unlike PSO), binary tournament
+(`tournament_size=3`), elitism (`n_elite=2` copied straight into the
+next generation), same `0.95·w1` early stop, same P/G_max budget as PSO
+by construction.
+
+**Crossover (SBX)**, probability `crossover_prob=0.9`, per-gene gate
+`u ≤ 0.5`, `eta_c=15`:
+```
+beta = (2u)^(1/(eta_c+1))            if u ≤ 0.5
+     = (1/(2(1−u)))^(1/(eta_c+1))    otherwise
+child1 = 0.5·((1+beta)p1 + (1−beta)p2)
+child2 = 0.5·((1−beta)p1 + (1+beta)p2)      # clipped to [lo,hi]
+```
+**Mutation (bounded polynomial)**, per-gene probability `1/dim`,
+`eta_m=20`:
+```
+delta = (2u)^(1/(eta_m+1)) − 1              if u<0.5   (range [−1,0])
+      = 1 − (2(1−u))^(1/(eta_m+1))          otherwise  (range [0,1])
+x_new = x + delta·(x−lo)   if u<0.5   else   x + delta·(hi−x)
+```
+Guaranteed in-bounds without clipping (scales toward the nearer bound).
+
+## A.4 Heuristics and clustering utilities
+
+- **`Centroid`** — value-weighted k-means centroids (`weighted_kmeans`),
+  fixed altitude `lower.z + altitude_frac·range` (default 0.5); one
+  evaluation; `value_weighted=False` toggles unweighted centroids.
+- **`RandomPlacement`** — best of `n_draws=20` uniform candidates.
+- **`Static`** — stays at `instance.prev_positions`; one evaluation.
+- **`kmeanspp_centers(rng, points, K, weights)`** — k-means++ with
+  optional value-proportional sampling (first center ∝ weights,
+  subsequent ∝ D²·weights; uniform fallback on zero/non-finite weight).
+- **`weighted_kmeans(...)`** — Lloyd's algorithm seeded by the above,
+  weighted centroid updates, ≤25 iterations, early convergence stop.
+
+---
+
+# Appendix B — Client selection and reputation in detail
+
+Line-level reference for `src/uavbench/fl/client_selection.py`,
+`device_state.py`, `reputation.py`, and their wiring in `federated.py`.
+Corresponds to paper Algorithms 1–4 (§IV-C).
+
+## B.1 The four-stage pipeline
+
+```
+1. Eligibility gate    : battery ≥ B_min, SNR ≥ SNR_min, memory OK, time ≤ T_max − ε
+2. Priority score      : P_n = w_b·b_n + w_ℓ·(1 − (T̂_n/T_max)²) + w_U·Ũ_n
+                         with Ũ_n = β(t)·Û_n + (1 − β(t))·R_n
+3. UCB exploration     : UCB_n(t) = P_n(t) + C·√(ln t / (N_n(t)+1)),  C = √2
+4. Greedy assignment   : sort by UCB; each client → feasible UAV (in range,
+                         under capacity) with lowest current load, ties by
+                         smallest distance; skipped if none feasible
+```
+
+**Utility details:** U_epi caps epicentre distance at the eligible-set
+95th percentile (one outlier can't squash everyone); U_SNR is min-max
+over snr_db clipped to [0,30] dB; U_dens counts other eligible clients
+within 5 km (vectorized O(n²), local equirectangular frame), min-max
+normalized; U_prox = clip(1 − d_min/R_comm, 0, 1), defaulting to 0.5
+when no UAV coordinates are supplied. `_minmax` has a degenerate-input
+guard: if all values are within 1e-10, everyone gets exactly 0.5.
+Squaring T̂/T_max in the speed term makes the penalty grow superlinearly
+near the deadline. Reputation defaults to 0.5 for unscored clients; `t`
+is floored at 1 so ln(t) never sees 0. UCB selection counts persist in
+the `ClientSelector` instance across the whole run; the greedy
+assignment increments them, feeding the next round's bonus.
+
+**`"random"` mode** (`hfl_no_selection`): eligibility gate, then per-UAV
+uniform draw of `min(capacity, |bucket|)` without replacement, using the
+caller-supplied rng (required for correct multi-seed sweeps; a
+round-derived `round_num·7919` seed exists only for legacy callers).
+Does not increment UCB counts. **`"all"` mode** (`flat_fl`,
+`centralized`): returns `covered` verbatim — no filtering, scoring, or
+capacity limit.
+
+## B.2 Device state (`device_state.py`)
+
+Init per client: battery ~ U(0.5,1.0); snr_base ~ U(5,20) dB;
+memory_ok ~ Bernoulli(0.90); compute_base ~ U(50,250) s. Per round
+(end-of-round, given the actually-selected set): selected −0.02 battery,
+unselected +0.005 (clipped [0,1]); fresh N(0,2) dB SNR noise and
+N(0,30) s compute noise for everyone; selected clients' observed compute
+time (`max(10, base+noise)`) appended to a rolling 10-round history.
+Adaptive margin ε_n = 1.96·std(last 10 observed times) once ≥3
+observations (else 0) — a 95%-confidence-style buffer giving volatile
+clients a stricter effective deadline. Eligibility = all four hard
+gates: battery ≥ 0.20, snr ≥ 3.0 dB, memory_ok,
+compute_time ≤ 300 − ε_n.
+
+## B.3 Reputation formulas (`reputation.py`)
+
+- **R_contrib** — per-client EMA of the update-delta vector,
+  `Δw̄(t) = 0.7·Δw(t) + 0.3·Δw̄(t−1)`;
+  `R_contrib = (1 + cos(Δw̄(t), Δw̄(t−1))) / 2`; cold start or
+  near-zero-norm EMA (denom ≤ 1e-12) → 0.5.
+- **R_anomaly** — global per-parameter mean/variance EMA
+  (`_STATS_ALPHA=0.1`) across all clients; per update vector v (dim J):
+  `z = (v − mean)/sqrt(var + eps)`, `d = sqrt(mean(z²))` (Mahalanobis/√J,
+  dimension-independent); `R_anomaly = 1` if `d ≤ 2`, else
+  `exp(−0.5·(d−2))`.
+- **R_temp** — `0.5·success_rate + 0.5/(1+σ_RT)` with σ_RT the variance
+  of the last 10 response times (0 if <2 samples); `mark_absent()`
+  increments attempts without successes.
+- **Bayesian adaptation** — every `_ADAPT_EVERY=10` rounds:
+  `posterior = prior + evidence`, `weights = posterior/sum(posterior)`,
+  prior = `_PRIOR_STRENGTH=20` × (0.4,0.3,0.3). Delivering clients add
+  their component scores as evidence; absent clients add the complement
+  (evidence *against* components that scored them highly).
+- **`trimmed_mean`** — a UAV's own reputation is the 10%-per-tail
+  trimmed mean of its selected clients' reputations (plain mean for
+  small clusters where the trim floor is 0); feeds the `R_min` server
+  gate.
+
+## B.4 Round-loop wiring (`run_full_hfl`)
+
+Per round, in order: refresh device states + reputation scores → check
+`low_eligible` → placement (if due; per-device V_i(t) from live
+SNR/reputation) → selection (if `reselect = (rnd−1) % T_sel == 0 or
+low_eligible or not selected`) → per-UAV groups → UAV image training +
+IoT structured training on selected clients only → `mark_absent` for
+selected clients that produced no update → `update_batch` on delivered
+deltas → UAV-level then reputation-gated server-level aggregation →
+`device_mgr.update_round(selected)` → evaluate global model, log row.
+
+## B.5 Constants at a glance
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `B_MIN` | 0.20 | minimum battery fraction to be eligible |
+| `SNR_MIN_DB` | 3.0 dB | minimum SNR to be eligible |
+| `T_MAX_S` | 300 s | nominal max local-training time |
+| `W_BATTERY / W_LEARNING / W_UTILITY` | 0.35 / 0.30 / 0.35 | priority weights |
+| `W_EPI, W_SNR, W_DENS, W_PROX` | 0.4 / 0.3 / 0.2 / 0.1 | utility sub-weights |
+| `UCB_C` | √2 | UCB1 exploration constant |
+| `T_decay` (β schedule) | 20 rounds | utility→reputation decay, shared with placement |
+| Battery discharge/recharge | −0.02 / +0.005 per round | selected vs unselected |
+| SNR / compute noise | N(0,2) dB / N(0,30) s | per-round fluctuation |
+| Adaptive margin ε_n | 1.96·σ(last 10 compute times) | dynamic eligibility buffer |
+| `T_sel` / `lambda_min` / `R_min` | 5 rounds / 0.5 / 0.3 | cadence, early-reselect trigger, aggregation gate |
+| Reputation init weights | 0.4 / 0.3 / 0.3 | Dirichlet-adapted every 10 rounds |
+| `_VEC_EMA_NEW/OLD`, `_STATS_ALPHA` | 0.7/0.3, 0.1 | EMAs |
+| `_PRIOR_STRENGTH` | 20.0 | Dirichlet prior concentration |
+| Mahalanobis threshold | d ≤ 2 → R_anomaly = 1 | dimension-independent (/√J) |
+| `trimmed_mean` trim | 10% each tail | UAV cluster reputation |
+
+---
+
+# Appendix C — Selection-literature baselines: citations, pseudocode, fidelity notes
+
+All three baselines are implemented in
+`src/uavbench/fl/client_selection.py` as selection modes `"fedcs"`,
+`"rep_cap"`, `"fair_mab"`, exposed as full-system methods in
+`_METHOD_CFG`. They share the identical PSO placement, reputation
+FedAvg aggregation, and T_sel cadence as `proposed_hfl`, so the
+selection rule is the only experimental variable. Notation matches the
+paper's Algorithms 1–4.
+
+## C.1 Baseline B1 — FedCS
+
+**Citation:** T. Nishio and R. Yonetani, "Client selection for federated
+learning with heterogeneous resources in mobile edge," in *2019 IEEE
+International Conference on Communications (ICC)*, 2019, pp. 1–7.
+
+**Core idea (source):** a fixed per-round deadline `Tmax`; greedily add
+the candidate that increases the round's projected completion time the
+least, stopping when the deadline would be exceeded. No data-value or
+reputation signal anywhere — selection is purely a function of estimated
+time.
+
+**Adaptation note (state explicitly in the paper):** the original
+assumes a flat server↔client topology. We adapt it to the hierarchy by
+(i) running the identical greedy-marginal-time rule independently per
+UAV over devices already gated in by our eligibility filter (so FedCS
+benefits from the same eligibility floor everyone else gets), and
+(ii) using each device's T̂_n(t) — already computed for our own priority
+score — as FedCS's time estimate, so both methods see the same
+measurement and only the selection *rule* differs.
+
+```
+Algorithm B1: FedCS-style Greedy Deadline Selection (per UAV u)
+1: S_u(t) ← ∅;  T_proj ← 0
+2: candidates ← E_u(t) sorted by ascending T̂n(t)     # cheapest first
+3: for each n in candidates do
+4:     T_inc ← max(T̂n(t) − T_proj, 0)                # marginal time increase
+5:     if T_proj + T_inc ≤ Tmax and |S_u(t)| < Cu then
+6:         S_u(t) ← S_u(t) ∪ {n};  T_proj ← max(T_proj, T̂n(t))
+7:     else break
+8: return S_u(t)
+```
+
+**Expected contrast:** resource-efficient but value-blind — cannot
+distinguish a fast device with poor seismic SNR from a fast device near
+the epicenter.
+
+## C.2 Baseline B2 — Reputation-capability selection
+
+**Citation:** H. Zhao, L. Geng, W. Feng, and C. Zhou, "Client selection
+and resource scheduling in reliable federated learning for uav-assisted
+vehicular networks," *Chinese Journal of Aeronautics*, vol. 37, no. 9,
+pp. 328–346, Jun. 2024.
+
+**Core idea (source):** reputation-based mechanism integrating data
+quality and computation capability to select reliable, high-performance
+nodes — no exploration term, no geospatial utility, no starvation guard.
+
+**Adaptation note:** we reuse our own `R_contrib`/`R_anomaly`/`R_temp`
+sub-scores as the "data quality/reliability" half (recomputing a
+different reputation estimator would conflate "different reputation
+model" with "different selection rule"), and our existing
+ℓ̃_n = 1 − (T̂_n/Tmax)² as the "computation capability" half. What this
+baseline *omits* relative to ours: utility Û_n, the β(t) blend, and the
+UCB bonus — so it systematically starves seismically valuable devices
+with middling reputation/compute, exactly the failure mode the UCB term
+prevents; its starvation is expected and measured (Jain's index).
+
+```
+Algorithm B2: Reputation-Capability Selection (per round t)
+1: for each n in E(t):  score_n ← γ·Rn(t) + (1 − γ)·ℓ̃n(t)     # γ = 0.5
+2: sort E(t) by descending score_n → L
+3: return L            # feeds Algorithm 4 (greedy UAV assignment),
+                       # replacing UCB_n with score_n
+```
+
+## C.3 Baseline B3 — Fairness-enhanced MAB scheduling
+
+**Citation:** C. Zhu, Y. Shi, H. Zhao, K. Chen, T. Zhang, and C. Bao,
+"A fairness-enhanced federated learning scheduling mechanism for
+UAV-assisted emergency communication," *Sensors*, vol. 24, no. 5,
+p. 1599, 2024.
+
+**Core idea (source):** a multi-armed-bandit scheduler whose reward
+weights model freshness (staleness since last contribution) and energy,
+explicitly to enforce participation fairness in an emergency-
+communication UAV setting — the same disaster context as this paper,
+making it a strong head-to-head.
+
+**Adaptation note:** their "energy" maps onto our b_n(t) (battery);
+their "staleness" maps onto our selection bookkeeping (their reward
+*directly rewards* being stale; our UCB *bonuses* rarely-selected
+devices — structurally similar exploration pressure, different reward
+shape). No seismic/geospatial utility and no reputation/trust component
+at all. `T_stale_cap` (the staleness normalizer) is set to `T_sel` — a
+hyperparameter we introduce to bound their reward to [0,1] for fair
+comparison; state this choice explicitly. Present it as "our UCB
+explores over *value*, theirs explores over *fairness/energy*".
+
+```
+Algorithm B3: Fairness/Energy MAB Selection (per round t)
+1: for each n in E(t):
+2:     reward_n ← w_energy·bn(t) + w_stale·min(1, staleness_n(t)/T_stale_cap)
+                                                    # weights 0.5 / 0.5
+3: sort E(t) by descending reward_n → L
+4: return L                                         # feeds Algorithm 4
+5: after the round: last_selected_n ← t for each selected n
+```
+
+## C.4 Presenting all three in the paper
+
+- **Signal table** (alongside Table I): one row per baseline with
+  columns *Selection signal(s)*, *Exploration mechanism*,
+  *Reputation/trust modeled?*, *Data-value/utility modeled?* — makes the
+  "why these three" argument visually obvious: FedCS (resource only),
+  Zhao et al. (reputation+capability, no exploration, no utility), Zhu
+  et al. (fairness/energy bandit, no reputation, no utility), Proposed
+  (all four).
+- **Results:** keep literature baselines in a *separate* table/figure
+  from our own ablations — two tables, two questions (§10).
+- **Related Work:** for each of the three citations add one sentence
+  noting "we implement this as a baseline in §V", connecting related
+  work to results.
+
+---
+
+# Appendix D — Data pipeline internals
+
+Line-level reference for `src/hflsim/data/loader.py` and the
+PSO→HFL bridge.
+
+- **Streaming loader:** rows are streamed (not snapshot-downloaded) from
+  `AbbasABC/HFL-Dataset` at the pinned revision via the `datasets`
+  `IterableDataset` API, keeping only the columns needed for
+  partitioning + training. The outer streaming call retries up to
+  5 times with exponential backoff (30s, 60s, 120s, 240s, capped) so a
+  mid-stream HF gateway failure or tree-listing 504 under concurrent
+  load doesn't crash a whole GCP job. Deterministic subsampling
+  (`df.sample(n=..., random_state=seed)`) is applied after streaming.
+- **GSI tile fetch:** each building chip is composited from a 2×2 mosaic
+  of zoom-18 XYZ tiles and cropped to 128×128 RGB centered on the
+  building's (lat,lon); tiles cached under `HFL_TILE_CACHE` (default
+  `./data/tile_cache`). Network fetch retries 3 times (1s, 2s backoff)
+  before returning a black chip, so a flaky connection never stalls
+  training; the black-chip rate diagnostic (§2) exists because the
+  seismic features are near-constant across one disaster area — the
+  image is the only modality with real discriminative signal, and a high
+  black-chip rate silently collapses the model to majority-class
+  prediction.
+- **Feature scaling order:** raw lat/lon are saved *before* any
+  transform (needed unscaled for tile lookups), then normalized to [0,1]
+  for model input; the 7 seismic columns (`MMI_original, MMI_shape,
+  PGA, PGV, SA_0_3, SA_1_0, SA_3_0`) are z-scored (StandardScaler).
+- **Partitioning:** `KMeans(n_clusters=N, n_init=10)` over
+  (longitude, latitude); per client, indices shuffled with a per-client
+  seed (`random_seed + cid` — independent across clients, reproducible
+  from one base seed) and split 80/20; a client's reported coordinate is
+  the mean lat/lon of its rows (dataset mean if a cluster is empty).
+- **Caches:** the streamed metadata DataFrame is written to
+  `<data_dir>/.metadata_df_cache_sub<pct>_seed<seed>.parquet` via
+  temp-file + atomic `os.replace` (a partial write can never corrupt the
+  next run); K-means assignments + train/test index lists are pickled to
+  `<data_dir>/.partition_cache/partitions_<sha256[:16]>.pkl`, keyed by a
+  hash of (row_count, N, train_ratio, seed) — the N-sweep needs each N's
+  partition exactly once.
+- **Feature cache:** `compute_feature_cache` runs a frozen pretrained
+  ResNet-18 (head replaced by Identity, ImageNet normalization) once
+  over the whole dataset and saves (N,512) float16 features (~5 MB at
+  N=5000); FL training never runs the backbone.
+- **PSO→HFL bridge (`hflsim/placement.py`):** converts a
+  `{client_id: (lat,lon)}` dict to a `ProblemInstance` in projected
+  metric space, runs the requested optimizer via
+  `uavbench.optimizers.REGISTRY`, and converts the result back to
+  `UAVAggregator` objects at optimized lat/lon. When `prev_positions`
+  isn't supplied it defaults to an even linspace spread across the
+  bounding box at mid-altitude, avoiding a placement bias toward the
+  projection origin. `UAVAggregator` (legacy `hflsim.simulation`) is
+  used only by this bridge; the live round loop aggregates via
+  `uavbench/fl/model.py` (§9).
+
+---
+
+# Appendix E — Reference constants tables
+
+### Placement objective & PSO/GA
+
+| Parameter | Value |
+|---|---|
+| `w1, w2, w3` (fitness weights) | 0.6 / 0.3 / 0.1 |
+| Theoretical fitness ceiling | `w1 = 0.6` |
+| Early-stop threshold (PSO & GA) | `0.95 × w1 = 0.57` |
+| `R_comm` (placement default) | 500 m |
+| `B_min_uav` | 0.2 |
+| PSO `P`, `G_max` | 100, 200 |
+| PSO `c1=c2` (→ `phi`, `chi`) | 2.05 (→ 4.1, ≈0.7298) |
+| PSO `ring_k`, `vmax_frac` | 2, 0.2 |
+| PSO stagnation `(delta, G_stag, rho)` | 1e-4, 20, 0.2 |
+| PSO turbulence `p_turb` | 0.1 |
+| GA `crossover_prob`, `eta_c`, `eta_m` | 0.9, 15.0, 20.0 |
+| GA `tournament_size`, `n_elite` | 3, 2 |
+| Energy model `p_fly/p_hover/cruise/t_serve/capacity` | 250 W / 200 W / 15 m/s / 60 s / 200,000 J |
+
+### Model & deployment
+
+| Parameter | Value |
+|---|---|
+| Image feature dim (ResNet-18) | 512 |
+| Structured feature dim | 9 |
+| Fusion embed dims (img/struct) | 128 / 64 |
+| Damage classes | 4 (Survived/Collapsed/Obstructed/Missing) |
+| IoT payload size | ≈0.271 MB (67,652 params) |
+| UAV payload size | ≈0.533 MB (133,316 params) |
+| GSI tile zoom / chip size | 18 (~0.6 m/px) / 128×128 |
+| Raw damage code remap | `{0→0, 1→1, 9→2, 99→3}` |
+| Client partitioning | K-means over (lon, lat), `n_init=10` |
+| Default `train_ratio` | 0.8 |
+| HF stream retry backoff | 30s, 60s, 120s, 240s (capped) |
+
+(Client-selection and reputation constants: Appendix B §B.5.)

@@ -29,13 +29,12 @@ dependencies = [
     "typing_extensions>=4.7.0",
 ]
 
+# Optional editor-time conveniences only — nothing gates on these.
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.4.0",
     "ruff>=0.6.0",
     "black>=24.0.0",
     "mypy>=1.10.0",
-    "pre-commit>=3.7.0",
 ]
 
 [project.scripts]
@@ -44,10 +43,6 @@ uavbench = "uavbench.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100
@@ -64,8 +59,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Legacy np.random.* in old test fixtures — determinism there doesn't feed
-# any reported result; migrate opportunistically, don't block CI on it.
+# Legacy np.random.* in check fixtures — determinism there doesn't feed
+# any reported result.
 "tests/**" = ["NPY002"]
 # hflsim legacy package (see its LEGACY marker): rewriting its global-RNG
 # calls would silently change the historical CLI's reproducibility.

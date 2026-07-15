@@ -1,65 +1,80 @@
 # Client Selection for Hierarchical Federated Learning with UAV Placement
 
 Research code for post-earthquake building-damage classification via
-**hierarchical federated learning (HFL)** over UAV-relayed IoT clients, with
-metaheuristic **3-D UAV placement** (PSO/GA and published literature
-baselines) and **reputation-aware client selection**. All experiments run on
-one real fused multi-modal dataset for the **2024 Noto Peninsula earthquake**
-— the pipeline is real-data only (no synthetic experiment data; offline unit
-tests inject a deterministic fixture through a documented seam).
-
-## Layout
-
-| Path | Contents |
-|---|---|
-| `src/uavbench/` | The live experimental package: placement optimizers (`optimizers/`), problem model + path-loss coverage (`problem/`), FL harnesses, selection, reputation, sweeps (`fl/`), metrics, statistics (`analysis/`), reporting (seed manifests, timing). |
-| `src/hflsim/` | Data pipeline (HF streaming, GSI imagery, partitioning) + a **legacy** standalone simulator kept only for the `hflsim` CLI and the `UAVAggregator` bridge. |
-| `configs/` | Every experiment as a YAML config (one-line ablations; resolved copies + seed manifests persisted next to results). |
-| `tests/` | 340 offline tests (`pytest`), including CI invariants that pin the fairness of the paired-comparison design. |
-| `REPORTS/` | Implementation references — start at `master_implementation_reference.md` (the consolidated why-and-how for paper writing) — plus data availability + hardware/runtime disclosures. |
-| `scripts/` | Reproduction entry point and GCP wrappers. |
-
-## Data
-
-The single real dataset streams from HuggingFace `AbbasABC/HFL-Dataset`
-(pinned revision in `src/hflsim/data/loader.py`), fusing Noto-2024 building
-damage labels, USGS ShakeMap parameters, and on-demand GSI aerial imagery.
-`HF_TOKEN` is required on first run; metadata/partition/tile caches under
-`./data/` (never tracked in git) make later runs offline-capable. See
-`REPORTS/data_availability.md` for licensing and the stated single-event
-limitation.
+hierarchical federated learning over UAV-relayed IoT clients, with
+metaheuristic 3-D UAV placement and reputation-aware client selection.
+Design rationale and implementation details:
+`REPORTS/master_implementation_reference.md`. Which config produced which
+result: `REPORTS/results_provenance.md`.
 
 ## Install
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-lock.txt   # exact pins used for the paper
-pip install -e ".[dev]"
-pytest -q                              # 340 offline tests, no token needed
+pip install -e .
 ```
+
+Python 3.13. Sanity checks are plain scripts, run manually before trusting
+a batch of results (offline, no HF token needed):
+
+```bash
+python tests/sanity_checks/run_all.py
+```
+
+## Data
+
+Experiments stream the real fused multi-modal dataset for the 2024 Noto
+Peninsula earthquake from HuggingFace `AbbasABC/HFL-Dataset`, pinned to
+revision `6cf97c900445e080e61cb45e1aa72515d3ff1de8` (default in
+`src/hflsim/data/loader.py`, overridable via `HF_DATASET_REVISION`).
+Export `HF_TOKEN` before the first run; metadata/partition/tile caches
+under `./data/` (gitignored, never redistributed) make later runs
+offline-capable. GSI aerial tiles are fetched on demand and cached under
+`./data/tile_cache` (`HFL_TILE_CACHE`).
 
 ## Running experiments
 
+`uavbench` subcommands (each writes into the `results_dir` named by its
+config):
+
 ```bash
-uavbench smoke                 # Tier-1 placement benchmark, minutes on CPU
-uavbench run          --config configs/tier1_core.yaml   # Tier-1 grid (7 methods x 3 scenarios x 30 seeds)
-uavbench smoke_tier2                                     # real-data FL smoke (reduced subsample)
-uavbench run_paper_sim --config configs/paper_full.yaml  # full system sim (11 methods x 3 N x seeds)
-uavbench run_selection_sim                               # selection-rule isolation benchmark
-uavbench run_stress_sweep                                # dropout / SNR / black-chip robustness sweep
-uavbench significance --config <results-dir> --metric accuracy   # paired Wilcoxon, Holm-corrected
+uavbench smoke                                             # fast Tier-1 end-to-end check
+uavbench run              --config configs/tier1_core.yaml # Tier-1 placement grid
+uavbench analyze          --config configs/tier1_core.yaml # summary table for saved Tier-1 runs
+uavbench plot             --config configs/tier1_core.yaml # Tier-1 convergence figures
+uavbench run_tier2        --config configs/tier2_fl.yaml   # Tier-2 FL benchmark
+uavbench smoke_tier2                                       # Tier-2 smoke, real data at reduced subsample
+uavbench run_paper_sim    --config configs/paper_full.yaml # full paper system sim (N x method x seed)
+uavbench run_selection_sim                                 # selection-rule isolation benchmark
+uavbench run_sweep        --config configs/tier2_sweep.yaml# N-scalability sweep
+uavbench run_stress_sweep --config configs/stress_test.yaml# dropout / SNR / black-chip robustness sweep
+uavbench significance     --config <results-dir-or-config> --metric accuracy  # paired Wilcoxon, Holm-corrected
+uavbench clean            [--config <config>]              # remove results
 ```
 
-Every run writes its resolved config, a `seed_manifest.csv` (exact seeds,
-written before the run starts), per-round parquet tables, and confusion
-matrices. `scripts/reproduce_paper.sh [--smoke]` chains the full grid end to
-end; see `REPORTS/hardware_and_runtime.md` for machine specs and wall-clock
-expectations.
+`scripts/reproduce_paper.sh [--smoke]` chains the full grid end to end,
+logging to `results/reproduce_paper.log`. A legacy `hflsim` CLI also
+exists for the pre-`uavbench` standalone simulator.
 
-## Method comparison design
+## Configs
 
-All placement methods score through one shared fitness/assignment path
-(`problem/fitness.py`), all selection methods run in the otherwise-identical
-pipeline (`_METHOD_CFG` in `fl/federated.py`), and instance seeds are
-method-independent — so per-seed results are paired samples, verified by
-`tests/uavbench/test_invariants.py`.
+Every experiment is a YAML file under `configs/`:
+
+| Config | Harness |
+|---|---|
+| `smoke.yaml` | reduced Tier-1 grid (used by `uavbench smoke` path in the reproduce script) |
+| `tier1_core.yaml` | Tier-1 placement grid (7 methods x 3 scenarios x 30 seeds) |
+| `tier2_fl.yaml` / `tier2_reduced.yaml` | Tier-2 FL benchmark (full / smoke) |
+| `tier2_sweep.yaml` | N-scalability sweep |
+| `paper_full.yaml` | full system sim (11 methods x 3 N x seeds) |
+| `selection_isolation.yaml` | selection-rule isolation |
+| `stress_test.yaml` | robustness stress sweep |
+
+## Outputs
+
+Runs write into `results/<name>/`: a resolved config YAML, a
+`seed_manifest.csv` (exact seeds, written before the run starts),
+per-round/per-run parquet tables, `confusion.parquet`, and figures.
+Every number destined for the paper must have a row in
+`REPORTS/results_provenance.md`.

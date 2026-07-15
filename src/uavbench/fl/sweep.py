@@ -26,6 +26,7 @@ from pathlib import Path
 import pandas as pd
 from joblib import Parallel, delayed
 
+from ..reporting.tables import write_table
 from .federated import _dump_resolved_cfg
 
 logger = logging.getLogger("uavbench.fl.sweep")
@@ -157,11 +158,7 @@ def run_sweep(cfg: dict) -> dict:
 
     full_df = pd.concat(dfs, ignore_index=True)
 
-    out_path = results_dir / "sweep_rounds.parquet"
-    try:
-        full_df.to_parquet(out_path, index=False)
-    except Exception:
-        full_df.to_csv(out_path.with_suffix(".csv"), index=False)
+    write_table(full_df, results_dir / "sweep_rounds.parquet")
 
     _dump_resolved_cfg(cfg, results_dir / "config.sweep.resolved.yaml")
 
@@ -265,11 +262,7 @@ def run_paper_sweep(cfg: dict) -> dict:
 
     full_df = pd.concat(dfs, ignore_index=True)
 
-    out_path = results_dir / "paper_sweep_rounds.parquet"
-    try:
-        full_df.to_parquet(out_path, index=False)
-    except Exception:
-        full_df.to_csv(out_path.with_suffix(".csv"), index=False)
+    write_table(full_df, results_dir / "paper_sweep_rounds.parquet")
 
     _dump_resolved_cfg(cfg, results_dir / "config.paper_sweep.resolved.yaml")
 

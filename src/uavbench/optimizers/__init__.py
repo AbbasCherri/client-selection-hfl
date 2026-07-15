@@ -41,7 +41,15 @@ def build_optimizer(
     kwargs: dict = dict(params or {})
     if method in _BUDGETED_METHODS and budget is not None:
         kwargs.update(P=budget["P"], G_max=budget["G_max"])
-    return cls(**kwargs)
+    opt = cls(**kwargs)
+    if method in _BUDGETED_METHODS and budget is not None:
+        # The paired PSO/GA comparison is void if a constructor ever stops
+        # honouring the shared budget — fail here, not in a results table.
+        assert (opt.P, opt.G_max) == (budget["P"], budget["G_max"]), (
+            f"{method} ignored the shared eval budget: "
+            f"got (P={opt.P}, G_max={opt.G_max}), expected {budget}"
+        )
+    return opt
 
 
 __all__ = [

@@ -19,7 +19,6 @@ from __future__ import annotations
 import pandas as pd
 
 from uavbench.fl.seeds import fullsim_method_seed, sweep_job_seed, tier2_seed
-from uavbench.runner import _instance_seed
 
 HARNESSES = (
     "tier1",
@@ -50,6 +49,11 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
     rows: list[dict] = []
 
     if harness == "tier1":
+        # Deferred import: runner imports reporting.tables at module level, so
+        # a top-level import here would be a circular dependency (it breaks
+        # joblib workers, which import each module fresh).
+        from uavbench.runner import _instance_seed
+
         base = cfg["instance_seed"]
         opt_base = cfg["optimizer_seed"]
         for s_idx, scen in enumerate(cfg["scenarios"]):

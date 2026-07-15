@@ -1,4 +1,4 @@
-"""Deterministic offline data fixture for the test suite ONLY.
+"""Deterministic offline data fixture for the sanity checks ONLY.
 
 The experimental pipeline is real-data only (`AbbasABC/HFL-Dataset`); no
 synthetic data feeds any config, sweep, or reported result. This module

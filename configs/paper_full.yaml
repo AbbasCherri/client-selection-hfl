@@ -11,7 +11,7 @@
 #   hfl_static        — no UAV repositioning ablation
 #   hfl_no_reputation — uniform (sample-weighted) aggregation ablation
 #
-# Literature baselines (Algorithms B1-B3, REPORTS/literature_baselines.md) —
+# Literature baselines (Algorithms B1-B3, REPORTS/master_implementation_reference.md Appendix C) —
 # same PSO placement / reputation FedAvg / T_sel cadence as proposed_hfl,
 # only the selection rule differs. Report these in a table separate from the
 # ablations above ("vs. literature" and "vs. our own ablations" answer

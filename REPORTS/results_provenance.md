@@ -1,0 +1,29 @@
+# Results Provenance
+
+**Rule: every number, table, and figure in the paper must trace to a row
+in this file.** Each results-producing run gets one row: when it ran,
+the exact command/config, what it wrote, the git commit of the code that
+produced it, and the paper table/figure it feeds. A number without a row
+here does not go in the paper; a row whose attribution is uncertain is
+marked "TODO: confirm" rather than guessed. Add a new row *before*
+quoting anything from a new run. (Per-run ground truth lives next to the
+outputs: every harness writes its resolved config YAML and a
+`seed_manifest.csv` before the run starts.)
+
+Note on the current state (2026-07-15): all tracked results below are
+smoke-scale or predate the literature baselines / current configs — none
+is final paper material yet. Rows for the final grids (Tier-1 core,
+11-method paper sim, selection isolation, stress sweep, N-sweep) must be
+added when those runs happen.
+
+| Date | Command / config | Output file(s) | Git commit | Paper table/figure | Notes |
+|---|---|---|---|---|---|
+| 2026-06-25 | legacy `hflsim` standalone simulator (pre-`uavbench`) | `results/simulation_results_N14.csv`, `results/simulation_results_N35.csv` | `5386986` | none | Preliminary data only; produced by the legacy simulator, not the current harness. TODO: confirm nothing in the paper cites these; candidates for deletion. |
+| 2026-06-29 | `uavbench run_sweep --config configs/tier2_sweep.yaml` (real data, subsample 0.1, N=30..250, methods incl. pso) | `results/tier2_sweep/sweep_rounds.parquet`, per-N `tier2_rounds.parquet`, `sweep_*.png` | `a4e9a07` | scalability figure (candidate) — TODO: confirm | Predates the 2026-07 seed-stream tag change, so not seed-comparable with reruns; regenerate before quoting. |
+| 2026-06-29 | sweep smoke run, resolved config `tier2_sweep_synthetic` (`data.source: synthetic`, N=30/50, 2 rounds) | `results/sweep_smoke/*` | `5dc1360` | none (smoke) | Resolved config records `source: synthetic`; the current library rejects synthetic (real-data-only pipeline since 2026-07-14), so this cannot be regenerated as-is. |
+| 2026-07-01 | `uavbench run_paper_sim`, resolved config `paper_full_system` (real data, **subsample 0.1**, N=100/200/500, **6 methods**, 3 seeds) | `results/paper_full/paper_sweep_rounds.parquet`, `results/paper_full/N{100,200,500}/seed*/fullsim_rounds.parquet`, `paper_*.png` (accuracy/F1 vs rounds, ablation table, comm/energy, scalability) | `6a9646d` | paper ablation table + accuracy/F1/comm figures (candidate) — TODO: confirm | Predates the literature baselines (`fedcs`/`rep_cap`/`fair_mab`, `mozaffari2016`/`alzenad2017`) and differs from the current `configs/paper_full.yaml` (subsample 1.0, 11 methods, N=30/50/100). Must be regenerated for submission. |
+| 2026-07-08 (approx.) | `uavbench run_paper_sim` partial rerun at N=30/50 (6 methods, per-method subdirectories) | `results/paper_full/N{30,50}/seed*/<method>/fullsim_rounds.parquet` | `c3e00de` | TODO: confirm | Newer per-method directory layout than the N=100/200/500 run above; still 6 methods, so also superseded by the 11-method config. |
+| 2026-07-14 | `scripts/reproduce_paper.sh --smoke` — Tier-1 step (`configs/smoke.yaml`: 5 methods x 2 scenarios x 5 seeds) | `results/smoke/{runs,convergence,summary}.parquet`, `seed_manifest.csv`, `significance.csv`, `convergence_*.png`, `config.resolved.yaml` | `5c55a7a` | none (smoke validation) | End-to-end pipeline check; log in `results/reproduce_paper.log`. |
+| 2026-07-14 | `scripts/reproduce_paper.sh --smoke` — Tier-2 step (`uavbench smoke_tier2`, `configs/tier2_reduced.yaml`) | `results/tier2_reduced/tier2_rounds.parquet`, `confusion.parquet`, `tier2_*.png`, `config.tier2.resolved.yaml` | `5c55a7a` | none (smoke) | Resolved config records `data.source: synthetic` although the pipeline is documented real-data-only — same-day cleanup artifact. TODO: confirm and regenerate on the real path. |
+| 2026-07-14 | `scripts/reproduce_paper.sh --smoke` — stress step (`uavbench run_stress_sweep` with a *temporary scratchpad* `stress_ci.yaml`: 2 cells x 2 methods x 2 seeds, synthetic) | `results/stress_smoke_ci/stress_rounds.parquet`, `seed_manifest.csv`, `significance.csv`, per-cell dirs, `config.stress.resolved.yaml` | `5c55a7a` | none (smoke) | The driving config is not checked in (`/tmp` scratchpad path in the log), so this run is not reproducible from `configs/`. Regenerate with `configs/stress_test.yaml`. |
+| 2026-07-14 | `scripts/reproduce_paper.sh --smoke` — artifact staging step | `results/paper_artifact/*` (copies of the above manifests, resolved configs, significance CSVs) | `5c55a7a` | provenance bundle | Derived copies, no new data. |

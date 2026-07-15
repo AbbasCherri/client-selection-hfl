@@ -3,7 +3,7 @@
 # runs to significance tests, using the checked-in configs and seed manifests.
 #
 # Usage:
-#   scripts/reproduce_paper.sh           # full grid (hours; see REPORTS/hardware_and_runtime.md)
+#   scripts/reproduce_paper.sh           # full grid (hours; see REPORTS/master_implementation_reference.md §18)
 #   scripts/reproduce_paper.sh --smoke   # reduced end-to-end check (real data at small subsample)
 #
 # Requirements: the pinned environment (pip install -r requirements-lock.txt,

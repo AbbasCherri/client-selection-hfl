@@ -1,7 +1,7 @@
 # Fast end-to-end smoke config. Tiny instances, few seeds, finishes in minutes on CPU.
 name: smoke
 
-# Hardware / parallelism (see REPORTS/hardware_and_runtime.md)
+# Hardware / parallelism (see REPORTS/master_implementation_reference.md §18)
 n_workers: 8
 results_dir: results/smoke
 

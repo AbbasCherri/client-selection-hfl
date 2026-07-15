@@ -17,7 +17,7 @@ Selection modes
 "random"   — eligibility filter only, then random draw per UAV (hfl_no_selection)
 "all"      — skip all filters; every covered client participates (flat_fl / centralized)
 
-Literature baselines (Algorithms B1-B3, REPORTS/literature_baselines.md)
+Literature baselines (Algorithms B1-B3, REPORTS/master_implementation_reference.md Appendix C)
 ------------------------------------------------------------------------
 "fedcs"    — B1: FedCS greedy deadline selection per UAV, purely time-driven
              (Nishio & Yonetani, ICC 2019)

@@ -1,7 +1,7 @@
 """Selection-isolation benchmark: client-selection rules head-to-head.
 
 Compares the client-selection algorithms (proposed UCB, random, and the
-literature baselines B1-B3 from REPORTS/literature_baselines.md) under
+literature baselines B1-B3 from REPORTS/master_implementation_reference.md Appendix C) under
 conditions where the selection rule is the *only* experimental variable:
 
 - **Static UAVs.** UAV positions are the K-means cluster centres of the
@@ -47,18 +47,23 @@ from sklearn.cluster import KMeans
 from torch.utils.data import DataLoader, Subset
 
 from hflsim.shared.coords import latlon_to_meters
+from uavbench.metrics.fl import (
+    confusion_rows as _confusion_rows,
+)
+from uavbench.metrics.fl import (
+    evaluate_loader as _evaluate_loader,
+)
+from uavbench.metrics.fl import (
+    jain_index,
+    round_comm_mb,
+)
 
 from .client_selection import ClientSelector
 from .dataset import CachedDataset, ClientData, make_client_loader
 from .device_state import DeviceStateManager
-from .fairness import jain_index
 from .federated import (
-    _IOT_MODEL_SIZE_MB,
-    _UAV_MODEL_SIZE_MB,
-    _confusion_rows,
     _covered_clients,
     _dump_resolved_cfg,
-    _evaluate_loader,
     _load_data,
     _local_train,
     _uav_local_train,
@@ -140,7 +145,7 @@ def static_uav_layout(
     return K, uav_latlon, covered
 
 
-# Jain's index lives in fairness.py so run_tier2/run_full_hfl report the
+# Jain's index lives in metrics.fl so run_tier2/run_full_hfl report the
 # same metric; the private alias keeps this module's historical import path.
 _jain_index = jain_index
 
@@ -401,10 +406,7 @@ def run_selection_isolation(cfg: dict) -> dict:
                 rounds_to_target = rnd
 
             counts_arr = np.fromiter(sel_counts.values(), dtype=np.float64)
-            n_active_uavs = len(uav_img_updates)
-            comm_mb = (
-                2.0 * n_selected * _IOT_MODEL_SIZE_MB + 2.0 * n_active_uavs * _UAV_MODEL_SIZE_MB
-            )
+            comm_mb = round_comm_mb(n_selected, n_active_uavs=len(uav_img_updates))
 
             all_rows.append(
                 {

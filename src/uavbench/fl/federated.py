@@ -34,20 +34,39 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import yaml
-from sklearn.metrics import confusion_matrix, f1_score
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 
 from hflsim.shared.coords import haversine_matrix, latlon_to_meters
 from hflsim.shared.value import compute_value
+
+# Reported-metric computation is shared across every harness via metrics.fl;
+# the leading-underscore aliases keep this module's historical names.
+from uavbench.metrics.fl import (
+    CLASS_NAMES,  # noqa: F401 — re-exported for confusion plots/tests
+    jain_index,
+    round_comm_mb,
+)
+from uavbench.metrics.fl import (
+    IOT_MODEL_SIZE_MB as _IOT_MODEL_SIZE_MB,
+)
+from uavbench.metrics.fl import (
+    UAV_MODEL_SIZE_MB as _UAV_MODEL_SIZE_MB,  # noqa: F401 — re-exported for tests
+)
+from uavbench.metrics.fl import (
+    confusion_rows as _confusion_rows,
+)
+from uavbench.metrics.fl import (
+    evaluate_subset as _evaluate,
+)
 from uavbench.optimizers import build_optimizer
 from uavbench.problem.energy import EnergyModel
 from uavbench.problem.fitness import Fitness
 from uavbench.problem.instance import ProblemInstance
+from uavbench.reporting.tables import write_table as _write_table
 
 from .client_selection import ClientSelector
 from .dataset import CachedDataset, ClientData, make_client_loader
 from .device_state import DeviceStateManager
-from .fairness import jain_index
 from .features import compute_feature_cache
 from .model import (
     CachedFusionModel,
@@ -254,77 +273,6 @@ def _uav_local_train(
     return local.full_trainable_state_dict(), n_seen // max(n_epochs, 1)
 
 
-def _evaluate(
-    model: CachedFusionModel,
-    dataset: CachedDataset,
-    indices: list[int],
-    batch_size: int = 64,
-) -> dict:
-    """Compute global accuracy, per-class F1, and macro-F1 on the test set."""
-    if not indices:
-        return {
-            "accuracy": 0.0,
-            "macro_f1": 0.0,
-            "f1_per_class": {},
-            "confusion_matrix": np.zeros((4, 4), dtype=int),
-        }
-
-    subset = Subset(dataset, indices)
-    loader = DataLoader(subset, batch_size=batch_size, shuffle=False)
-    return _evaluate_loader(model, loader)
-
-
-def _evaluate_loader(model: CachedFusionModel, loader: DataLoader) -> dict:
-    """Metric computation on a prebuilt (non-empty) test loader.
-
-    Split out of ``_evaluate`` so callers that evaluate every round can build
-    the loader once instead of re-wrapping the test subset per round.
-    """
-    model.eval()
-    all_preds, all_labels = [], []
-    with torch.no_grad():
-        for img_feat, struct, labels in loader:
-            preds = model(img_feat, struct).argmax(dim=1)
-            all_preds.append(preds.numpy())
-            all_labels.append(labels.numpy())
-
-    preds = np.concatenate(all_preds)
-    labels = np.concatenate(all_labels)
-    acc = float((preds == labels).mean())
-    macro_f1 = float(f1_score(labels, preds, average="macro", zero_division=0, labels=[0, 1, 2, 3]))
-    per_class = f1_score(labels, preds, average=None, zero_division=0, labels=[0, 1, 2, 3])
-    class_names = ["survived", "collapsed", "obstructed", "missing"]
-    return {
-        "accuracy": acc,
-        "macro_f1": macro_f1,
-        "f1_per_class": dict(zip(class_names, per_class.tolist())),
-        "confusion_matrix": confusion_matrix(labels, preds, labels=[0, 1, 2, 3]),
-    }
-
-
-# Damage classes in label order 0-3 (shared by confusion reporting/plots).
-CLASS_NAMES = ["survived", "collapsed", "obstructed", "missing"]
-
-
-def _confusion_rows(method: str, rnd: int, cm: np.ndarray) -> list[dict]:
-    """Flatten a (4,4) confusion matrix into long-form rows for parquet.
-
-    The 4x4 matrix doesn't belong in the flat per-round row; long form keeps
-    the rounds table schema stable and the matrix queryable per (method, round).
-    """
-    return [
-        {
-            "method": method,
-            "round": rnd,
-            "true_label": CLASS_NAMES[t],
-            "pred_label": CLASS_NAMES[p],
-            "count": int(cm[t, p]),
-        }
-        for t in range(4)
-        for p in range(4)
-    ]
-
-
 def _report_black_chip_rate(full_dataset, cfg: dict) -> None:
     """Log and persist the real-data black-chip rate diagnostic.
 
@@ -344,6 +292,17 @@ def _report_black_chip_rate(full_dataset, cfg: dict) -> None:
     level = logging.WARNING if rate > 0.5 else logging.INFO
     logger.log(level, "Black-chip rate: %.1f%% of image loads", 100.0 * rate)
     cfg.setdefault("_diagnostics", {})["black_chip_rate"] = rate
+    # Hard gate: above this rate the image modality is effectively absent and
+    # accuracy silently collapses to the majority class (observed failure
+    # mode). Refuse to produce results that would look valid but aren't;
+    # override via data.max_black_chip_rate only for deliberate stress runs.
+    max_rate = float(cfg.get("data", {}).get("max_black_chip_rate", 0.5))
+    if rate > max_rate:
+        raise RuntimeError(
+            f"Black-chip rate {rate:.1%} exceeds data.max_black_chip_rate={max_rate:.1%}: "
+            "the image modality is effectively missing (tile fetch failures). "
+            "Fix the tile source/cache or raise the threshold explicitly for a stress run."
+        )
 
 
 def _dump_resolved_cfg(cfg: dict, path: Path) -> None:
@@ -359,11 +318,6 @@ def _dump_resolved_cfg(cfg: dict, path: Path) -> None:
         yaml.safe_dump(out, f, sort_keys=False)
 
 
-def _write_table(df: pd.DataFrame, path: Path) -> None:
-    try:
-        df.to_parquet(path, index=False)
-    except Exception:
-        df.to_csv(path.with_suffix(".csv"), index=False)
 
 
 # ---------------------------------------------------------------------------
@@ -526,8 +480,8 @@ def run_tier2(cfg: dict) -> dict:
             elapsed = time.perf_counter() - t0
 
             n_covered = len(covered)
-            # Uplink + downlink, no UAV→server hop (Tier-2 flat placement harness).
-            comm_mb_round = 2.0 * n_covered * _MODEL_SIZE_MB
+            # No UAV→server hop (Tier-2 flat placement harness).
+            comm_mb_round = round_comm_mb(n_covered)
 
             if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
                 rounds_to_target = rnd
@@ -595,10 +549,7 @@ def run_tier2(cfg: dict) -> dict:
 # Full paper system simulation
 # ---------------------------------------------------------------------------
 
-# IoT payload:  struct_branch (17,216) + fusion (50,436)         = 67,652 params ≈ 0.271 MB
-# UAV payload:  img_proj (65,664) + struct_branch + fusion       = 133,316 params ≈ 0.533 MB
-_IOT_MODEL_SIZE_MB: float = 67_652 * 4 / 1_000_000
-_UAV_MODEL_SIZE_MB: float = 133_316 * 4 / 1_000_000
+# Payload-size constants live in uavbench.metrics.fl (imported above).
 _MODEL_SIZE_MB: float = _IOT_MODEL_SIZE_MB  # kept for run_tier2 back-compat
 
 
@@ -615,7 +566,7 @@ _METHOD_CFG: dict[str, tuple] = {
     "hfl_no_selection": ("pso", "random", True, True),
     "hfl_static": ("pso", "ucb", True, False),
     "hfl_no_reputation": ("pso", "ucb", False, True),
-    # Literature baselines (Algorithms B1-B3, REPORTS/literature_baselines.md):
+    # Literature baselines (Algorithms B1-B3, REPORTS/master_implementation_reference.md Appendix C):
     # identical PSO placement, reputation FedAvg, and T_sel cadence as
     # proposed_hfl — only the client-selection rule differs, isolating it as
     # the experimental variable.
@@ -1166,17 +1117,12 @@ def run_full_hfl(cfg: dict) -> dict:
             if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
                 rounds_to_target = rnd
 
-            # Communication cost (MB): uplink + downlink
-            # IoT↔UAV: IoT payload (struct+fusion only, _IOT_MODEL_SIZE_MB)
-            # UAV↔server: UAV payload (img_proj+struct+fusion, _UAV_MODEL_SIZE_MB)
-            # flat_fl: IoT↔server directly, IoT payload only
+            # Communication cost: shared accounting rule in metrics.fl.
+            # flat_fl (placement_method None): IoT↔server directly, IoT payload only.
             if placement_method is None:
-                comm_mb = 2.0 * n_selected * _IOT_MODEL_SIZE_MB
+                comm_mb = round_comm_mb(n_selected)
             else:
-                n_active_uavs = len(uav_img_updates)
-                comm_mb = (
-                    2.0 * n_selected * _IOT_MODEL_SIZE_MB + 2.0 * n_active_uavs * _UAV_MODEL_SIZE_MB
-                )
+                comm_mb = round_comm_mb(n_selected, n_active_uavs=len(uav_img_updates))
 
             for cid in selected:
                 sel_counts[cid] += 1
