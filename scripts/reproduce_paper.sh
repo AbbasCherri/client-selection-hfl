@@ -10,6 +10,13 @@
 # then pip install -e .) and, for the real-data harnesses, HF_TOKEN exported.
 # Every step logs to results/reproduce_paper.log and each harness writes its
 # own seed_manifest.csv + config.*.resolved.yaml next to its outputs.
+#
+# Interrupted runs: every step below (run/run_paper_sim/run_selection_sim/
+# run_sweep/run_stress_sweep) checkpoints each (N, method/mode, seed) job as
+# it finishes and skips + reloads already-finished jobs on the next attempt.
+# If this script is killed (Ctrl-C, SSH drop, VM preemption), just re-run it
+# unchanged — it resumes from the last completed job in the step it was on,
+# then continues to the remaining steps, instead of starting over.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."

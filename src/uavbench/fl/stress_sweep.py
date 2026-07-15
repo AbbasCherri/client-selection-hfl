@@ -32,7 +32,7 @@ from pathlib import Path
 import pandas as pd
 from joblib import Parallel, delayed
 
-from ..reporting.tables import write_table
+from ..reporting.tables import read_table, write_table
 from .federated import _dump_resolved_cfg
 from .seeds import sweep_job_seed
 
@@ -71,13 +71,11 @@ def _job(
     seed_idx: int,
     cfg: dict,
 ) -> pd.DataFrame:
-    """One (knob-cell, method, seed) full-system run inside a joblib worker."""
-    import torch
+    """One (knob-cell, method, seed) full-system run inside a joblib worker.
 
-    torch.set_num_threads(1)
-
-    from .federated import run_full_hfl
-
+    Resumable: see ``sweep._job`` — ``run_full_hfl`` writes
+    ``config.fullsim.resolved.yaml`` last, so its presence gates the skip.
+    """
     job_cfg = copy.deepcopy(cfg)
     job_cfg["methods"] = [method]
     job_cfg["fl"]["dropout_rate"] = dropout
@@ -89,12 +87,32 @@ def _job(
     job_cfg["fl"]["seed"] = sweep_job_seed(
         cfg.get("optimizer_seed", 9876), seed_idx, cfg["data"]["N_clients"]
     )
-    job_cfg["results_dir"] = str(
-        Path(cfg["results_dir"])
-        / f"d{dropout}_s{snr_deg}_b{black_chip}"
-        / f"seed{seed_idx}"
-        / method
+    job_results_dir = (
+        Path(cfg["results_dir"]) / f"d{dropout}_s{snr_deg}_b{black_chip}" / f"seed{seed_idx}" / method
     )
+    job_cfg["results_dir"] = str(job_results_dir)
+
+    if (job_results_dir / "config.fullsim.resolved.yaml").exists():
+        logger.info(
+            "[d=%.2f snr-%.0fdB chip=%.2f  %-16s seed=%d] checkpoint found — skipping (resume)",
+            dropout,
+            snr_deg,
+            black_chip,
+            method,
+            seed_idx,
+        )
+        df = read_table(job_results_dir / "fullsim_rounds.parquet")
+        df.insert(0, "seed", seed_idx)
+        df.insert(0, "black_chip_rate", black_chip)
+        df.insert(0, "snr_degradation_db", snr_deg)
+        df.insert(0, "dropout_rate", dropout)
+        return df
+
+    import torch
+
+    torch.set_num_threads(1)
+
+    from .federated import run_full_hfl
 
     logger.info(
         "[d=%.2f snr-%.0fdB chip=%.2f  %-16s seed=%d] starting",

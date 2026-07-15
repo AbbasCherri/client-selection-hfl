@@ -551,6 +551,12 @@ while `flat_fl`'s "all" mode is untouched; black-chip degrades accuracy.
   analyze/plot → paper sim → selection isolation → N-sweep → stress sweep
   → significance → artifact staging, logging to
   `results/reproduce_paper.log`.
+- **Resumable:** each (N, method/mode, seed) job in every sweep checkpoints
+  to its own results sub-directory as it finishes (gated on that job's
+  `config.*.resolved.yaml`, written last) and is skipped + reloaded from
+  disk rather than recomputed on the next attempt; the Tier-1 grid
+  checkpoints per job to `results_dir/.checkpoints/`. A killed run (Ctrl-C,
+  SSH drop, VM preemption) can simply be re-launched unchanged.
 - **Per-run artifacts:** resolved config YAML (prebuilt payloads elided),
   `seed_manifest.csv` (written before the run), rounds/runs parquet,
   `confusion.parquet`, figures.
@@ -636,7 +642,7 @@ while `flat_fl`'s "all" mode is untouched; black-chip degrades accuracy.
 | Role | Machine | CPU | RAM | Notes |
 |---|---|---|---|---|
 | Development / smoke runs | Dell Latitude 5540 | Intel i7-1355U (10c/12t) | 32 GB | CPU-only; all harnesses runnable |
-| Full experimental grids | GCP `n1-standard-12` | 12 vCPU | 45 GB | via `scripts/run_gcp.sh` / `scripts/run_paper_sim.sh` / `scripts/run_selection_gcp.sh` (self-terminating) |
+| Full experimental grids | GCP `n1-standard-12` | 12 vCPU | 45 GB | via `scripts/run_gcp.sh` (self-terminating; wraps `reproduce_paper.sh`) |
 
 No GPU is used anywhere: the CPU-feasibility claim is backed by measured
 wall-clock numbers, not an architectural argument.

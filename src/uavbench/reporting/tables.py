@@ -37,3 +37,19 @@ def write_table(df: pd.DataFrame, path: Path) -> Path:
         return csv_path
     csv_path.unlink(missing_ok=True)  # remove stale CSV from a previous fallback run
     return path
+
+
+def read_table(path: Path) -> pd.DataFrame:
+    """Read a table written by :func:`write_table` — parquet, or its CSV fallback.
+
+    ``path`` is the ``.parquet`` path; if it is missing, the ``.csv`` sibling
+    is tried (mirrors the fallback ``write_table`` may have taken). Raises
+    ``FileNotFoundError`` if neither exists.
+    """
+    path = Path(path)
+    if path.exists():
+        return pd.read_parquet(path)
+    csv_path = path.with_suffix(".csv")
+    if csv_path.exists():
+        return pd.read_csv(csv_path)
+    raise FileNotFoundError(f"no table at {path} or {csv_path}")

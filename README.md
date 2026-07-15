@@ -54,7 +54,10 @@ uavbench clean            [--config <config>]              # remove results
 ```
 
 `scripts/reproduce_paper.sh [--smoke]` chains the full grid end to end,
-logging to `results/reproduce_paper.log`. A legacy `hflsim` CLI also
+logging to `results/reproduce_paper.log`; every step checkpoints per job
+and resumes on re-run instead of restarting from scratch if interrupted.
+`scripts/run_gcp.sh` wraps it for a self-terminating GCP VM run (see
+`scripts/gcp_setup.sh` for environment setup). A legacy `hflsim` CLI also
 exists for the pre-`uavbench` standalone simulator.
 
 ## Configs

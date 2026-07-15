@@ -22,6 +22,7 @@ from .optimizers import build_optimizer
 from .problem.energy import EnergyModel
 from .problem.fitness import Fitness
 from .problem.instance import generate_instance
+from .reporting.checkpoint import load_checkpoint, save_checkpoint
 from .reporting.tables import write_table as _write_table
 
 logger = logging.getLogger("uavbench.runner")
@@ -121,8 +122,28 @@ def _dir_size_mb(path: Path) -> float:
     return sum(p.stat().st_size for p in path.rglob("*") if p.is_file()) / 1e6
 
 
+def _checkpoint_path(results_dir: Path, method: str, scenario_idx: int, seed_i: int) -> Path:
+    return results_dir / ".checkpoints" / f"{method}__s{scenario_idx}__seed{seed_i}.pkl"
+
+
+def _run_one_checkpointed(
+    cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i: int, ckpt: Path
+) -> dict:
+    """Run one job and checkpoint it — executed inside a joblib worker."""
+    out = _run_one(cfg, method, method_idx, scenario_idx, seed_i)
+    save_checkpoint(ckpt, out)
+    return out
+
+
 def run_experiment(cfg: dict) -> dict:
-    """Run the full grid and persist per-run metrics + convergence traces."""
+    """Run the full grid and persist per-run metrics + convergence traces.
+
+    Resumable: each (method, scenario, seed) job is checkpointed to
+    ``results_dir/.checkpoints/`` as it finishes. A rerun with the same
+    ``results_dir`` (e.g. after the process was killed mid-grid) reloads
+    already-checkpointed jobs instead of recomputing them and only submits
+    the remaining ones to the pool.
+    """
     results_dir = Path(cfg["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +162,26 @@ def run_experiment(cfg: dict) -> dict:
         for m_idx, m in enumerate(methods)
         for seed_i in range(n_seeds)
     ]
+
+    job_outputs: dict[tuple, dict] = {}
+    pending = []
+    for job in jobs:
+        _, m, s_idx, seed_i = job
+        ckpt = _checkpoint_path(results_dir, m, s_idx, seed_i)
+        cached = load_checkpoint(ckpt)
+        if cached is not None:
+            job_outputs[job] = cached
+        else:
+            pending.append(job)
+
+    n_done = len(jobs) - len(pending)
+    if n_done:
+        logger.info(
+            "Resuming: %d/%d jobs already checkpointed, running the remaining %d",
+            n_done,
+            len(jobs),
+            len(pending),
+        )
     logger.info(
         "Running %d jobs (%d methods x %d scenarios x %d seeds) on %d workers",
         len(jobs),
@@ -150,9 +191,17 @@ def run_experiment(cfg: dict) -> dict:
         cfg["n_workers"],
     )
 
-    outputs = Parallel(n_jobs=cfg["n_workers"])(
-        delayed(_run_one)(cfg, m, m_idx, s_idx, seed_i) for (m_idx, m, s_idx, seed_i) in jobs
-    )
+    if pending:
+        computed = Parallel(n_jobs=cfg["n_workers"])(
+            delayed(_run_one_checkpointed)(
+                cfg, m, m_idx, s_idx, seed_i, _checkpoint_path(results_dir, m, s_idx, seed_i)
+            )
+            for (m_idx, m, s_idx, seed_i) in pending
+        )
+        for job, out in zip(pending, computed):
+            job_outputs[job] = out
+
+    outputs = [job_outputs[job] for job in jobs]
 
     rows = [o["metrics"] for o in outputs]
     conv_rows = []

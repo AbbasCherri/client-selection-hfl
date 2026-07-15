@@ -26,7 +26,7 @@ from pathlib import Path
 import pandas as pd
 from joblib import Parallel, delayed
 
-from ..reporting.tables import write_table
+from ..reporting.tables import read_table, write_table
 from .federated import _dump_resolved_cfg
 
 logger = logging.getLogger("uavbench.fl.sweep")
@@ -87,18 +87,42 @@ def _prefetch_all_N(cfg: dict) -> None:
 
 
 def _job(N: int, method: str, cfg: dict) -> pd.DataFrame:
-    """Single (N, method) FL run, executed inside a joblib worker process."""
+    """Single (N, method) FL run, executed inside a joblib worker process.
+
+    Resumable: ``run_tier2`` writes ``config.tier2.resolved.yaml`` as its
+    last step, so that file's presence means the job fully finished on a
+    prior attempt — reload its already-written table instead of redoing the
+    FL run. Each (N, method) gets its own sub-directory: sharing one dir per
+    N across methods (as a pre-checkpointing version of this function did)
+    made every method's write silently clobber the previous method's output
+    file, which was harmless when nothing ever read it back but would make
+    the resume check reload the wrong method's results.
+    """
+    job_cfg = copy.deepcopy(cfg)
+    job_cfg["data"]["N_clients"] = N
+    job_cfg["methods"] = [method]
+    job_results_dir = Path(cfg["results_dir"]) / f"N{N}" / method
+    job_cfg["results_dir"] = str(job_results_dir)
+
+    if (job_results_dir / "config.tier2.resolved.yaml").exists():
+        logger.info("[N=%d  method=%-10s] checkpoint found — skipping (resume)", N, method)
+        df = read_table(job_results_dir / "tier2_rounds.parquet")
+        df.insert(0, "N", N)
+        return df
+
+    # Point to the shared N-level feature cache (one dir above) produced by
+    # _prefetch_all_N so parallel method workers don't each re-run the full
+    # ResNet forward pass.
+    if job_cfg["data"].get("source", "real") == "real":
+        job_cfg["data"]["feature_cache_path"] = str(
+            Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy"
+        )
+
     import torch
 
     torch.set_num_threads(1)  # limit intra-op parallelism so 12 workers don't thrash BLAS
 
     from .federated import run_tier2  # import inside worker to avoid fork issues
-
-    job_cfg = copy.deepcopy(cfg)
-    job_cfg["data"]["N_clients"] = N
-    job_cfg["methods"] = [method]
-    # Each N gets its own sub-directory; the pre-fetched img_features.npy lives here.
-    job_cfg["results_dir"] = str(Path(cfg["results_dir"]) / f"N{N}")
 
     logger.info("[N=%d  method=%-10s] starting", N, method)
     out = run_tier2(job_cfg)
@@ -174,12 +198,11 @@ def run_sweep(cfg: dict) -> dict:
 
 
 def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
-    """Single (N, method, seed) full-system run, executed inside a joblib worker."""
-    import torch
+    """Single (N, method, seed) full-system run, executed inside a joblib worker.
 
-    torch.set_num_threads(1)
-
-    from .federated import run_full_hfl
+    Resumable: see ``_job`` above — ``run_full_hfl`` writes
+    ``config.fullsim.resolved.yaml`` last, so its presence gates the skip.
+    """
     from .seeds import sweep_job_seed
 
     job_cfg = copy.deepcopy(cfg)
@@ -196,7 +219,18 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # the method segment, all 6 methods for a given (N, seed) share one dir
     # and race to overwrite each other's output file — the last writer wins
     # and earlier results are silently lost.
-    job_cfg["results_dir"] = str(Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / method)
+    job_results_dir = Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / method
+    job_cfg["results_dir"] = str(job_results_dir)
+
+    if (job_results_dir / "config.fullsim.resolved.yaml").exists():
+        logger.info(
+            "[N=%d  method=%-20s  seed=%d] checkpoint found — skipping (resume)", N, method, seed_idx
+        )
+        df = read_table(job_results_dir / "fullsim_rounds.parquet")
+        df.insert(0, "seed", seed_idx)
+        df.insert(0, "N", N)
+        return df
+
     # Point to the shared N-level feature cache (one dir above) produced by
     # _prefetch_all_N so parallel method/seed workers don't each re-run the
     # full ResNet forward pass.
@@ -204,6 +238,12 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
         job_cfg["data"]["feature_cache_path"] = str(
             Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy"
         )
+
+    import torch
+
+    torch.set_num_threads(1)
+
+    from .federated import run_full_hfl
 
     logger.info("[N=%d  method=%-20s  seed=%d] starting", N, method, seed_idx)
     out = run_full_hfl(job_cfg)

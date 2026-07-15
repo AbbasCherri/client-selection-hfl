@@ -58,6 +58,7 @@ from uavbench.metrics.fl import (
     round_comm_mb,
 )
 
+from ..reporting.tables import read_table
 from .client_selection import ClientSelector
 from .dataset import CachedDataset, ClientData, make_client_loader
 from .device_state import DeviceStateManager
@@ -468,11 +469,11 @@ def run_selection_isolation(cfg: dict) -> dict:
 
 
 def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
-    """One (N, mode, seed) run inside a joblib worker."""
-    import torch as _torch
+    """One (N, mode, seed) run inside a joblib worker.
 
-    _torch.set_num_threads(1)  # 1 thread × n_workers = full CPU budget, no BLAS thrash
-
+    Resumable: see ``sweep._job`` — ``run_selection_isolation`` writes
+    ``config.selection.resolved.yaml`` last, so its presence gates the skip.
+    """
     job_cfg = copy.deepcopy(cfg)
     job_cfg["data"]["N_clients"] = N
     job_cfg["modes"] = [mode]
@@ -481,7 +482,22 @@ def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # so the selection rule is the only cross-mode difference. (Contrast with
     # sweep._paper_job, where run_full_hfl folds in a method hash.)
     job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
-    job_cfg["results_dir"] = str(Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / mode)
+    job_results_dir = Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / mode
+    job_cfg["results_dir"] = str(job_results_dir)
+
+    if (job_results_dir / "config.selection.resolved.yaml").exists():
+        logger.info(
+            "[N=%d  mode=%-9s seed=%d] checkpoint found — skipping (resume)", N, mode, seed_idx
+        )
+        df = read_table(job_results_dir / "selection_rounds.parquet")
+        df.insert(0, "seed", seed_idx)
+        df.insert(0, "N", N)
+        return df
+
+    import torch as _torch
+
+    _torch.set_num_threads(1)  # 1 thread × n_workers = full CPU budget, no BLAS thrash
+
     if job_cfg["data"].get("source", "real") == "real":
         job_cfg["data"]["feature_cache_path"] = str(
             Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy"
