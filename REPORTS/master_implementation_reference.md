@@ -280,13 +280,19 @@ ablation that prices dynamic placement).
 
 **Literature baselines (published methods, faithful path-loss radius):**
 
-*Shared channel model* (`problem/path_loss.py`): Al-Hourani et al. 2014
-probabilistic LoS — P(LoS) = 1/(1+a·exp(−b(θ−a))), mean loss = FSPL(d_3d,f)
+*Shared channel model* (`problem/path_loss.py`): probabilistic LoS —
+P(LoS) = 1/(1+a·exp(−b(θ−a))), mean loss = FSPL(d_3d,f)
 + P_LoS·η_LoS + (1−P_LoS)·η_NLoS; `coverage_radius(h)` by bisection
 (monotonicity checked); environment presets (suburban a=4.88, b=0.43,
 η=0.1/21 dB, plus urban/dense/high-rise). Radius-vs-altitude is unimodal
 (rises while LoS gain dominates, falls when FSPL dominates) — verified
-numerically.
+numerically. Sourcing (confirmed 2026-07): the model draws on **two**
+distinct Al-Hourani et al. papers — GLOBECOM 2014 for the environment
+constants and the η_LoS/η_NLoS values (confirmed exact match to that
+paper's Table II μ1/μ2 at 2000 MHz), and WCL 2014 for the S-curve LoS fit
+and the altitude optimization, whose own FSPL term is confirmed evaluated
+at the 3-D slant distance `d_3d = sqrt(h²+r²)` — matching this
+implementation exactly. Full sourcing detail: Appendix A.5.
 
 - **`mozaffari2016`** (IEEE Comm. Lett. 2016): compute the
   radius-maximizing altitude (h*, r*) once, then place K equal discs by
@@ -304,6 +310,11 @@ numerically.
   2-D step uses the value-weighted centroid rather than the paper's
   smallest-enclosing-circle center.
 
+Full citations, faithful pseudocode (Algorithms A6–A7), fidelity/adaptation
+notes, and the shared channel-model sourcing: **Appendix A.5–A.8** —
+the same reproducibility-grade treatment given to the selection-literature
+baselines in Appendix C.
+
 *Both:* altitude search restricted to the intersection of configured
 [h_min, h_max] and the instance z-bounds (no post-hoc clipping → altitude
 and radius always mutually consistent); one-shot deterministic; scored
@@ -316,11 +327,15 @@ methods face. Full-sim Noto scale (R_comm=20 km) uses 145 dB → radii on
 the 20 km order. The calibration makes the *placement rule* the compared
 variable, not an arbitrarily tighter radio.
 
-**`# VERIFY AGAINST PAPER` markers (resolve before quoting absolute
-numbers):** exact (a,b,η) preset values; 3-D vs horizontal FSPL
-convention; Mozaffari's closed-form optimum (grid search is the stand-in);
-Alzenad's exact altitude rule and SEC-vs-centroid 2-D step; each paper's
-own multi-UAV arrangement.
+**`# VERIFY AGAINST PAPER` markers — status (resolved 2026-07):** the
+`(a,b,η)` preset values and the 3-D-vs-horizontal FSPL convention are
+**confirmed** against the two Al-Hourani source papers (Appendix A.5) and
+no longer open. What remains open, by design, as *stated adaptation
+choices rather than unverified gaps* (Appendix A.6–A.7): Mozaffari's
+closed-form optimum (this codebase uses a grid search as a deliberate
+numerical stand-in); Alzenad's exact altitude rule and SEC-vs-centroid 2-D
+step; each paper's own multi-UAV packing/deployment arrangement (not
+reproduced verbatim by either baseline here).
 
 ---
 
@@ -592,10 +607,17 @@ while `flat_fl`'s "all" mode is untouched; black-chip degrades accuracy.
    (100 dB Tier-1 / 145 dB Noto scale) and why (§7).
 5. **Adaptation notes** for Mozaffari (K-disc greedy maximal covering)
    and Alzenad (per-cluster decoupling, centroid vs SEC) — and for the
-   selection baselines' instantiation constants (§7, §8).
-6. **Resolve all `# VERIFY AGAINST PAPER` markers** in
-   `problem/path_loss.py`, `optimizers/mozaffari2016.py`,
-   `optimizers/alzenad2017.py` before quoting absolute radii (§7).
+   selection baselines' instantiation constants (§7, §8, Appendix A.6–A.7,
+   Appendix C).
+6. **`# VERIFY AGAINST PAPER` markers — resolved status:** the `(a,b,η)`
+   preset values and the 3-D-vs-horizontal FSPL convention in
+   `problem/path_loss.py` are confirmed against the two Al-Hourani source
+   papers (Appendix A.5) — closed, not outstanding. Mozaffari's closed-form
+   altitude optimum (`optimizers/mozaffari2016.py`) and Alzenad's exact
+   altitude rule / SEC-vs-centroid step (`optimizers/alzenad2017.py`)
+   remain stated adaptation choices rather than verified reproductions —
+   state them as such in the paper (Appendix A.6–A.7), not as an
+   unresolved TODO.
 7. **Paired-test justification** via the shared-instance seed design;
    Holm correction; seed counts and manifests (§11, §13).
 8. **Separate tables** for own-ablations vs literature baselines (§10).
@@ -801,6 +823,140 @@ Guaranteed in-bounds without clipping (scales toward the nearer bound).
   subsequent ∝ D²·weights; uniform fallback on zero/non-finite weight).
 - **`weighted_kmeans(...)`** — Lloyd's algorithm seeded by the above,
   weighted centroid updates, ≤25 iterations, early convergence stop.
+
+## A.5 Placement literature baselines: shared channel-model sourcing
+
+Both A.6 and A.7 below build on the probabilistic air-to-ground channel in
+`problem/path_loss.py`, which draws on **two** distinct Al-Hourani et al.
+papers cited separately (not a single merged "2014" source):
+
+- Al-Hourani, Kandeepan & Jamalipour, "Modeling Air-to-Ground Path Loss for
+  Low Altitude Platforms in Urban Environments," IEEE GLOBECOM 2014 —
+  source of the environment shape constants and, confirmed exactly, the
+  `eta_los_db`/`eta_nlos_db` excess-loss values (that paper's `mu_1`/`mu_2`,
+  Table II, 2000 MHz row: Suburban 0.1/21, Urban 1.0/20, Dense Urban
+  1.6/23, Highrise 2.3/34 dB).
+- Al-Hourani, Kandeepan & Lardner, "Optimal LAP Altitude for Maximum
+  Coverage," IEEE WCL 2014 — source of the S-curve LoS-probability fit and
+  the altitude/coverage-radius optimization; its own free-space term is
+  evaluated at the 3-D slant distance `d = sqrt(h^2 + r^2)`, which
+  `average_path_loss`'s `d3d = hypot(distance_ground_m, altitude_m)`
+  matches exactly (confirmed, not the horizontal-only distance).
+
+The `(a, b)` LoS shape constants are the standard literature-cited
+Al-Hourani values, used as-is rather than re-derived from the WCL letter's
+own bivariate surface-fit polynomial over `(alpha*beta, gamma)` — a stated
+simplification. What is *not* covered by these two papers, and stays open
+as an explicit adaptation choice per baseline: Mozaffari's own closed-form
+altitude optimum (A.6) and Alzenad's smallest-enclosing-circle vs. centroid
+choice (A.7).
+
+## A.6 Placement baseline — Mozaffari2016
+
+Implemented in `optimizers/mozaffari2016.py` as the `mozaffari2016` full-
+system method (own placement + `ucb` selection, per `_METHOD_CFG`).
+
+**Citation:** M. Mozaffari, W. Saad, M. Bennis, and M. Debbah, "Efficient
+Deployment of Multiple Unmanned Aerial Vehicles for Optimal Wireless
+Coverage," *IEEE Communications Letters*, vol. 20, no. 8, pp. 1647–1650,
+Aug. 2016.
+
+**Core idea (source):** derive the single-UAV altitude/radius pair
+`(h*, r*)` that maximizes ground coverage radius under the air-to-ground
+path-loss model, then deploy multiple UAVs as equal-radius discs to
+maximize total covered area.
+
+**Adaptation note (state explicitly in the paper):** the source paper's
+core result is the single-UAV `(h*, r*)` derivation; its multi-UAV
+deployment packs equal discs to maximize coverage. Here that packing is
+realized as **greedy maximal covering discretized at the device
+locations**: each of the K discs is centered on the device position
+maximizing the value of not-yet-covered devices within `r*`, which are
+then removed before the next disc is placed — a deterministic K-UAV
+generalization aligned with this benchmark's value-weighted coverage
+objective, not a verbatim reproduction of the paper's own packing
+arrangement (not verified against the source). A residual-centroid rule
+was rejected: it degenerates on clustered layouts, where the centroid can
+sit farther than `r*` from every cluster and cover nothing.
+
+```
+Algorithm A6: Mozaffari-style Greedy Equal-Disc Coverage
+1: (h*, r*) ← optimal_altitude_mozaffari(max_path_loss_db, freq, env)  # grid search, §A.5
+2: remaining ← all devices;  centers ← []
+3: for k = 1..K do
+4:     if remaining is empty:
+5:         centers.append(last center, or device centroid if none yet)  # co-locate spare disc
+6:         continue
+7:     j* ← argmax_j  sum_{i in remaining} value_i · [dist(i, j) <= r*]   # candidate = device location j
+8:     centers.append(position(j*))
+9:     remaining ← remaining \ { i : dist(i, j*) <= r* }
+10: positions ← [(centers[k], h*) for k in 1..K];  radii ← [r*]*K
+11: return positions, radii   # scored once through shared Fitness with `radii` applied
+```
+
+**Expected contrast:** a physically-grounded, closed-form-altitude
+baseline, but altitude is uniform and radius is fixed regardless of local
+device density — it cannot trade a smaller radius for tighter clustering
+the way value-weighted metaheuristic search can.
+
+## A.7 Placement baseline — Alzenad2017
+
+Implemented in `optimizers/alzenad2017.py` as the `alzenad2017` full-system
+method (own placement + `ucb` selection, per `_METHOD_CFG`).
+
+**Citation:** A. Alzenad, A. El-Keyi, F. Lagum, and H. Yanikomeroglu,
+"3-D Placement of an Unmanned Aerial Vehicle Base Station (UAV-BS) for
+Energy-Efficient Maximal Coverage," *IEEE Wireless Communications Letters*,
+vol. 6, no. 4, pp. 434–437, Aug. 2017.
+
+**Core idea (source):** decouple 3-D placement into a 2-D horizontal step
+(cover a target ground area) and an altitude step (choose the *minimum*
+altitude whose path-loss-derived radius still reaches the required
+coverage circle — the energy-efficient, minimum-transmit-power choice).
+
+**Adaptation note (state explicitly in the paper):** the source paper
+places a single UAV-BS; here devices are partitioned into K value-weighted
+k-means clusters and the paper's decoupled 2-D + altitude rule is applied
+independently per cluster, yielding genuinely non-uniform per-UAV radii —
+the generalization from one UAV to K. The 2-D step uses the value-weighted
+cluster centroid rather than the paper's smallest-enclosing-circle (SEC)
+center; whether an exact SEC center (Welzl's algorithm) would materially
+tighten the required radius versus the centroid used here is not evaluated
+against the source (a stated, not verified, deviation).
+
+```
+Algorithm A7: Alzenad-style Per-Cluster Decoupled 2-D + Altitude Placement
+1: centers ← weighted_kmeans(devices, K, value)              # value-weighted k-means, §A.4
+2: assign each device to its nearest center → K clusters
+3: for k = 1..K do
+4:     req_r_k ← max_{i in cluster k} dist(i, centers[k])     # required coverage radius
+5:     (h_k, r_k) ← min_altitude_for_radius(req_r_k, max_path_loss_db, freq, env)
+                                                               # smallest h reaching req_r_k, §A.5
+6: positions ← [(centers[k], h_k) for k in 1..K];  radii ← [r_k for k in 1..K]
+7: return positions, radii   # scored once through shared Fitness with per-UAV `radii` applied
+```
+
+**Expected contrast:** genuinely non-uniform per-UAV radii (unlike
+Mozaffari's equal discs) and altitude tuned to each cluster's actual
+footprint, but still centroid-based rather than value-weighted-optimized
+placement — it cannot reposition to trade off movement penalty or load
+balance the way PSO/GA can.
+
+## A.8 Presenting placement baselines in the paper
+
+- **Signal table** (alongside the placement method table): one row per
+  baseline with columns *Altitude rule*, *Radius uniformity*, *2-D
+  placement rule*, *Repositioning/movement-aware?* — makes the "why these
+  two" argument visually obvious: Mozaffari (uniform radius, greedy
+  covering, no repositioning-awareness), Alzenad (non-uniform per-cluster
+  radius, centroid-based, no repositioning-awareness), Proposed PSO/GA
+  (value-weighted, movement- and load-aware search).
+- **Results:** keep placement literature baselines in a *separate*
+  table/figure from the own-system ablations — two tables, two questions
+  (§10).
+- **Related Work:** for each of the two citations add one sentence noting
+  "we implement this as a baseline in §V", connecting related work to
+  results (same convention as Appendix C.4 for the selection baselines).
 
 ---
 

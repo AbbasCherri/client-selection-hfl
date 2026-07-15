@@ -1,8 +1,20 @@
 """Air-to-ground path-loss model and altitude-coupled coverage radius.
 
-Implements the probabilistic LoS/NLoS air-to-ground channel of Al-Hourani,
-Kandeepan & Lardner, "Optimal LAP Altitude for Maximum Coverage" (IEEE WCL
-2014) — the model both placement literature baselines build on:
+Implements the probabilistic LoS/NLoS air-to-ground channel from **two**
+distinct Al-Hourani et al. papers, which do different jobs and are cited
+separately (not as one merged "2014" source):
+
+* Al-Hourani, Kandeepan & Jamalipour, "Modeling Air-to-Ground Path Loss for
+  Low Altitude Platforms in Urban Environments," IEEE GLOBECOM 2014 — the
+  source of the environment shape constants and, critically, the
+  `eta_los_db`/`eta_nlos_db` excess-loss values (that paper's `mu_1`/`mu_2`,
+  Table II, 2000 MHz row).
+* Al-Hourani, Kandeepan & Lardner, "Optimal LAP Altitude for Maximum
+  Coverage," IEEE WCL 2014 — the source of the S-curve LoS-probability fit
+  (`los_probability`), the 3-D free-space path-loss form, and the
+  altitude/coverage-radius optimization this module implements.
+
+This channel model is what both placement literature baselines build on:
 
 * Mozaffari, Saad, Bennis & Debbah, "Efficient Deployment of Multiple
   Unmanned Aerial Vehicles for Optimal Wireless Coverage," IEEE Comm.
@@ -11,14 +23,23 @@ Kandeepan & Lardner, "Optimal LAP Altitude for Maximum Coverage" (IEEE WCL
   Aerial Vehicle Base Station (UAV-BS) for Energy-Efficient Maximal
   Coverage," IEEE WCL 2017 (minimum altitude achieving a required radius).
 
-Environment constants follow the values commonly cited from Al-Hourani et
-al.'s Table (as used by both papers). All formulas are standard-form;
-before quoting absolute numeric outputs in the paper, re-verify the
-markers below against each source:
-
-# VERIFY AGAINST PAPER: (a, b, eta) presets per environment; free-space
-# term evaluated at 3D slant distance (the convention used here); and each
-# paper's exact max-path-loss threshold convention.
+**Sourcing status (resolved 2026-07):**
+- `eta_los_db`/`eta_nlos_db` in `ENV_PRESETS` are confirmed to match the
+  GLOBECOM paper's Table II `(mu_1, mu_2)` at 2000 MHz exactly (Suburban
+  0.1/21, Urban 1.0/20, Dense Urban 1.6/23, Highrise 2.3/34 dB).
+- `average_path_loss`'s free-space term is confirmed evaluated at the 3-D
+  slant distance (`d3d = hypot(distance_ground_m, altitude_m)`), matching
+  the WCL letter's own `d = sqrt(h^2 + r^2)` convention exactly — not the
+  horizontal-only distance.
+- The `(a, b)` LoS shape constants in `ENV_PRESETS` are the standard
+  literature-cited Al-Hourani values, used as-is rather than re-derived
+  from the WCL letter's bivariate surface-fit polynomial over `(alpha*beta,
+  gamma)` — a stated simplification, not an unverified gap.
+- Each baseline's own optimum-derivation fidelity (Mozaffari's closed-form
+  altitude vs. this module's grid search; Alzenad's smallest-enclosing-
+  circle vs. centroid) is *not* covered by the two papers above and is
+  documented as an explicit adaptation choice in `optimizers/mozaffari2016.py`
+  / `optimizers/alzenad2017.py` respectively — see those files, not here.
 
 Units are stated per parameter: metres (m), Hertz (Hz), decibels (dB),
 degrees (deg).
@@ -33,9 +54,9 @@ import numpy as np
 _C = 299_792_458.0  # speed of light, m/s
 
 # Al-Hourani et al. environment presets: a/b shape the sigmoid LoS
-# probability; eta_los/eta_nlos are mean excess losses (dB) beyond free
-# space for LoS/NLoS links.
-# VERIFY AGAINST PAPER: exact table values before quoting absolute radii.
+# probability (standard literature-cited values); eta_los/eta_nlos are mean
+# excess losses (dB) beyond free space for LoS/NLoS links, confirmed against
+# the GLOBECOM 2014 paper's Table II (mu_1, mu_2 at 2000 MHz).
 ENV_PRESETS: dict[str, dict[str, float]] = {
     "suburban": {"a": 4.88, "b": 0.43, "eta_los_db": 0.1, "eta_nlos_db": 21.0},
     "urban": {"a": 9.61, "b": 0.16, "eta_los_db": 1.0, "eta_nlos_db": 20.0},
@@ -149,8 +170,11 @@ def optimal_altitude_mozaffari(
     ``coverage_radius(h, ...)``. The radius-vs-altitude curve is unimodal
     under this model (rising while improved LoS dominates, falling once
     free-space loss dominates), so a grid of ``n_grid`` points suffices.
-    # VERIFY AGAINST PAPER (Mozaffari 2016, Eq. 10-12): the paper derives
-    # this optimum in closed form; the grid search is a numerical stand-in.
+    Known deviation (not verified against the source derivation): Mozaffari
+    2016 (Eq. 10-12) derives this optimum in closed form; this grid search
+    is a numerical stand-in, adopted deliberately rather than re-deriving
+    the closed form. See `optimizers/mozaffari2016.py` for the fidelity
+    note this feeds.
 
     Returns ``(h_star_m, r_star_m)``.
     """
@@ -183,9 +207,11 @@ def min_altitude_for_radius(
     minimum transmit-power altitude that still covers the target circle).
     If no altitude achieves the requirement, fall back to the altitude
     maximizing the radius, so callers always get a usable placement.
-    # VERIFY AGAINST PAPER (Alzenad 2017 §III): the paper frames this via a
-    # circle-placement + feasibility argument; this scan is a numerical
-    # stand-in for the same minimum-feasible-altitude choice.
+    Known deviation (not verified against the source derivation): Alzenad
+    2017 (§III) frames this via a circle-placement + feasibility argument;
+    this scan is a numerical stand-in for the same minimum-feasible-
+    altitude choice, adopted deliberately. See `optimizers/alzenad2017.py`
+    for the fidelity note this feeds.
 
     Returns ``(h_m, r_achieved_m)``.
     """

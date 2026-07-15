@@ -15,8 +15,11 @@ K value-weighted k-means clusters and the paper's decoupled 2D+altitude
 rule is applied per cluster, yielding genuinely non-uniform per-UAV radii.
 The 2-D step uses the value-weighted centroid rather than the paper's
 smallest-enclosing-circle center.
-# VERIFY AGAINST PAPER: whether an exact smallest-enclosing-circle center
-# (Welzl) materially tightens required_radius versus the centroid used here.
+Known deviation (not verified against the source derivation): whether an
+exact smallest-enclosing-circle center (Welzl) would materially tighten
+`required_radius` versus the centroid used here is not evaluated — the
+centroid is a deliberate, stated stand-in. Full pseudocode and fidelity
+notes: Appendix A.7 of `REPORTS/master_implementation_reference.md`.
 
 Scoring is one shot through the shared :class:`Fitness` with the per-UAV
 radii applied, so all reported numbers are comparable with PSO/GA.

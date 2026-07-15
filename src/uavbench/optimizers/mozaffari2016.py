@@ -17,7 +17,10 @@ maximizes the value of not-yet-covered devices within r*, which are then
 removed before the next disc — a deterministic K-UAV generalization
 aligned with this benchmark's value-weighted coverage objective, not a
 verbatim reproduction.
-# VERIFY AGAINST PAPER: the paper's own multi-UAV packing arrangement.
+Known deviation (not verified against the source derivation): the paper's
+own multi-UAV packing arrangement is not reproduced verbatim — this greedy
+covering is a deliberate, stated stand-in for it. Full pseudocode and
+fidelity notes: Appendix A.6 of `REPORTS/master_implementation_reference.md`.
 
 Scoring is one shot through the shared :class:`Fitness` with the derived
 per-UAV radius applied (``radii``), so coverage/movement/load numbers are
