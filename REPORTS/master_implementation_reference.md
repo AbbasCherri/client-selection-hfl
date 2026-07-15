@@ -88,12 +88,18 @@ split (`train_ratio=0.8`); every client's test indices are pooled into one
 **global held-out test set**, and *every reported accuracy/F1 is computed
 on it, every round* — no training-set numbers anywhere.
 
-**Black-chip diagnostic (report in the paper).** A GSI fetch failure
-yields an all-black chip carrying zero image signal; a high rate collapses
-the model to the majority class while non-accuracy metrics keep moving.
-The measured rate is logged and persisted per run under
+**Black-chip diagnostic + hard gate (report in the paper).** A GSI fetch
+failure yields an all-black chip carrying zero image signal; a high rate
+collapses the model to the majority class while non-accuracy metrics keep
+moving. The measured rate is logged and persisted per run under
 `_diagnostics.black_chip_rate` in the resolved-config YAML — quote it next
 to the accuracy tables as evidence the image modality was informative.
+Beyond reporting, the rate is a **hard gate**: if it exceeds
+`data.max_black_chip_rate` (default **0.5**) the run raises `RuntimeError`
+instead of producing a completed-looking majority-collapse result (the
+diagnostic is persisted *before* the raise so the evidence survives).
+Deliberate stress runs that push the injected black-chip knob past the
+gate must raise the threshold explicitly in their config.
 
 **Licensing / availability (data availability statement).** GSI aerial
 tiles are used under the **Government of Japan Standard Terms of Use
@@ -175,9 +181,12 @@ hierarchical: comm = 2·n_selected·0.271 + 2·n_active_uavs·0.533   MB
 flat_fl:      comm = 2·n_selected·0.271                            MB
 ```
 
-Identical accounting for every method (`comm_mb_round` column); the exact
-constants and the two-tier formula are pinned by manually run sanity
-checks so the efficiency claim is auditable.
+Identical accounting for every method (`comm_mb_round` column): the single
+rule is `uavbench/metrics/fl.py::round_comm_mb`, called by every harness —
+no per-harness reimplementation. The payload constants are pinned against
+the **live model's parameter counts** by `check_metrics.py` (not just
+against themselves), so the efficiency claim is auditable and cannot
+silently drift from the architecture.
 
 **Energy (`problem/energy.py`, reporting-only by design):**
 `E(d) = P_fly·(d/v) + P_hover·t_serve` with P_fly=250 W, P_hover=200 W,
@@ -458,7 +467,7 @@ starts. Every number in the paper traces to an exact rerunnable seed.
 | Coverage %, F_cover | shared fitness breakdown | primary placement quality |
 | Movement (m) | fitness breakdown | shows coverage isn't bought by unconstrained repositioning |
 | Load imbalance | fitness breakdown | per-round *assignment* balance — distinct from selection fairness; label both clearly |
-| Jain's fairness index | cumulative selection counts, `fl/fairness.py` (Jain et al., DEC TR-301, 1984) | the instrument for the UCB anti-starvation claim; reported by all FL harnesses |
+| Jain's fairness index | cumulative selection counts, `metrics/fl.py::jain_index` (Jain et al., DEC TR-301, 1984) | the instrument for the UCB anti-starvation claim; reported by all FL harnesses (NaN for `centralized` — no selection exists there) |
 | `evals_to_threshold` | iteration reaching 95% of final best | convergence speed under an identical eval budget |
 | `convergence_auc` | trapezoidal AUC normalized by shared G_max, flat plateau extension | trajectory summary that doesn't reward early stopping with a smaller denominator |
 | Wall-clock | `wall_time_s` per optimizer run; `round_time_s` per FL round; per-method aggregate via `summarize_wall_clock` | the CPU-feasibility claim needs measured numbers |
@@ -530,12 +539,16 @@ while `flat_fl`'s "all" mode is untouched; black-chip degrades accuracy.
 - **Per-run artifacts:** resolved config YAML (prebuilt payloads elided),
   `seed_manifest.csv` (written before the run), rounds/runs parquet,
   `confusion.parquet`, figures.
-- **Sanity checks (manual):** offline checks run without a token via the
-  fixture seam; they are run manually before results are trusted (the
-  suite is being consolidated into `tests/sanity_checks/` scripts).
-  Invariant checks encode the fairness-of-comparison claims: PSO/GA
-  always share P/G_max regardless of config; instance/optimizer seed
-  streams are disjoint even under equal bases.
+- **Sanity checks (manual):** 13 plain scripts under `tests/sanity_checks/`
+  (72 checks total; `python tests/sanity_checks/run_all.py` runs them all),
+  offline via the prebuilt-fixture seam, no token needed. Not pytest — a
+  person reads the printed PASS/FAIL output before trusting a batch of
+  results. The fairness-of-comparison invariants are additionally enforced
+  by **runtime asserts at the enforcement points**: `build_optimizer`
+  asserts the constructed optimizer honours the shared P/G_max, and the
+  Tier-1 runner's `_run_one` asserts the instance and optimizer seed
+  streams did not collide — a violation crashes the run itself, not just a
+  check script.
 - **Hardware:** see §18 for the full machine/parallelism/runtime
   disclosure; fill its wall-clock table from the final grid run.
 
@@ -547,6 +560,21 @@ while `flat_fl`'s "all" mode is untouched; black-chip degrades accuracy.
   objective; no selection mode bypasses the eligibility gate (except the
   deliberate `all` upper bound). One `build_optimizer`, one `_load_data`,
   one `_dump_resolved_cfg`.
+- **Single metrics home:** every reported FL metric (classification,
+  confusion long-form, Jain fairness, comm cost) lives in
+  `uavbench/metrics/fl.py`; Tier-1 placement metrics stay numpy-only in
+  `metrics/placement.py` so the Tier-1 harness never imports torch.
+  `fl/fairness.py` is a re-export shim.
+- **No silent failures in the results path:** every harness writes tables
+  through `reporting/tables.py::write_table` — the pyarrow-missing CSV
+  fallback logs the failure at WARNING and deletes the stale/partial
+  parquet (readers prefer parquet when both exist, so a leftover file from
+  an earlier run could otherwise silently shadow fresh results). The
+  black-chip gate (§2) applies the same rule to data quality: a state that
+  would corrupt a reported number aborts the run rather than logging and
+  continuing. Plot generation is the one tolerated soft failure (skipped
+  with a logged warning) because figures are regenerable from the saved
+  parquet via `analyze`.
 - **Vectorization:** `haversine_matrix` (exact vectorized twin of the
   scalar, equivalence-pinned) replaced Python double loops in coverage
   checks and selection scoring — ~17× on `_covered_clients` at N=500,
@@ -1035,7 +1063,10 @@ PSO→HFL bridge.
   seismic features are near-constant across one disaster area — the
   image is the only modality with real discriminative signal, and a high
   black-chip rate silently collapses the model to majority-class
-  prediction.
+  prediction. The per-chip fallback is tolerated *because* the run-level
+  hard gate (§2) bounds its aggregate effect: past
+  `data.max_black_chip_rate` the harness aborts rather than train on a
+  dataset whose image modality is effectively absent.
 - **Feature scaling order:** raw lat/lon are saved *before* any
   transform (needed unscaled for tile lookups), then normalized to [0,1]
   for model input; the 7 seismic columns (`MMI_original, MMI_shape,
