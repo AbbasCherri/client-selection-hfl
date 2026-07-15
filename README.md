@@ -11,7 +11,7 @@ result: `REPORTS/results_provenance.md`.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-lock.txt   # exact pins used for the paper
+pip install -r requirements.txt   # exact pins used for the paper
 pip install -e .
 ```
 

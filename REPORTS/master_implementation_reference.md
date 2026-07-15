@@ -544,9 +544,9 @@ while `flat_fl`'s "all" mode is untouched; black-chip degrades accuracy.
 
 ## 15. Reproducibility and artifacts
 
-- **Environment:** Python 3.13.14; `requirements-lock.txt` = exact
-  `pip freeze` of the results-producing machine (floor pins in
-  `pyproject.toml` for installability).
+- **Environment:** Python 3.13.14; `requirements.txt` = exact `pip freeze`
+  closure (direct + transitive) of the results-producing machine, dev/test
+  tooling excluded (floor pins in `pyproject.toml` for installability).
 - **One command:** `scripts/reproduce_paper.sh [--smoke]` chains Tier-1 →
   analyze/plot → paper sim → selection isolation → N-sweep → stress sweep
   → significance → artifact staging, logging to

@@ -6,7 +6,7 @@
 #   scripts/reproduce_paper.sh           # full grid (hours; see REPORTS/master_implementation_reference.md §18)
 #   scripts/reproduce_paper.sh --smoke   # reduced end-to-end check (real data at small subsample)
 #
-# Requirements: the pinned environment (pip install -r requirements-lock.txt,
+# Requirements: the pinned environment (pip install -r requirements.txt,
 # then pip install -e .) and, for the real-data harnesses, HF_TOKEN exported.
 # Every step logs to results/reproduce_paper.log and each harness writes its
 # own seed_manifest.csv + config.*.resolved.yaml next to its outputs.

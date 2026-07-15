@@ -7,7 +7,7 @@
 # mirrors pyproject.toml) — do not add inline pins here.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # repo root (script lives in scripts/)
 cd "$SCRIPT_DIR"
 
 has_sudo=false
