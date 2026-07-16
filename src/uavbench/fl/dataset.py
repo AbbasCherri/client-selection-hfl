@@ -54,8 +54,10 @@ class CachedDataset(Dataset):
         return len(self.base)  # type: ignore[arg-type]
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        _, struct, label = self.base[idx]
-        return self.img_features[idx], struct, label
+        # Never call base.__getitem__ here: it decodes the raw image chip from
+        # disk, which this wrapper immediately discards. Struct features and
+        # labels are already in-memory tensors on the base dataset.
+        return self.img_features[idx], self.base.features[idx], self.base.labels[idx]
 
 
 def make_client_loader(
