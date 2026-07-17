@@ -3,7 +3,8 @@
 #
 # Runs scripts/reproduce_paper.sh end to end (Tier-1 grid -> analyze/plot ->
 # paper sim -> selection isolation -> N-sweep -> stress sweep -> significance
-# -> artifact staging), then stops the VM. This is the only GCP entry point —
+# -> artifact staging), commits + pushes results/ to GitHub, then stops the
+# VM. This is the only GCP entry point —
 # it replaces the old run_paper_sim.sh / run_selection_gcp.sh, which each ran
 # a subset of what reproduce_paper.sh already does end to end.
 #
@@ -168,5 +169,27 @@ echo "[$(date)] Pipeline done." | tee -a "$LOG_FILE"
 echo "[$(date)] Results disk usage:" | tee -a "$LOG_FILE"
 du -sh "$SCRIPT_DIR/results"/* 2>/dev/null | tee -a "$LOG_FILE" || true
 df -h "$SCRIPT_DIR" | tee -a "$LOG_FILE"
+
+# ---------------------------------------------------------------------------
+# Commit + push results to GitHub before the VM stops itself. Runs only after
+# a successful pipeline (set -e aborts earlier otherwise). Feature caches
+# (img_features.npy) and *.log are excluded via .gitignore, so nothing staged
+# here can hit GitHub's 100 MB file limit. On any git failure the script
+# exits non-zero: the shutdown trap still stops the VM, the results stay on
+# its disk, and the log says exactly what to push manually.
+# ---------------------------------------------------------------------------
+echo "[$(date)] Committing results to GitHub …" | tee -a "$LOG_FILE"
+git add -A -- results >> "$LOG_FILE" 2>&1
+if git diff --cached --quiet; then
+    echo "[$(date)] No new results to commit." | tee -a "$LOG_FILE"
+elif git commit -m "Add results from GCP run $(date -Is) (smoke=$SMOKE)" >> "$LOG_FILE" 2>&1 \
+    && git pull --rebase origin main >> "$LOG_FILE" 2>&1 \
+    && git push origin main >> "$LOG_FILE" 2>&1; then
+    echo "[$(date)] Results pushed to GitHub: $(git rev-parse --short HEAD)" | tee -a "$LOG_FILE"
+else
+    git rebase --abort >> "$LOG_FILE" 2>&1 || true
+    echo "[$(date)] ERROR: committing/pushing results FAILED — results remain on the VM disk; restart the VM and push manually." | tee -a "$LOG_FILE"
+    exit 1
+fi
 
 echo "[$(date)] ===== GCP pipeline run complete =====" | tee -a "$LOG_FILE"

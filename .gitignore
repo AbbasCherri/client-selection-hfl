@@ -27,3 +27,8 @@ nohup.out
 # Data is re-fetched from the pinned HF dataset / GSI tiles — never tracked
 # (see REPORTS/data_availability.md for licensing: tiles are not redistributed)
 data/
+
+# ResNet feature caches: rebuilt automatically (and validated against the
+# dataset) by compute_feature_cache; at subsample 1.0 they exceed GitHub's
+# 100 MB file limit, so the VM's auto-commit must never stage them.
+img_features.npy
