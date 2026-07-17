@@ -420,3 +420,214 @@ epicenter_biased_N250_K10      centroid            ga       30      176.0  0.253
 2026-07-15 16:50:20,119 INFO uavbench.fl.sweep: Phase 1 complete — all caches ready.
 2026-07-15 16:50:20,119 INFO uavbench.fl.sweep: Phase 2: 3 N × 11 methods × 3 seeds = 99 jobs — 12 parallel workers
 [Parallel(n_jobs=12)]: Using backend LokyBackend with 12 concurrent workers.
+=== reproduce_paper.sh started 2026-07-16T11:49:17+00:00 (smoke=0) ===
+
+--- [2026-07-16T11:49:17+00:00] Tier-1 placement grid (configs/tier1_core.yaml) ---
+2026-07-16 11:49:22,964 INFO uavbench: Seed manifest (630 rows) at results/tier1_core/seed_manifest.csv
+2026-07-16 11:49:23,030 INFO uavbench.runner: Resuming: 630/630 jobs already checkpointed, running the remaining 0
+2026-07-16 11:49:23,030 INFO uavbench.runner: Running 630 jobs (7 methods x 3 scenarios x 30 seeds) on 8 workers
+2026-07-16 11:49:23,205 INFO uavbench.runner: Wrote runs.parquet and convergence.parquet
+2026-07-16 11:49:23,206 INFO uavbench.runner: Results dir results/tier1_core footprint: 1.19 MB
+
+=== Tier-1 headline (mean over seeds) ===
+                 scenario        method  final_fitness_mean  final_fitness_ci95  coverage_pct_mean  wall_time_s_mean
+       clustered_N250_K10   alzenad2017            0.419430            0.011563          86.333333          0.124780
+       clustered_N250_K10      centroid            0.394703            0.012773          82.653333          0.006270
+       clustered_N250_K10            ga            0.407267            0.018054          79.480000         59.787086
+       clustered_N250_K10 mozaffari2016            0.442937            0.009834          90.146667          0.020572
+       clustered_N250_K10           pso            0.442021            0.011639          88.506667         74.471447
+       clustered_N250_K10        random            0.145729            0.010758          39.573333          0.032394
+       clustered_N250_K10        static            0.082561            0.024391          12.653333          0.001448
+epicenter_biased_N250_K10   alzenad2017            0.517357            0.009752          93.706667          0.101242
+epicenter_biased_N250_K10      centroid            0.513843            0.010602          93.426667          0.007293
+epicenter_biased_N250_K10            ga            0.501386            0.011211          89.226667         57.342159
+epicenter_biased_N250_K10 mozaffari2016            0.432903            0.022710          80.306667          0.021126
+epicenter_biased_N250_K10           pso            0.542716            0.009807          96.760000         79.598375
+epicenter_biased_N250_K10        random            0.149961            0.022683          38.266667          0.031212
+epicenter_biased_N250_K10        static            0.281204            0.074751          43.946667          0.002140
+         uniform_N250_K10   alzenad2017            0.216337            0.009227          52.146667          0.149545
+         uniform_N250_K10      centroid            0.120501            0.011689          36.760000          0.006008
+         uniform_N250_K10            ga            0.237955            0.007981          47.413333         56.678602
+         uniform_N250_K10 mozaffari2016            0.275654            0.007006          58.346667          0.020232
+         uniform_N250_K10           pso            0.250524            0.007212          46.253333         50.247412
+         uniform_N250_K10        random            0.094383            0.005927          29.426667          0.033379
+         uniform_N250_K10        static            0.161514            0.010941          25.466667          0.001700
+
+=== Wall-clock summary (per method) ===
+       method       source  mean_s  std_s  total_s  n
+  alzenad2017 runs.parquet   0.125  0.023     11.3 90
+     centroid runs.parquet   0.007  0.001      0.6 90
+           ga runs.parquet  57.936 19.187   5214.2 90
+mozaffari2016 runs.parquet   0.021  0.001      1.9 90
+          pso runs.parquet  68.106 31.791   6129.5 90
+       random runs.parquet   0.032  0.002      2.9 90
+       static runs.parquet   0.002  0.000      0.2 90
+2026-07-16 11:49:36,139 INFO uavbench: Wrote figure results/tier1_core/convergence_clustered_N250_K10.png
+2026-07-16 11:49:36,139 INFO uavbench: Wrote figure results/tier1_core/convergence_epicenter_biased_N250_K10.png
+2026-07-16 11:49:36,139 INFO uavbench: Wrote figure results/tier1_core/convergence_uniform_N250_K10.png
+
+--- [2026-07-16T11:49:37+00:00] Tier-1 significance (final_fitness, paired Wilcoxon) ---
+2026-07-16 11:49:42,484 INFO uavbench: Wrote results/tier1_core/significance.csv
+
+=== Paired wilcoxon on 'final_fitness' (source: runs.parquet, Holm-corrected) ===
+                 scenario      method_a      method_b  n_pairs  statistic  p_value  mean_diff  significant        metric     test correction
+         uniform_N250_K10   alzenad2017      centroid       30        0.0  0.00000    0.09584         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10   alzenad2017        random       30        0.0  0.00000    0.36740         True final_fitness wilcoxon       holm
+       clustered_N250_K10   alzenad2017        static       30        0.0  0.00000    0.33687         True final_fitness wilcoxon       holm
+         uniform_N250_K10   alzenad2017        random       30        0.0  0.00000    0.12195         True final_fitness wilcoxon       holm
+       clustered_N250_K10   alzenad2017        random       30        0.0  0.00000    0.27370         True final_fitness wilcoxon       holm
+         uniform_N250_K10   alzenad2017 mozaffari2016       30        0.0  0.00000   -0.05932         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10   alzenad2017           pso       30        0.0  0.00000   -0.02536         True final_fitness wilcoxon       holm
+         uniform_N250_K10      centroid mozaffari2016       30        0.0  0.00000   -0.15515         True final_fitness wilcoxon       holm
+       clustered_N250_K10      centroid           pso       30        0.0  0.00000   -0.04732         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10      centroid           pso       30        0.0  0.00000   -0.02887         True final_fitness wilcoxon       holm
+         uniform_N250_K10      centroid           pso       30        0.0  0.00000   -0.13002         True final_fitness wilcoxon       holm
+       clustered_N250_K10      centroid        random       30        0.0  0.00000    0.24897         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10      centroid        random       30        0.0  0.00000    0.36388         True final_fitness wilcoxon       holm
+       clustered_N250_K10      centroid        static       30        0.0  0.00000    0.31214         True final_fitness wilcoxon       holm
+         uniform_N250_K10      centroid            ga       30        0.0  0.00000   -0.11745         True final_fitness wilcoxon       holm
+         uniform_N250_K10        random        static       30        0.0  0.00000   -0.06713         True final_fitness wilcoxon       holm
+       clustered_N250_K10 mozaffari2016        random       30        0.0  0.00000    0.29721         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10 mozaffari2016        random       30        0.0  0.00000    0.28294         True final_fitness wilcoxon       holm
+         uniform_N250_K10 mozaffari2016        random       30        0.0  0.00000    0.18127         True final_fitness wilcoxon       holm
+       clustered_N250_K10 mozaffari2016        static       30        0.0  0.00000    0.36038         True final_fitness wilcoxon       holm
+         uniform_N250_K10 mozaffari2016        static       30        0.0  0.00000    0.11414         True final_fitness wilcoxon       holm
+       clustered_N250_K10           pso        random       30        0.0  0.00000    0.29629         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10           pso        random       30        0.0  0.00000    0.39276         True final_fitness wilcoxon       holm
+         uniform_N250_K10           pso        random       30        0.0  0.00000    0.15614         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10            ga        random       30        0.0  0.00000    0.35143         True final_fitness wilcoxon       holm
+         uniform_N250_K10            ga        random       30        0.0  0.00000    0.14357         True final_fitness wilcoxon       holm
+       clustered_N250_K10            ga        static       30        0.0  0.00000    0.32471         True final_fitness wilcoxon       holm
+         uniform_N250_K10            ga        static       30        0.0  0.00000    0.07644         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10 mozaffari2016           pso       30        0.0  0.00000   -0.10981         True final_fitness wilcoxon       holm
+       clustered_N250_K10            ga        random       30        0.0  0.00000    0.26154         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10            ga           pso       30        0.0  0.00000   -0.04133         True final_fitness wilcoxon       holm
+         uniform_N250_K10            ga mozaffari2016       30        0.0  0.00000   -0.03770         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10           pso        static       30        0.0  0.00000    0.26151         True final_fitness wilcoxon       holm
+       clustered_N250_K10           pso        static       30        0.0  0.00000    0.35946         True final_fitness wilcoxon       holm
+         uniform_N250_K10           pso        static       30        0.0  0.00000    0.08901         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10            ga mozaffari2016       30        4.0  0.00000    0.06848         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10   alzenad2017 mozaffari2016       30        6.0  0.00000    0.08445         True final_fitness wilcoxon       holm
+         uniform_N250_K10   alzenad2017           pso       30        6.0  0.00000   -0.03419         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10   alzenad2017        static       30        8.0  0.00000    0.23615         True final_fitness wilcoxon       holm
+         uniform_N250_K10 mozaffari2016           pso       30        9.0  0.00000    0.02513         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10      centroid        static       30        9.0  0.00000    0.23264         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10      centroid mozaffari2016       30       12.0  0.00000    0.08094         True final_fitness wilcoxon       holm
+         uniform_N250_K10   alzenad2017        static       30       18.0  0.00000    0.05482         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10            ga        static       30       31.0  0.00000    0.22018         True final_fitness wilcoxon       holm
+       clustered_N250_K10      centroid mozaffari2016       30       34.0  0.00001   -0.04823         True final_fitness wilcoxon       holm
+       clustered_N250_K10            ga           pso       30       43.0  0.00002   -0.03475         True final_fitness wilcoxon       holm
+         uniform_N250_K10            ga           pso       30       44.0  0.00003   -0.01257         True final_fitness wilcoxon       holm
+       clustered_N250_K10        random        static       30       46.0  0.00003    0.06317         True final_fitness wilcoxon       holm
+         uniform_N250_K10      centroid        static       30       46.0  0.00003   -0.04101         True final_fitness wilcoxon       holm
+       clustered_N250_K10   alzenad2017      centroid       30       50.0  0.00006    0.02473         True final_fitness wilcoxon       holm
+       clustered_N250_K10   alzenad2017           pso       30       56.0  0.00011   -0.02259         True final_fitness wilcoxon       holm
+       clustered_N250_K10            ga mozaffari2016       30       66.0  0.00031   -0.03567         True final_fitness wilcoxon       holm
+         uniform_N250_K10      centroid        random       30       70.0  0.00046    0.02612         True final_fitness wilcoxon       holm
+       clustered_N250_K10   alzenad2017 mozaffari2016       30       71.0  0.00051   -0.02351         True final_fitness wilcoxon       holm
+         uniform_N250_K10   alzenad2017            ga       30       80.0  0.00113   -0.02162         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10        random        static       30       87.0  0.00202   -0.13124         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10 mozaffari2016        static       30       91.0  0.00277    0.15170         True final_fitness wilcoxon       holm
+epicenter_biased_N250_K10   alzenad2017            ga       30      108.0  0.00930    0.01597        False final_fitness wilcoxon       holm
+       clustered_N250_K10   alzenad2017            ga       30      152.0  0.10040    0.01216        False final_fitness wilcoxon       holm
+       clustered_N250_K10      centroid            ga       30      157.0  0.12413   -0.01256        False final_fitness wilcoxon       holm
+epicenter_biased_N250_K10   alzenad2017      centroid       30      174.0  0.23665    0.00351        False final_fitness wilcoxon       holm
+epicenter_biased_N250_K10      centroid            ga       30      176.0  0.25344    0.01246        False final_fitness wilcoxon       holm
+       clustered_N250_K10 mozaffari2016           pso       30      187.0  0.35988    0.00092        False final_fitness wilcoxon       holm
+
+--- [2026-07-16T11:49:43+00:00] Full paper simulation (configs/paper_full.yaml) ---
+2026-07-16 11:49:48,334 INFO uavbench: Seed manifest (99 rows) at results/paper_full/seed_manifest.csv
+2026-07-16 11:49:48,334 INFO uavbench.fl.sweep: Phase 1: pre-fetching data for 3 N-values (sequential)…
+2026-07-16 11:49:48,387 INFO uavbench.fl.sweep: [prefetch] N=30 — loading dataset (first call streams HF, subsequent calls hit disk cache) …
+2026-07-16 11:49:48,387 INFO hflsim.data.loader: No local CSV found – streaming from HuggingFace.
+2026-07-16 11:49:48,387 INFO hflsim.data.loader: Loading cached metadata DataFrame from ./data/.metadata_df_cache_sub10000_seed42.parquet
+2026-07-16 11:49:48,538 INFO hflsim.data.loader: Loaded cached partitions from ./data/.partition_cache/partitions_44df5fd098798b3d.pkl
+2026-07-16 11:49:48,555 INFO hflsim.data.loader: Data partitioning complete. Total samples: 128843, clients: 30.
+2026-07-16 11:49:48,557 INFO uavbench.fl.features: Loading cached ResNet-18 features from results/paper_full/N30/img_features.npy
+2026-07-16 11:49:49,777 INFO uavbench.fl.sweep: [prefetch] N=30 — done.
+2026-07-16 11:49:49,778 INFO uavbench.fl.sweep: [prefetch] N=50 — loading dataset (first call streams HF, subsequent calls hit disk cache) …
+2026-07-16 11:49:49,778 INFO hflsim.data.loader: No local CSV found – streaming from HuggingFace.
+2026-07-16 11:49:49,778 INFO hflsim.data.loader: Loading cached metadata DataFrame from ./data/.metadata_df_cache_sub10000_seed42.parquet
+2026-07-16 11:49:49,955 INFO hflsim.data.loader: Loaded cached partitions from ./data/.partition_cache/partitions_31a05d39240b5bc9.pkl
+2026-07-16 11:49:49,967 INFO hflsim.data.loader: Data partitioning complete. Total samples: 128843, clients: 50.
+2026-07-16 11:49:49,969 INFO uavbench.fl.features: Loading cached ResNet-18 features from results/paper_full/N50/img_features.npy
+2026-07-16 11:49:50,545 INFO uavbench.fl.sweep: [prefetch] N=50 — done.
+2026-07-16 11:49:50,545 INFO uavbench.fl.sweep: [prefetch] N=100 — loading dataset (first call streams HF, subsequent calls hit disk cache) …
+2026-07-16 11:49:50,545 INFO hflsim.data.loader: No local CSV found – streaming from HuggingFace.
+2026-07-16 11:49:50,545 INFO hflsim.data.loader: Loading cached metadata DataFrame from ./data/.metadata_df_cache_sub10000_seed42.parquet
+2026-07-16 11:49:50,642 INFO hflsim.data.loader: Loaded cached partitions from ./data/.partition_cache/partitions_83077531f156795e.pkl
+2026-07-16 11:49:50,648 INFO hflsim.data.loader: Data partitioning complete. Total samples: 128843, clients: 100.
+2026-07-16 11:49:50,650 INFO uavbench.fl.features: Loading cached ResNet-18 features from results/paper_full/N100/img_features.npy
+2026-07-16 11:49:50,699 INFO uavbench.fl.sweep: [prefetch] N=100 — done.
+2026-07-16 11:49:50,699 INFO uavbench.fl.sweep: Phase 1 complete — all caches ready.
+2026-07-16 11:49:50,700 INFO uavbench.fl.sweep: Phase 2: 3 N × 11 methods × 3 seeds = 99 jobs — 12 parallel workers
+[Parallel(n_jobs=12)]: Using backend LokyBackend with 12 concurrent workers.
+[Parallel(n_jobs=12)]: Done  48 tasks      | elapsed: 153.9min
+joblib.externals.loky.process_executor._RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/joblib/externals/loky/process_executor.py", line 490, in _process_worker
+    r = call_item()
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/joblib/externals/loky/process_executor.py", line 291, in __call__
+    return self.fn(*self.args, **self.kwargs)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/joblib/parallel.py", line 607, in __call__
+    return [func(*args, **kwargs) for func, args, kwargs in self.items]
+            ~~~~^^^^^^^^^^^^^^^^^
+  File "/home/abbasbcherri/client-selection-hfl/src/uavbench/fl/sweep.py", line 249, in _paper_job
+    out = run_full_hfl(job_cfg)
+  File "/home/abbasbcherri/client-selection-hfl/src/uavbench/fl/federated.py", line 1014, in run_full_hfl
+    sd, n = _uav_local_train(global_model, uav_loader, n_uav_epochs, uav_lr)
+            ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/abbasbcherri/client-selection-hfl/src/uavbench/fl/federated.py", line 265, in _uav_local_train
+    for img_feat, struct, labels in loader:
+                                    ^^^^^^
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/torch/utils/data/dataloader.py", line 718, in __next__
+    data = self._next_data()
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/torch/utils/data/dataloader.py", line 778, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/torch/utils/data/_utils/fetch.py", line 52, in fetch
+    data = self.dataset.__getitems__(possibly_batched_index)
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/torch/utils/data/dataset.py", line 443, in __getitems__
+    return [self.dataset[self.indices[idx]] for idx in indices]
+            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/home/abbasbcherri/client-selection-hfl/src/uavbench/fl/dataset.py", line 60, in __getitem__
+    return self.img_features[idx], self.base.features[idx], self.base.labels[idx]
+           ~~~~~~~~~~~~~~~~~^^^^^
+IndexError: index 89114 is out of bounds for dimension 0 with size 12884
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/abbasbcherri/client-selection-hfl/src/uavbench/__main__.py", line 6, in <module>
+    main()
+    ~~~~^^
+  File "/home/abbasbcherri/client-selection-hfl/src/uavbench/cli.py", line 434, in main
+    args.func(args)
+    ~~~~~~~~~^^^^^^
+  File "/home/abbasbcherri/client-selection-hfl/src/uavbench/cli.py", line 252, in cmd_run_paper_sim
+    out = run_paper_sweep(cfg)
+  File "/home/abbasbcherri/client-selection-hfl/src/uavbench/fl/sweep.py", line 299, in run_paper_sweep
+    dfs = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
+        delayed(_paper_job)(N, method, seed_idx, cfg) for N, method, seed_idx in jobs
+    )
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/joblib/parallel.py", line 2072, in __call__
+    return output if self.return_generator else list(output)
+                                                ~~~~^^^^^^^^
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/joblib/parallel.py", line 1682, in _get_outputs
+    yield from self._retrieve()
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/joblib/parallel.py", line 1784, in _retrieve
+    self._raise_error_fast()
+    ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/joblib/parallel.py", line 1859, in _raise_error_fast
+    error_job.get_result(self.timeout)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/joblib/parallel.py", line 758, in get_result
+    return self._return_or_raise()
+           ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/abbasbcherri/client-selection-hfl/.venv/lib/python3.14/site-packages/joblib/parallel.py", line 773, in _return_or_raise
+    raise self._result
+IndexError: index 89114 is out of bounds for dimension 0 with size 12884
