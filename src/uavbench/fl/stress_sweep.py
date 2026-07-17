@@ -163,7 +163,7 @@ def _prefetch(cfg: dict) -> None:
         full_dataset,
         cache_path=str(cache_path),
         batch_size=data_cfg.get("feature_batch_size", 32),
-        num_workers=0,
+        num_workers=data_cfg.get("feature_num_workers", 0),
     )
     data_cfg["feature_cache_path"] = str(cache_path)
     logger.info("[prefetch] done.")

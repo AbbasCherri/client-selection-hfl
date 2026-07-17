@@ -65,9 +65,21 @@ def compute_feature_cache(
         ``(N, 512)`` float32 feature array ready to index by sample position.
     """
     if os.path.exists(cache_path) and not force:
-        logger.info("Loading cached ResNet-18 features from %s", cache_path)
         arr = np.load(cache_path)
-        return arr.astype(np.float32)
+        # A cache row-count that disagrees with the dataset means the file was
+        # built for a different data configuration (e.g. data.subsample changed
+        # after the cache was written). Loading it anyway produces an
+        # out-of-bounds index deep inside a training epoch — recompute instead.
+        if arr.ndim == 2 and arr.shape == (len(dataset), FEAT_DIM):
+            logger.info("Loading cached ResNet-18 features from %s", cache_path)
+            return arr.astype(np.float32)
+        logger.warning(
+            "Stale feature cache %s: shape %s != expected (%d, %d) — recomputing.",
+            cache_path,
+            arr.shape,
+            len(dataset),
+            FEAT_DIM,
+        )
 
     logger.info("Computing ResNet-18 features for %d samples (one-time pass, CPU)…", len(dataset))
     backbone = _frozen_resnet18()
@@ -80,7 +92,7 @@ def compute_feature_cache(
     )
 
     chunks: list[np.ndarray] = []
-    with torch.no_grad():
+    with torch.inference_mode():
         for imgs, _, _ in loader:
             imgs = (imgs - _IMG_MEAN) / _IMG_STD
             feats = backbone(imgs)  # (B, 512)

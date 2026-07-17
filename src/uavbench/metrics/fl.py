@@ -23,6 +23,14 @@ from torch.utils.data import DataLoader, Subset
 # Damage classes in label order 0-3 (shared by confusion reporting/plots).
 CLASS_NAMES = ["survived", "collapsed", "obstructed", "missing"]
 
+# rounds_to_target: a single-round accuracy crossing can be a transient — on
+# the imbalanced test set, near-majority-class predictions in the first rounds
+# reach ~0.70 before the model has learned the minority classes (observed in
+# the 2026-07-16 run: rounds_to_target=1 with final accuracy far below the
+# target). Every harness therefore counts the target as reached only when the
+# accuracy holds for this many consecutive evaluations.
+TARGET_CONSEC_ROUNDS = 2
+
 # Communication payload sizes (float32 parameter counts x 4 bytes):
 # IoT payload:  struct_branch (17,216) + fusion (50,436)         = 67,652 params ~ 0.271 MB
 # UAV payload:  img_proj (65,664) + struct_branch + fusion       = 133,316 params ~ 0.533 MB
@@ -44,18 +52,8 @@ def round_comm_mb(n_selected: int, n_active_uavs: int | None = None) -> float:
     return mb
 
 
-def evaluate_loader(model, loader: DataLoader) -> dict:
-    """Accuracy, macro-F1, per-class F1, and confusion matrix on a test loader."""
-    model.eval()
-    all_preds, all_labels = [], []
-    with torch.no_grad():
-        for img_feat, struct, labels in loader:
-            preds = model(img_feat, struct).argmax(dim=1)
-            all_preds.append(preds.numpy())
-            all_labels.append(labels.numpy())
-
-    preds = np.concatenate(all_preds)
-    labels = np.concatenate(all_labels)
+def _classification_metrics(labels: np.ndarray, preds: np.ndarray) -> dict:
+    """Accuracy, macro-F1, per-class F1, confusion matrix from label/pred arrays."""
     acc = float((preds == labels).mean())
     macro_f1 = float(f1_score(labels, preds, average="macro", zero_division=0, labels=[0, 1, 2, 3]))
     per_class = f1_score(labels, preds, average=None, zero_division=0, labels=[0, 1, 2, 3])
@@ -67,8 +65,28 @@ def evaluate_loader(model, loader: DataLoader) -> dict:
     }
 
 
-def evaluate_subset(model, dataset, indices: list[int], batch_size: int = 64) -> dict:
-    """:func:`evaluate_loader` on ``dataset[indices]``; zero metrics if empty."""
+def evaluate_loader(model, loader: DataLoader) -> dict:
+    """Accuracy, macro-F1, per-class F1, and confusion matrix on a test loader."""
+    model.eval()
+    all_preds, all_labels = [], []
+    with torch.inference_mode():
+        for img_feat, struct, labels in loader:
+            preds = model(img_feat, struct).argmax(dim=1)
+            all_preds.append(preds.numpy())
+            all_labels.append(labels.numpy())
+
+    return _classification_metrics(np.concatenate(all_labels), np.concatenate(all_preds))
+
+
+def evaluate_subset(model, dataset, indices: list[int], batch_size: int = 512) -> dict:
+    """Sequential, unweighted evaluation on ``dataset[indices]``; zero metrics if empty.
+
+    Datasets exposing ``eval_tensors()`` (CachedDataset) are evaluated by
+    slicing the in-memory tensors directly — order-preserving and unshuffled,
+    exactly like the DataLoader fallback (shuffle=False), but without the
+    per-item ``__getitem__`` + collate overhead. This runs every round, so it
+    is the hottest evaluation path in every FL harness.
+    """
     if not indices:
         return {
             "accuracy": 0.0,
@@ -76,6 +94,19 @@ def evaluate_subset(model, dataset, indices: list[int], batch_size: int = 64) ->
             "f1_per_class": {},
             "confusion_matrix": np.zeros((4, 4), dtype=int),
         }
+
+    eval_tensors = getattr(dataset, "eval_tensors", None)
+    if eval_tensors is not None:
+        img, struct, labels = eval_tensors()
+        idx = torch.as_tensor(indices, dtype=torch.long)
+        model.eval()
+        pred_chunks = []
+        with torch.inference_mode():
+            for b in idx.split(batch_size):
+                pred_chunks.append(model(img[b], struct[b]).argmax(dim=1))
+        preds = torch.cat(pred_chunks).numpy()
+        return _classification_metrics(labels[idx].numpy(), preds)
+
     loader = DataLoader(Subset(dataset, indices), batch_size=batch_size, shuffle=False)
     return evaluate_loader(model, loader)
 

@@ -19,7 +19,7 @@ conditions where the selection rule is the *only* experimental variable:
 Efficiency (logic-identical optimizations only)
 -----------------------------------------------
 - Placement + coverage computed once per run (static ground sensors + UAVs).
-- Per-client DataLoaders built once (shard indices never change); UAV pooled
+- Per-client shard loaders built once (shard indices never change); UAV pooled
   loaders rebuilt only when the roster changes (every T_sel rounds).
 - Test loader built once; evaluation reuses it every round.
 - ``run_selection_sweep`` parallelises the (N × mode × seed) grid with joblib;
@@ -44,14 +44,16 @@ import pandas as pd
 import torch
 from joblib import Parallel, delayed
 from sklearn.cluster import KMeans
-from torch.utils.data import DataLoader, Subset
 
 from hflsim.shared.coords import latlon_to_meters
 from uavbench.metrics.fl import (
     confusion_rows as _confusion_rows,
 )
 from uavbench.metrics.fl import (
-    evaluate_loader as _evaluate_loader,
+    TARGET_CONSEC_ROUNDS as _TARGET_CONSEC_ROUNDS,
+)
+from uavbench.metrics.fl import (
+    evaluate_subset as _evaluate_subset,
 )
 from uavbench.metrics.fl import (
     jain_index,
@@ -60,7 +62,7 @@ from uavbench.metrics.fl import (
 
 from ..reporting.tables import read_table
 from .client_selection import ClientSelector
-from .dataset import CachedDataset, ClientData, make_client_loader
+from .dataset import BalancedShardLoader, CachedDataset, ClientData, make_client_loader
 from .device_state import DeviceStateManager
 from .federated import (
     _covered_clients,
@@ -230,12 +232,7 @@ def run_selection_isolation(cfg: dict) -> dict:
     )
 
     # ── 3. Loaders built once (shard indices never change) ─────────────────
-    test_loader = (
-        DataLoader(Subset(cached_dataset, global_test_indices), batch_size=64, shuffle=False)
-        if global_test_indices
-        else None
-    )
-    client_loaders: dict[int, DataLoader] = {
+    client_loaders: dict[int, BalancedShardLoader] = {
         c.client_id: make_client_loader(cached_dataset, c.train_indices, batch_size)
         for c in clients
     }
@@ -264,9 +261,10 @@ def run_selection_isolation(cfg: dict) -> dict:
         selector = ClientSelector(client_ids, epicentre=epicentre)
 
         selected: dict[int, int] = {}
-        uav_loaders: dict[int, DataLoader] = {}
+        uav_loaders: dict[int, BalancedShardLoader] = {}
         sel_counts = {cid: 0 for cid in client_ids}
         rounds_to_target: int | None = None
+        target_streak = 0
         method_start_idx = len(all_rows)
 
         for rnd in range(1, n_rounds + 1):
@@ -392,19 +390,17 @@ def run_selection_isolation(cfg: dict) -> dict:
                 sel_counts[cid] += 1
 
             # ── Evaluate ─────────────────────────────────────────────────
-            if test_loader is not None:
-                metrics = _evaluate_loader(global_model, test_loader)
-            else:
-                metrics = {
-                    "accuracy": 0.0,
-                    "macro_f1": 0.0,
-                    "f1_per_class": {},
-                    "confusion_matrix": np.zeros((4, 4), dtype=int),
-                }
+            # evaluate_subset handles empty test indices (zero metrics) and
+            # takes the tensor-sliced fast path on CachedDataset.
+            metrics = _evaluate_subset(global_model, cached_dataset, global_test_indices)
             elapsed = time.perf_counter() - t0
 
-            if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
-                rounds_to_target = rnd
+            if metrics["accuracy"] >= target_accuracy:
+                target_streak += 1
+                if rounds_to_target is None and target_streak >= _TARGET_CONSEC_ROUNDS:
+                    rounds_to_target = rnd - _TARGET_CONSEC_ROUNDS + 1
+            else:
+                target_streak = 0
 
             counts_arr = np.fromiter(sel_counts.values(), dtype=np.float64)
             comm_mb = round_comm_mb(n_selected, n_active_uavs=len(uav_img_updates))

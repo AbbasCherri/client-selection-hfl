@@ -1,4 +1,4 @@
-"""Dataset adapters for Tier-2: cached-feature dataset and synthetic fallback.
+"""Dataset adapters for Tier-2: cached-feature dataset and shard loaders.
 
 The ``CachedDataset`` wraps a ``MultiModalDataset`` and replaces the image
 tensor with a row from the precomputed ResNet-18 feature cache, so the FL
@@ -17,12 +17,15 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset, Subset, WeightedRandomSampler
+from torch.utils.data import Dataset
 
 logger = logging.getLogger("uavbench.fl.dataset")
 
 # Expected number of structured features (must match hflsim FEATURE_COLS).
 STRUCT_DIM = 9
+
+# Damage classes 0-3 (see uavbench.metrics.fl.CLASS_NAMES).
+N_CLASSES = 4
 
 
 @dataclass
@@ -47,8 +50,23 @@ class CachedDataset(Dataset):
     """
 
     def __init__(self, base_dataset: Dataset, img_features: np.ndarray) -> None:
+        if len(img_features) != len(base_dataset):  # type: ignore[arg-type]
+            # A mismatched feature cache indexes out of bounds mid-epoch (hours
+            # into a sweep). Refuse it here, at construction, with the cause.
+            raise ValueError(
+                f"img_features has {len(img_features)} rows but the dataset has "
+                f"{len(base_dataset)} samples. The feature cache was built for a "  # type: ignore[arg-type]
+                "different data configuration (e.g. data.subsample changed) — "
+                "delete the stale img_features.npy or let compute_feature_cache "
+                "rebuild it."
+            )
         self.base = base_dataset
         self.img_features = torch.from_numpy(img_features.astype(np.float32))
+        # In-memory views used for tensor-sliced batching (both the real
+        # MultiModalDataset and the prebuilt test fixture store these as
+        # torch tensors).
+        self.struct_features: torch.Tensor = self.base.features  # type: ignore[attr-defined]
+        self.labels: torch.Tensor = self.base.labels  # type: ignore[attr-defined]
 
     def __len__(self) -> int:
         return len(self.base)  # type: ignore[arg-type]
@@ -57,19 +75,52 @@ class CachedDataset(Dataset):
         # Never call base.__getitem__ here: it decodes the raw image chip from
         # disk, which this wrapper immediately discards. Struct features and
         # labels are already in-memory tensors on the base dataset.
-        return self.img_features[idx], self.base.features[idx], self.base.labels[idx]
+        return self.img_features[idx], self.struct_features[idx], self.labels[idx]
+
+    def eval_tensors(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """The full (img_features, struct_features, labels) tensors for
+        vectorized evaluation (see metrics.fl.evaluate_subset fast path)."""
+        return self.img_features, self.struct_features, self.labels
+
+
+class BalancedShardLoader:
+    """Class-balanced batch iterator over one client/UAV shard.
+
+    Sampling semantics match the DataLoader + WeightedRandomSampler it
+    replaces: each epoch draws ``len(indices)`` samples with replacement,
+    weighted by inverse class frequency within the shard, from the global
+    torch RNG (deterministic under ``torch.manual_seed``). Batches are built
+    by slicing the in-memory feature tensors instead of per-item
+    ``__getitem__`` + collate, which dominated training wall-time.
+    """
+
+    def __init__(self, dataset: CachedDataset, indices: list[int], batch_size: int) -> None:
+        if not indices:
+            raise ValueError("BalancedShardLoader needs a non-empty shard")
+        self.indices = torch.as_tensor(indices, dtype=torch.long)
+        shard_labels = dataset.labels[self.indices].to(torch.long)
+        counts = torch.bincount(shard_labels, minlength=N_CLASSES).to(torch.float64)
+        self.weights = 1.0 / (counts[shard_labels] + 1e-6)
+        self.batch_size = min(batch_size, len(indices))
+        self._img = dataset.img_features
+        self._struct = dataset.struct_features
+        self._labels = dataset.labels
+
+    def __len__(self) -> int:
+        return (len(self.indices) + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self):
+        order = torch.multinomial(self.weights, len(self.indices), replacement=True)
+        sel = self.indices[order]
+        for start in range(0, len(sel), self.batch_size):
+            b = sel[start : start + self.batch_size]
+            yield self._img[b], self._struct[b], self._labels[b]
 
 
 def make_client_loader(
     dataset: CachedDataset,
     indices: list[int],
     batch_size: int = 16,
-) -> DataLoader:
-    """DataLoader for one client's shard with value-balanced sampling."""
-    subset = Subset(dataset, indices)
-    labels = [int(dataset.base.labels[i].item()) for i in indices]  # type: ignore[attr-defined]
-    n_classes = 4
-    counts = np.bincount(labels, minlength=n_classes).astype(float)
-    weights = [1.0 / (counts[l] + 1e-6) for l in labels]
-    sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
-    return DataLoader(subset, batch_size=min(batch_size, len(indices)), sampler=sampler)
+) -> BalancedShardLoader:
+    """Loader for one client's shard with value-balanced sampling."""
+    return BalancedShardLoader(dataset, indices, batch_size)

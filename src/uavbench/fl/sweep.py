@@ -21,15 +21,73 @@ from __future__ import annotations
 import copy
 import logging
 import os
+import traceback
 from pathlib import Path
 
 import pandas as pd
+import yaml
 from joblib import Parallel, delayed
 
 from ..reporting.tables import read_table, write_table
 from .federated import _dump_resolved_cfg
 
 logger = logging.getLogger("uavbench.fl.sweep")
+
+# Bump whenever a code change alters RNG draw order or numerics (e.g. the
+# 2026-07-17 tensor-sliced shard loader): checkpoints written by an older
+# version are no longer reproducible under the current code, so the resume
+# gate refuses them and the affected jobs rerun.
+PIPELINE_VERSION = 2
+
+# Checkpoint-resume config comparison: sections that define what a job
+# computes. Keys in _RESUME_VOLATILE_DATA_KEYS are locations/credentials, not
+# semantics (the feature cache is separately validated against the dataset by
+# compute_feature_cache/CachedDataset).
+_RESUME_SIG_KEYS = ("data", "fl", "budget", "methods", "optimizer_params", "epicentre")
+_RESUME_VOLATILE_DATA_KEYS = ("hf_token", "prebuilt", "feature_cache_path")
+
+
+def _resume_signature(cfg: dict) -> dict:
+    """The job-defining subset of a config, normalized through YAML.
+
+    The YAML round-trip maps tuples/np scalars to the plain types a reloaded
+    checkpoint config carries, so stored and freshly-built signatures compare
+    equal iff the job would compute the same thing.
+    """
+    sig: dict = {"_pipeline_version": cfg.get("_pipeline_version")}
+    for key in _RESUME_SIG_KEYS:
+        val = copy.deepcopy(cfg.get(key))
+        if key == "data" and isinstance(val, dict):
+            for vk in _RESUME_VOLATILE_DATA_KEYS:
+                val.pop(vk, None)
+        sig[key] = val
+    return yaml.safe_load(yaml.safe_dump(sig))
+
+
+def _stale_checkpoint_reason(ckpt_path: Path, job_cfg: dict) -> str | None:
+    """None if the checkpoint at ``ckpt_path`` matches ``job_cfg``; else why not.
+
+    Guards the resume gate: a resolved-config file left behind by an earlier
+    run with different settings (or an older pipeline version) must not be
+    silently reused as this job's result — that is how the 2026-07-14 smoke
+    leftovers ended up standing in for full paper runs.
+    """
+    try:
+        with open(ckpt_path) as f:
+            stored = yaml.safe_load(f)
+    except Exception as exc:  # unreadable/corrupt checkpoint → rerun
+        return f"unreadable checkpoint config ({exc})"
+    if not isinstance(stored, dict):
+        return "checkpoint config is not a mapping"
+
+    stored_sig = _resume_signature(stored)
+    current_sig = _resume_signature(job_cfg)
+    if stored_sig == current_sig:
+        return None
+    for key, cur in current_sig.items():
+        if stored_sig.get(key) != cur:
+            return f"config mismatch in {key!r} (stored {stored_sig.get(key)!r} != current {cur!r})"
+    return "config mismatch"
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +134,7 @@ def _prefetch_all_N(cfg: dict) -> None:
             full_dataset,
             cache_path=cache_path,
             batch_size=data_cfg.get("feature_batch_size", 32),
-            num_workers=0,
+            num_workers=data_cfg.get("feature_num_workers", 0),
         )
         logger.info("[prefetch] N=%d — done.", N)
 
@@ -101,14 +159,25 @@ def _job(N: int, method: str, cfg: dict) -> pd.DataFrame:
     job_cfg = copy.deepcopy(cfg)
     job_cfg["data"]["N_clients"] = N
     job_cfg["methods"] = [method]
+    job_cfg["_pipeline_version"] = PIPELINE_VERSION
     job_results_dir = Path(cfg["results_dir"]) / f"N{N}" / method
     job_cfg["results_dir"] = str(job_results_dir)
 
-    if (job_results_dir / "config.tier2.resolved.yaml").exists():
-        logger.info("[N=%d  method=%-10s] checkpoint found — skipping (resume)", N, method)
-        df = read_table(job_results_dir / "tier2_rounds.parquet")
-        df.insert(0, "N", N)
-        return df
+    ckpt = job_results_dir / "config.tier2.resolved.yaml"
+    if ckpt.exists():
+        stale = _stale_checkpoint_reason(ckpt, job_cfg)
+        if stale is None:
+            logger.info("[N=%d  method=%-10s] checkpoint found — skipping (resume)", N, method)
+            df = read_table(job_results_dir / "tier2_rounds.parquet")
+            df.insert(0, "N", N)
+            return df
+        logger.warning(
+            "[N=%d  method=%-10s] STALE checkpoint at %s — rerunning (%s)",
+            N,
+            method,
+            job_results_dir,
+            stale,
+        )
 
     # Point to the shared N-level feature cache (one dir above) produced by
     # _prefetch_all_N so parallel method workers don't each re-run the full
@@ -138,6 +207,42 @@ def _job(N: int, method: str, cfg: dict) -> pd.DataFrame:
         final_f1,
     )
     return df
+
+
+# ---------------------------------------------------------------------------
+# Job failure isolation
+# ---------------------------------------------------------------------------
+
+
+def _isolated(job_fn, tag: str, *args) -> tuple[str, pd.DataFrame | None, str | None]:
+    """Run one sweep job, converting any exception into a returned record.
+
+    joblib's default fail-fast aborts the whole sweep on the first job error,
+    discarding hours of sibling-job compute (the 2026-07-16 run lost ~2.5 h to
+    one stale-cache IndexError). Instead every job runs to completion or
+    failure; the caller collects the failures and raises once, after the
+    surviving jobs have written their checkpoints.
+    """
+    try:
+        return tag, job_fn(*args), None
+    except Exception:
+        logger.exception("[%s] job FAILED", tag)
+        return tag, None, traceback.format_exc()
+
+
+def _collect_or_raise(results: list[tuple[str, pd.DataFrame | None, str | None]]) -> pd.DataFrame:
+    """Concatenate successful job frames; raise (loudly, with every traceback) if any failed."""
+    failures = [(tag, err) for tag, _, err in results if err is not None]
+    if failures:
+        for tag, err in failures:
+            logger.error("Job %s failed:\n%s", tag, err)
+        raise RuntimeError(
+            f"{len(failures)}/{len(results)} sweep jobs failed: "
+            f"{', '.join(tag for tag, _ in failures)}. Completed jobs are "
+            "checkpointed in their per-job directories — fix the cause and "
+            "rerun to resume. Full tracebacks are in the log above."
+        )
+    return pd.concat([df for _, df, _ in results], ignore_index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -176,11 +281,11 @@ def run_sweep(cfg: dict) -> dict:
         n_workers,
     )
 
-    dfs = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
-        delayed(_job)(N, method, cfg) for N, method in jobs
+    results = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
+        delayed(_isolated)(_job, f"N{N}/{method}", N, method, cfg) for N, method in jobs
     )
 
-    full_df = pd.concat(dfs, ignore_index=True)
+    full_df = _collect_or_raise(results)
 
     write_table(full_df, results_dir / "sweep_rounds.parquet")
 
@@ -214,6 +319,7 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # the per-method RNG draw in a way that is no longer reproducible from
     # this function's inputs alone.
     job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
+    job_cfg["_pipeline_version"] = PIPELINE_VERSION
     # Each (N, method, seed) gets its own sub-directory so parallel workers
     # never write to the same fullsim_rounds.parquet simultaneously.  Without
     # the method segment, all 6 methods for a given (N, seed) share one dir
@@ -222,14 +328,28 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     job_results_dir = Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / method
     job_cfg["results_dir"] = str(job_results_dir)
 
-    if (job_results_dir / "config.fullsim.resolved.yaml").exists():
-        logger.info(
-            "[N=%d  method=%-20s  seed=%d] checkpoint found — skipping (resume)", N, method, seed_idx
+    ckpt = job_results_dir / "config.fullsim.resolved.yaml"
+    if ckpt.exists():
+        stale = _stale_checkpoint_reason(ckpt, job_cfg)
+        if stale is None:
+            logger.info(
+                "[N=%d  method=%-20s  seed=%d] checkpoint found — skipping (resume)",
+                N,
+                method,
+                seed_idx,
+            )
+            df = read_table(job_results_dir / "fullsim_rounds.parquet")
+            df.insert(0, "seed", seed_idx)
+            df.insert(0, "N", N)
+            return df
+        logger.warning(
+            "[N=%d  method=%-20s  seed=%d] STALE checkpoint at %s — rerunning (%s)",
+            N,
+            method,
+            seed_idx,
+            job_results_dir,
+            stale,
         )
-        df = read_table(job_results_dir / "fullsim_rounds.parquet")
-        df.insert(0, "seed", seed_idx)
-        df.insert(0, "N", N)
-        return df
 
     # Point to the shared N-level feature cache (one dir above) produced by
     # _prefetch_all_N so parallel method/seed workers don't each re-run the
@@ -296,11 +416,12 @@ def run_paper_sweep(cfg: dict) -> dict:
         n_workers,
     )
 
-    dfs = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
-        delayed(_paper_job)(N, method, seed_idx, cfg) for N, method, seed_idx in jobs
+    results = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
+        delayed(_isolated)(_paper_job, f"N{N}/seed{seed_idx}/{method}", N, method, seed_idx, cfg)
+        for N, method, seed_idx in jobs
     )
 
-    full_df = pd.concat(dfs, ignore_index=True)
+    full_df = _collect_or_raise(results)
 
     write_table(full_df, results_dir / "paper_sweep_rounds.parquet")
 

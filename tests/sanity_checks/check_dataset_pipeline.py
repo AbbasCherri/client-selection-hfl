@@ -12,7 +12,6 @@ import torch
 from _fixture import SyntheticTorchDataset, build_synthetic_raw
 from _lib import check, finish
 from PIL import Image
-from torch.utils.data import WeightedRandomSampler
 
 from hflsim.data.loader import FEATURE_COLS, MultiModalDataset, _remap_damage_labels
 from uavbench.fl.dataset import CachedDataset, make_client_loader
@@ -53,23 +52,96 @@ def cached_dataset_passthrough():
 
 
 def train_loader_balanced_eval_loader_not():
-    # Inverse-frequency WeightedRandomSampler on the *training* loader only;
+    # Inverse-class-frequency sampling on the *training* loader only;
     # evaluation must see the true imbalanced distribution or macro-F1 lies.
     raw = build_synthetic_raw(N=60, K=3, seed=1)
     ds = CachedDataset(raw["full_dataset"], raw["img_features"])
-    loader = make_client_loader(ds, list(range(30)), batch_size=8)
-    assert isinstance(loader.sampler, WeightedRandomSampler)
+    indices = list(range(30))
+    loader = make_client_loader(ds, indices, batch_size=8)
+    # Per-sample weights are exactly 1/(class count within the shard).
+    shard_labels = ds.labels[torch.as_tensor(indices)].to(torch.long)
+    counts = torch.bincount(shard_labels, minlength=4).to(torch.float64)
+    assert torch.allclose(loader.weights, 1.0 / (counts[shard_labels] + 1e-6))
     assert loader.batch_size == 8
     # batch size capped at shard size
     assert make_client_loader(ds, [0, 1, 2], batch_size=64).batch_size == 3
-    # The evaluation path (metrics.fl.evaluate_subset) uses a plain
-    # sequential DataLoader — no sampler attribute of the weighted kind.
-    import inspect
+    # One epoch draws exactly len(indices) samples, deterministically under
+    # torch.manual_seed, re-drawn per epoch (two iterations differ).
+    torch.manual_seed(0)
+    epoch1 = [labels for _, _, labels in loader]
+    epoch2 = [labels for _, _, labels in loader]
+    torch.manual_seed(0)
+    epoch1_again = [labels for _, _, labels in loader]
+    assert sum(len(b) for b in epoch1) == 30
+    assert all(torch.equal(a, b) for a, b in zip(epoch1, epoch1_again))
+    assert not all(torch.equal(a, b) for a, b in zip(epoch1, epoch2))
+    # The evaluation path is sequential and unweighted: fast tensor path and
+    # DataLoader fallback must agree exactly, on the true distribution.
+    from torch.utils.data import DataLoader, Subset
 
-    from uavbench.metrics import fl as mfl
+    from uavbench.fl.model import CachedFusionModel
+    from uavbench.metrics.fl import evaluate_loader, evaluate_subset
 
-    src = inspect.getsource(mfl.evaluate_subset)
-    assert "WeightedRandomSampler" not in src and "shuffle=False" in src
+    torch.manual_seed(3)
+    model = CachedFusionModel()
+    test_idx = list(range(30, 60))
+    fast = evaluate_subset(model, ds, test_idx)
+    slow = evaluate_loader(model, DataLoader(Subset(ds, test_idx), batch_size=64, shuffle=False))
+    assert fast["accuracy"] == slow["accuracy"] and fast["macro_f1"] == slow["macro_f1"]
+    assert np.array_equal(fast["confusion_matrix"], slow["confusion_matrix"])
+    # The confusion matrix reflects the shard's true label counts (no resampling).
+    true_counts = np.bincount(ds.labels[torch.as_tensor(test_idx)].numpy(), minlength=4)
+    assert np.array_equal(fast["confusion_matrix"].sum(axis=1), true_counts)
+
+
+def mismatched_feature_cache_fails_fast():
+    # Regression for the 2026-07-16 crash: a feature cache built for a
+    # different subsample must be rejected at construction with an actionable
+    # error, not fail with IndexError hours into a training epoch.
+    feats = np.random.randn(10, 9).astype(np.float32)
+    labels = np.zeros(10, dtype=np.int64)
+    stale_cache = np.random.randn(4, 512).astype(np.float16)  # wrong row count
+    try:
+        CachedDataset(SyntheticTorchDataset(feats, labels), stale_cache)
+    except ValueError as e:
+        assert "stale" in str(e) or "subsample" in str(e)
+    else:
+        raise AssertionError("mismatched img_features must raise at construction")
+
+
+def stale_feature_cache_recomputed():
+    # compute_feature_cache must detect a cache whose row count disagrees with
+    # the dataset and rebuild it, and must NOT touch the backbone when the
+    # cache is valid.
+    import tempfile
+
+    import torch.nn as nn
+
+    from uavbench.fl import features as F
+
+    class TinyBackbone(nn.Module):
+        def forward(self, x):  # (B, 3, H, W) -> (B, 512), deterministic
+            return x.mean(dim=(2, 3)).repeat(1, 171)[:, :512]
+
+    ds = SyntheticTorchDataset(np.random.randn(7, 9).astype(np.float32), np.zeros(7, np.int64))
+    orig = F._frozen_resnet18
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            cache = str(Path(d) / "img_features.npy")
+            np.save(cache, np.zeros((3, 512), dtype=np.float16))  # stale: 3 != 7 rows
+            F._frozen_resnet18 = TinyBackbone
+            arr = F.compute_feature_cache(ds, cache, batch_size=4)
+            assert arr.shape == (7, 512), "stale cache must be rebuilt to dataset size"
+            assert np.load(cache).shape == (7, 512), "rebuilt cache must be persisted"
+
+            def _boom():
+                raise AssertionError("valid cache must be loaded without a backbone pass")
+
+            F._frozen_resnet18 = _boom
+            arr2 = F.compute_feature_cache(ds, cache, batch_size=4)
+            assert arr2.shape == (7, 512)
+    finally:
+        F._frozen_resnet18 = orig
 
 
 def black_chip_rate_exact():
@@ -145,6 +217,8 @@ check("label remap keeps all four classes {0,1,9,99}->{0,1,2,3}", label_remap_ke
 check("per-client train/test disjoint; global test set is the pool", splits_disjoint_and_pooled)
 check("CachedDataset serves f32 cached features, not raw images", cached_dataset_passthrough)
 check("weighted sampling on train loader ONLY; eval sees true distribution", train_loader_balanced_eval_loader_not)
+check("mismatched feature cache fails fast at CachedDataset construction", mismatched_feature_cache_fails_fast)
+check("stale feature cache detected and rebuilt; valid cache loaded as-is", stale_feature_cache_recomputed)
 check("black-chip rate counted exactly on a known fixture", black_chip_rate_exact)
 check("black-chip hard gate: crash above threshold, diagnostic persisted", black_chip_hard_gate)
 check("stress black-chip knob: exact, pure, deterministic", stress_black_chip_knob)

@@ -34,7 +34,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import yaml
-from torch.utils.data import DataLoader
 
 from hflsim.shared.coords import haversine_matrix, latlon_to_meters
 from hflsim.shared.value import compute_value
@@ -43,6 +42,7 @@ from hflsim.shared.value import compute_value
 # the leading-underscore aliases keep this module's historical names.
 from uavbench.metrics.fl import (
     CLASS_NAMES,  # noqa: F401 — re-exported for confusion plots/tests
+    TARGET_CONSEC_ROUNDS as _TARGET_CONSEC_ROUNDS,
     jain_index,
     round_comm_mb,
 )
@@ -65,7 +65,7 @@ from uavbench.problem.instance import ProblemInstance
 from uavbench.reporting.tables import write_table as _write_table
 
 from .client_selection import ClientSelector
-from .dataset import CachedDataset, ClientData, make_client_loader
+from .dataset import BalancedShardLoader, CachedDataset, ClientData, make_client_loader
 from .device_state import DeviceStateManager
 from .features import compute_feature_cache
 from .model import (
@@ -210,7 +210,7 @@ def _covered_clients(
 
 def _local_train(
     model: CachedFusionModel,
-    loader: DataLoader,
+    loader: BalancedShardLoader,
     n_epochs: int,
     lr: float,
 ) -> tuple[dict, int]:
@@ -242,7 +242,7 @@ def _local_train(
 
 def _uav_local_train(
     model: CachedFusionModel,
-    loader: DataLoader,
+    loader: BalancedShardLoader,
     n_epochs: int,
     lr: float,
 ) -> tuple[dict, int]:
@@ -396,6 +396,7 @@ def run_tier2(cfg: dict) -> dict:
         covered: dict[int, int] = {}
         last_placement_fitness: float = 0.0
         rounds_to_target: int | None = None
+        target_streak = 0
         cumulative_energy_j: float = 0.0
         # Tier-2 has no selection layer: every covered client trains each
         # round, so participation counts track coverage persistence.
@@ -428,6 +429,10 @@ def run_tier2(cfg: dict) -> dict:
                         prev_positions_m=prev_uav_positions_m,
                         method_params=optimizer_params.get(method, {}),
                     )
+                    # cumulative_energy_j counts repositioning (movement) energy
+                    # only — hover/communication energy has no simulated-time
+                    # model here, so non-repositioning methods legitimately
+                    # report 0 J. Label it as movement energy in figures.
                     if prev_uav_positions_m is not None:
                         move_m = float(
                             np.sum(np.sqrt(np.sum((uav_pos_m - prev_uav_positions_m) ** 2, axis=1)))
@@ -483,8 +488,12 @@ def run_tier2(cfg: dict) -> dict:
             # No UAV→server hop (Tier-2 flat placement harness).
             comm_mb_round = round_comm_mb(n_covered)
 
-            if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
-                rounds_to_target = rnd
+            if metrics["accuracy"] >= target_accuracy:
+                target_streak += 1
+                if rounds_to_target is None and target_streak >= _TARGET_CONSEC_ROUNDS:
+                    rounds_to_target = rnd - _TARGET_CONSEC_ROUNDS + 1
+            else:
+                target_streak = 0
 
             for cid in covered:
                 sel_counts[cid] += 1
@@ -676,7 +685,10 @@ def _load_data(cfg: dict, results_dir: Path) -> tuple:
         full_dataset,
         cache_path=cache_path,
         batch_size=data_cfg.get("feature_batch_size", 32),
-        num_workers=0,
+        # Image decode parallelism for the one-time feature pass; 0 = main
+        # process (the safe default). The sweeps prefetch caches sequentially
+        # before forking workers, so raising this never multiplies processes.
+        num_workers=data_cfg.get("feature_num_workers", 0),
     )
     _report_black_chip_rate(full_dataset, cfg)
     return (
@@ -880,8 +892,11 @@ def run_full_hfl(cfg: dict) -> dict:
         last_placement_fitness: float = 0.0
         cumulative_energy = 0.0
         rounds_to_target: int | None = None
+        target_streak = 0
         sel_counts: dict[int, int] = {cid: 0 for cid in client_ids}
         method_start_idx: int = len(all_rows)
+        # Static lookup, hoisted out of the round loop.
+        client_by_id = {c.client_id: c for c in clients}
 
         # Pre-project client coordinates once (static ground sensors): shared by
         # the per-selection V_i(t) computation. Order matches client_coord_map.
@@ -956,6 +971,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         value=device_values,
                         method_params=optimizer_params.get(placement_method, {}),
                     )
+                    # Movement (repositioning) energy only — see run_tier2 note.
                     if prev_uav_pos_m is not None:
                         move_m = float(
                             np.sum(np.sqrt(np.sum((uav_pos_m - prev_uav_pos_m) ** 2, axis=1)))
@@ -993,7 +1009,6 @@ def run_full_hfl(cfg: dict) -> dict:
 
             # ── Build UAV groups from selection map ───────────────────────
             # Maps uav_idx → list of ClientData for clients assigned to that UAV.
-            client_by_id = {c.client_id: c for c in clients}
             uav_groups: dict[int, list] = {j: [] for j in range(K)}
             for cid, uav_idx in selected.items():
                 if cid in client_by_id:
@@ -1114,8 +1129,12 @@ def run_full_hfl(cfg: dict) -> dict:
             metrics = _evaluate(global_model, cached_dataset, global_test_indices)
             elapsed = time.perf_counter() - t0
 
-            if rounds_to_target is None and metrics["accuracy"] >= target_accuracy:
-                rounds_to_target = rnd
+            if metrics["accuracy"] >= target_accuracy:
+                target_streak += 1
+                if rounds_to_target is None and target_streak >= _TARGET_CONSEC_ROUNDS:
+                    rounds_to_target = rnd - _TARGET_CONSEC_ROUNDS + 1
+            else:
+                target_streak = 0
 
             # Communication cost: shared accounting rule in metrics.fl.
             # flat_fl (placement_method None): IoT↔server directly, IoT payload only.

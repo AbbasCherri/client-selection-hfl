@@ -39,6 +39,10 @@ data:
   seed: 42
   data_dir: ./data
   feature_batch_size: 32
+  # DataLoader workers for the one-time ResNet feature pass (TIF decode is the
+  # bottleneck). Runs in the sequential prefetch phase, before the 12 sweep
+  # workers fork, so 8 decode processes fit the n1-standard-12 budget.
+  feature_num_workers: 8
   # N_clients is overwritten per-job by run_paper_sweep (one of N_values below).
   # This default only matters if run_full_hfl is called directly on this file.
   N_clients: 50
