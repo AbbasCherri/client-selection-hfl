@@ -23,7 +23,7 @@ name: stress_test
 results_dir: results/stress_test
 
 n_workers: 8
-n_seeds: 5
+n_seeds: 10         # paired-Wilcoxon power: n=5 gave min p 0.0625 — nothing could ever be significant
 optimizer_seed: 20260714
 
 data:
@@ -43,7 +43,7 @@ fl:
   n_local_epochs: 1
   lr: 1.0e-3
   batch_size: 16
-  target_accuracy: 0.70
+  target_accuracy: 0.60
   T_sel: 5
   placement_method: pso
 

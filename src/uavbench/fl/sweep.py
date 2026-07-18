@@ -110,6 +110,7 @@ def _prefetch_all_N(cfg: dict) -> None:
     from hflsim.data import get_hfl_data_partitions
 
     from .features import compute_feature_cache
+    from .seeds import partition_seed_for
 
     data_cfg = cfg["data"]
     hf_token = os.environ.get("HF_TOKEN", data_cfg.get("hf_token"))
@@ -128,6 +129,19 @@ def _prefetch_all_N(cfg: dict) -> None:
             random_seed=data_cfg.get("seed", 42),
             hf_token=hf_token,
         )
+        # Warm the per-seed partition caches too (cheap K-means only — the
+        # rows and feature cache are seed-independent), so parallel workers
+        # never race on computing the same partition.
+        for seed_idx in range(cfg.get("n_seeds", 1)):
+            get_hfl_data_partitions(
+                csv_path=data_cfg.get("csv_path"),
+                data_dir=data_cfg.get("data_dir", "./data"),
+                N=N,
+                subsample=data_cfg.get("subsample", 0.05),
+                random_seed=data_cfg.get("seed", 42),
+                hf_token=hf_token,
+                partition_seed=partition_seed_for(seed_idx),
+            )
         cache_path = str(results_dir / f"N{N}" / "img_features.npy")
         Path(cache_path).parent.mkdir(parents=True, exist_ok=True)
         compute_feature_cache(
@@ -308,10 +322,14 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     Resumable: see ``_job`` above — ``run_full_hfl`` writes
     ``config.fullsim.resolved.yaml`` last, so its presence gates the skip.
     """
-    from .seeds import sweep_job_seed
+    from .seeds import partition_seed_for, sweep_job_seed
 
     job_cfg = copy.deepcopy(cfg)
     job_cfg["data"]["N_clients"] = N
+    # Partition/test-split varies per seed repetition (method-free — every
+    # method sees the identical partition for a given seed, keeping the
+    # Wilcoxon pairing valid).
+    job_cfg["data"]["partition_seed"] = partition_seed_for(seed_idx)
     job_cfg["methods"] = [method]
     # Method identity is folded into the seed exactly once, inside run_full_hfl
     # (via fullsim_method_seed). Do NOT add a method hash here too, or every

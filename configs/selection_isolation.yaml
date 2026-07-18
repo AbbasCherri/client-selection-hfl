@@ -7,7 +7,7 @@
 #   - Identical FL pipeline for all modes (reputation FedAvg, R_min gate,
 #     T_sel reselection cadence, UAV image training).
 #
-# Grid: 6 N-values × 5 modes × 3 seeds = 90 jobs on 12 parallel workers.
+# Grid: 6 N-values × 7 modes × 10 seeds = 420 jobs on 12 parallel workers.
 #
 # Modes:
 #   ucb      — proposed system (Algorithms 1-4: eligibility → priority → UCB → greedy)
@@ -15,6 +15,8 @@
 #   fedcs    — B1: FedCS greedy deadline selection (Nishio & Yonetani, ICC 2019)
 #   rep_cap  — B2: reputation-capability ranking (Zhao et al., CJA 2024)
 #   fair_mab — B3: fairness/energy MAB selection (Zhu et al., Sensors 2024)
+#   oort     — B4: Oort guided participant selection (Lai et al., OSDI 2021)
+#   power_of_choice — B5: Power-of-Choice loss-based sampling (Cho et al., 2020)
 #
 # Requires HF_TOKEN for the real dataset; the pipeline is real-data only
 # (offline unit tests use the prebuilt fixture seam, not a config).
@@ -23,7 +25,7 @@ name: selection_isolation
 results_dir: results/selection_isolation
 
 n_workers: 12
-n_seeds: 3
+n_seeds: 10          # paired-Wilcoxon power: n=10 → min p ≈ 0.002 (3 seeds could never reach significance)
 optimizer_seed: 9876
 
 # Noto Peninsula 2024 earthquake epicentre (lat °N, lon °E)
@@ -48,7 +50,7 @@ fl:
   lr: 5.0e-4
   uav_lr: 5.0e-4
   batch_size: 32
-  target_accuracy: 0.70
+  target_accuracy: 0.60  # 0.70 exceeded even the centralized oracle — metric was always NaN
   T_sel: 5           # reselect clients every 5 rounds (paper §IV-E cadence)
   lambda_min: 0.5    # early-reselection trigger (§IV-E6)
   R_min: 0.3         # UAV clusters below this trimmed-mean reputation excluded (§IV-D)
@@ -73,3 +75,5 @@ modes:
   - fedcs
   - rep_cap
   - fair_mab
+  - oort
+  - power_of_choice

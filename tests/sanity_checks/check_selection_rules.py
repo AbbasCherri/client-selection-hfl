@@ -85,12 +85,16 @@ def fair_mab_reward_and_fairness_pressure():
 
 def capacity_respected_by_all_modes():
     n = 9
-    for mode in ("ucb", "fedcs", "rep_cap", "fair_mab"):
+    for mode in ("ucb", "fedcs", "rep_cap", "fair_mab", "oort", "power_of_choice"):
         sel = ClientSelector(list(range(n)))
         covered = {i: i % 3 for i in range(n)}  # 3 UAVs
         states = {i: _state() for i in range(n)}
         rep = {i: 0.5 for i in range(n)}
-        kwargs = {"rng": np.random.default_rng(0)} if mode == "ucb" else {}
+        kwargs = (
+            {"rng": np.random.default_rng(0)}
+            if mode in ("ucb", "power_of_choice")
+            else {}
+        )
         result = sel.select(covered, states, rep, _coords(n), [], 1, 2, mode=mode, **kwargs)
         for uav, cnt in Counter(result.values()).items():
             assert cnt <= 2, f"{mode} exceeded per-UAV capacity on UAV {uav}"
@@ -99,15 +103,53 @@ def capacity_respected_by_all_modes():
 def mode_all_and_unknown_mode():
     sel = ClientSelector([0, 1])
     states = {0: _state(), 1: _ineligible()}
-    # mode='all' (flat_fl) bypasses the eligibility gate entirely.
+    # mode='all' (flat_fl) selects every ELIGIBLE covered client — the device
+    # physics gate applies to every topology (2026-07-18 fix: bypassing it made
+    # flat_fl immune to battery drain and the dropout/SNR stress knobs).
     r = sel.select({0: 0, 1: 0}, states, {0: 0.5, 1: 0.5}, _coords(2), [], 1, 99, mode="all")
-    assert set(r.keys()) == {0, 1}
+    assert set(r.keys()) == {0}
     try:
         sel.select({0: 0}, {0: _state()}, {0: 0.5}, _coords(1), [], 1, 1, mode="bogus")
     except ValueError:
         pass
     else:
         raise AssertionError("unknown selection mode must raise")
+
+
+def oort_and_power_of_choice_loss_ranking():
+    # oort: higher last-observed loss wins slots; stragglers (above the
+    # eligible-pool median compute time) are penalised; never-trained clients
+    # inherit the max observed loss (exploration prior).
+    n = 4
+    sel = ClientSelector(list(range(n)))
+    sel.update_losses({0: 0.1, 1: 2.0, 2: 1.0})  # 3 never trained → prior 2.0
+    states = {i: _state() for i in range(n)}
+    covered = {i: 0 for i in range(n)}
+    r = sel.select(covered, states, {i: 0.5 for i in range(n)}, _coords(n), [], 5, 2, mode="oort")
+    assert len(r) == 2
+    assert 1 in r and 0 not in r, "high-loss client must beat low-loss under oort"
+    assert 3 in r or 2 in r, "untrained client competes at the max-loss prior"
+
+    # oort straggler penalty: equal losses, the slow half loses.
+    sel2 = ClientSelector(list(range(4)))
+    sel2.update_losses({i: 1.0 for i in range(4)})
+    states2 = {
+        0: _state(),
+        1: _state(),
+        2: DeviceState(battery=0.8, snr_db=15.0, memory_ok=True, compute_time_s=290.0),
+        3: DeviceState(battery=0.8, snr_db=15.0, memory_ok=True, compute_time_s=295.0),
+    }
+    r2 = sel2.select({i: 0 for i in range(4)}, states2, {i: 0.5 for i in range(4)},
+                     _coords(4), [], 5, 2, mode="oort")
+    assert set(r2.keys()) == {0, 1}, "stragglers above median compute must be penalised"
+
+    # power_of_choice: with the candidate set covering the pool, top-loss wins.
+    sel3 = ClientSelector(list(range(4)))
+    sel3.update_losses({0: 0.1, 1: 0.2, 2: 5.0, 3: 4.0})
+    r3 = sel3.select({i: 0 for i in range(4)}, {i: _state() for i in range(4)},
+                     {i: 0.5 for i in range(4)}, _coords(4), [], 5, 2,
+                     mode="power_of_choice", rng=np.random.default_rng(0))
+    assert set(r3.keys()) == {2, 3}, "power_of_choice must keep the highest-loss candidates"
 
 
 def eligibility_gate_thresholds():
@@ -123,6 +165,7 @@ check("FedCS: greedy fastest-first under deadline, eligibility respected", fedcs
 check("rep_cap: exact score formula (gamma=0.5), static no-exploration ranking", rep_cap_formula_and_static_ranking)
 check("fair_mab: exact reward formula, staleness cap, fairness pressure", fair_mab_reward_and_fairness_pressure)
 check("all modes respect per-UAV capacity", capacity_respected_by_all_modes)
-check("mode 'all' bypasses gate; unknown mode raises", mode_all_and_unknown_mode)
+check("mode 'all' is eligibility-gated; unknown mode raises", mode_all_and_unknown_mode)
+check("oort/power_of_choice: loss ranking, straggler penalty, prior", oort_and_power_of_choice_loss_ranking)
 check("device eligibility gate thresholds", eligibility_gate_thresholds)
 finish()

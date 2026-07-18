@@ -213,12 +213,15 @@ def _local_train(
     loader: BalancedShardLoader,
     n_epochs: int,
     lr: float,
-) -> tuple[dict, int]:
-    """Train a client-local copy of the model; return (trainable_state_dict, n_samples).
+) -> tuple[dict, int, float]:
+    """Train a client-local copy of the model; return
+    (trainable_state_dict, n_samples, mean_loss).
 
     img_proj is frozen on the clone (inherited from global_model which has
     freeze_img_proj() called after construction).  Only struct_branch + fusion
-    are updated — the IoT-level payload per paper §IV-B.
+    are updated — the IoT-level payload per paper §IV-B. mean_loss is the
+    sample-weighted mean training loss over all epochs; the oort /
+    power_of_choice baselines consume it as their statistical utility.
     """
     local = clone_model(model)
     local.train()
@@ -227,6 +230,7 @@ def _local_train(
     loss_fn = nn.CrossEntropyLoss()
 
     n_seen = 0
+    loss_sum = 0.0
     for _ in range(n_epochs):
         for img_feat, struct, labels in loader:
             opt.zero_grad()
@@ -236,8 +240,10 @@ def _local_train(
             torch.nn.utils.clip_grad_norm_(trainable, 1.0)
             opt.step()
             n_seen += labels.shape[0]
+            loss_sum += float(loss.detach()) * labels.shape[0]
 
-    return local.trainable_state_dict(), n_seen // max(n_epochs, 1)
+    mean_loss = loss_sum / max(n_seen, 1)
+    return local.trainable_state_dict(), n_seen // max(n_epochs, 1), mean_loss
 
 
 def _uav_local_train(
@@ -463,7 +469,7 @@ def run_tier2(cfg: dict) -> dict:
                     if not client.train_indices:
                         continue
                     loader = make_client_loader(cached_dataset, client.train_indices, batch_size)
-                    sd, n = _local_train(global_model, loader, n_local_epochs, lr)
+                    sd, n, _loss = _local_train(global_model, loader, n_local_epochs, lr)
                     client_updates[uav_idx].append((sd, n))
 
             # ---- UAV-level FedAvg ----
@@ -582,6 +588,8 @@ _METHOD_CFG: dict[str, tuple] = {
     "fedcs": ("pso", "fedcs", True, True),  # Nishio & Yonetani, ICC 2019
     "rep_cap": ("pso", "rep_cap", True, True),  # Zhao et al., Chin. J. Aeronaut. 2024
     "fair_mab": ("pso", "fair_mab", True, True),  # Zhu et al., Sensors 2024
+    "oort": ("pso", "oort", True, True),  # Lai et al., OSDI 2021
+    "power_of_choice": ("pso", "power_of_choice", True, True),  # Cho et al., 2020
     # Placement literature baselines: identical UCB selection, reputation
     # FedAvg, and T_sel cadence as proposed_hfl — only the placement rule
     # differs, isolating it as the experimental variable (mirror image of
@@ -677,6 +685,7 @@ def _load_data(cfg: dict, results_dir: Path) -> tuple:
             subsample=data_cfg.get("subsample", 0.05),
             random_seed=seed,
             hf_token=hf_token,
+            partition_seed=data_cfg.get("partition_seed"),
         )
     )
     # Allow the sweep to provide a shared N-level cache (avoids recomputing per seed).
@@ -709,9 +718,14 @@ def _run_centralized(
     n_local_epochs: int,
     lr: float,
     batch_size: int,
-) -> list[dict]:
-    """Oracle: train on all data at one node, report metrics every n_local_epochs epochs."""
+) -> tuple[list[dict], list[dict]]:
+    """Oracle: train on all data at one node, report metrics every n_local_epochs epochs.
+
+    Returns (round_rows, confusion_rows) — confusion was silently dropped for
+    this baseline before 2026-07-18 (empty confusion.parquet columns for the
+    centralized method)."""
     rows: list[dict] = []
+    conf_rows: list[dict] = []
     loader = make_client_loader(cached_dataset, all_train_indices, batch_size)
     # Centralized has full compute — train the entire model including img_proj.
     global_model.unfreeze_img_proj()
@@ -745,6 +759,7 @@ def _run_centralized(
                 **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
             }
         )
+        conf_rows.extend(_confusion_rows("centralized", rnd, metrics["confusion_matrix"]))
         logger.info(
             "Centralized round %d/%d | acc=%.3f | macro-F1=%.3f",
             rnd,
@@ -752,7 +767,7 @@ def _run_centralized(
             metrics["accuracy"],
             metrics["macro_f1"],
         )
-    return rows
+    return rows, conf_rows
 
 
 def run_full_hfl(cfg: dict) -> dict:
@@ -768,6 +783,8 @@ def run_full_hfl(cfg: dict) -> dict:
       fedcs             — literature B1: FedCS greedy deadline selection (Nishio & Yonetani 2019)
       rep_cap           — literature B2: reputation-capability ranking (Zhao et al. 2024)
       fair_mab          — literature B3: fairness/energy MAB selection (Zhu et al. 2024)
+      oort              — literature B4: Oort guided participant selection (Lai et al. 2021)
+      power_of_choice   — literature B5: Power-of-Choice loss-based sampling (Cho et al. 2020)
 
     Additional config keys vs run_tier2
     ------------------------------------
@@ -856,7 +873,7 @@ def run_full_hfl(cfg: dict) -> dict:
 
         # ── Centralized baseline: no federation at all ───────────────────
         if method == "centralized":
-            rows = _run_centralized(
+            rows, cent_conf = _run_centralized(
                 global_model,
                 cached_dataset,
                 all_train_indices,
@@ -867,6 +884,7 @@ def run_full_hfl(cfg: dict) -> dict:
                 batch_size,
             )
             all_rows.extend(rows)
+            confusion_rows.extend(cent_conf)
             models_by_method[method] = global_model
             continue
 
@@ -923,7 +941,9 @@ def run_full_hfl(cfg: dict) -> dict:
 
             # ── Placement ────────────────────────────────────────────────
             if placement_method is None:
-                # flat_fl: no UAV filter — all clients always covered (static, no dropouts).
+                # flat_fl: no UAV filter — all clients always covered. Selection
+                # mode "all" still applies the device-eligibility gate, so
+                # battery/SNR/memory physics (and the stress knobs) bind here too.
                 covered_all = {c.client_id: 0 for c in clients}
                 placement_fitness = 1.0
                 reselect = True
@@ -1035,15 +1055,20 @@ def run_full_hfl(cfg: dict) -> dict:
             global_trainable = global_model.trainable_state_dict()
             client_updates: dict[int, tuple[dict, int, float]] = {}
             client_deltas: dict[int, dict] = {}
+            client_losses: dict[int, float] = {}
             for c in clients:
                 if c.client_id not in selected or not c.train_indices:
                     continue
                 loader = make_client_loader(cached_dataset, c.train_indices, batch_size)
-                sd, n = _local_train(global_model, loader, n_local_epochs, lr)
+                sd, n, mean_loss = _local_train(global_model, loader, n_local_epochs, lr)
                 rep = rep_scores.get(c.client_id, 0.5)
                 client_updates[c.client_id] = (sd, n, rep)
+                client_losses[c.client_id] = mean_loss
                 # Reputation scores the update *delta* Δw_n, not absolute weights.
                 client_deltas[c.client_id] = {k: v - global_trainable[k] for k, v in sd.items()}
+            # Statistical-utility feed for the oort / power_of_choice baselines
+            # (harmless no-op for every other mode).
+            selector.update_losses(client_losses)
 
             # Clients chosen for this round but unable to train (e.g. empty shard)
             # count as absent for the temporal-reliability term of their reputation.

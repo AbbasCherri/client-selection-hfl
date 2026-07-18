@@ -58,12 +58,16 @@ else
     # 2. Full paper system simulation (real data; needs HF_TOKEN)
     step "Full paper simulation (configs/paper_full.yaml)"
     python -m uavbench run_paper_sim --config configs/paper_full.yaml
-    step "Paper-sim significance (accuracy, paired Wilcoxon)"
+    step "Paper-sim significance (accuracy + macro_f1, paired Wilcoxon)"
     python -m uavbench significance --config results/paper_full --metric accuracy
+    python -m uavbench significance --config results/paper_full --metric macro_f1
 
     # 3. Selection-isolation benchmark (real data)
     step "Selection isolation (configs/selection_isolation.yaml)"
     python -m uavbench run_selection_sim --config configs/selection_isolation.yaml
+    step "Selection-isolation significance (accuracy + macro_f1)"
+    python -m uavbench significance --config results/selection_isolation --metric accuracy
+    python -m uavbench significance --config results/selection_isolation --metric macro_f1
 
     # 4. N-scalability sweep (real data)
     step "N-scalability sweep (configs/tier2_sweep.yaml)"
@@ -83,7 +87,7 @@ step "Staging results/paper_artifact"
 ARTIFACT=results/paper_artifact
 mkdir -p "$ARTIFACT"
 find results -maxdepth 2 \
-    \( -name "seed_manifest.csv" -o -name "config.*.resolved.yaml" -o -name "significance.csv" \) \
+    \( -name "seed_manifest.csv" -o -name "config.*.resolved.yaml" -o -name "significance.csv" -o -name "significance_*.csv" \) \
     -not -path "$ARTIFACT/*" | while read -r f; do
     dest="$ARTIFACT/$(dirname "${f#results/}" | tr '/' '_')_$(basename "$f")"
     cp "$f" "$dest"

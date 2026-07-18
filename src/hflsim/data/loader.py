@@ -404,7 +404,7 @@ def _load_partition_cache(path: str):
 
 
 def _save_partition_cache(path: str, payload: dict):
-    tmp = path + ".tmp"
+    tmp = f"{path}.tmp{os.getpid()}"  # PID-unique: parallel workers may save the same key
     with open(tmp, "wb") as f:
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
     os.replace(tmp, path)
@@ -422,10 +422,19 @@ def get_hfl_data_partitions(
     random_seed: int = 42,
     subsample: float = 0.05,
     hf_token: str | None = None,
+    partition_seed: int | None = None,
 ):
     """
     Build the full MultiModalDataset and per-client index partitions.
+
+    ``random_seed`` controls the subsample row draw (and therefore which
+    feature caches apply); ``partition_seed`` (default: random_seed) controls
+    only the K-means client partition and per-client train/test splits. Sweeps
+    vary partition_seed per seed repetition so the partition/test-split
+    variance enters the confidence intervals without invalidating the shared
+    per-N feature caches (which depend only on the sampled rows).
     """
+    pseed = random_seed if partition_seed is None else int(partition_seed)
     # ------------------------------------------------------------------ #
     # 1. Load raw metadata                                                #
     # ------------------------------------------------------------------ #
@@ -486,6 +495,7 @@ def get_hfl_data_partitions(
         str(N),
         f"{train_ratio:.6f}",
         str(random_seed),
+        str(pseed),
     ])
     cache_path = _partition_cache_path(cache_root_dir, cache_key_str)
     cached = _load_partition_cache(cache_path)
@@ -502,7 +512,7 @@ def get_hfl_data_partitions(
         # ---------------------------------------------------------------- #
         logger.info("Partitioning %d rows into %d clients via K-Means …", len(df), N)
         coords_for_km = np.column_stack([raw_lon, raw_lat])
-        km = KMeans(n_clusters=N, random_state=random_seed, n_init=10)
+        km = KMeans(n_clusters=N, random_state=pseed, n_init=10)
         cluster_ids = km.fit_predict(coords_for_km)
 
         client_train_indices: dict[int, list[int]] = {}
@@ -514,7 +524,7 @@ def get_hfl_data_partitions(
             idx_arr = np.where(cluster_ids == cid)[0].tolist()
             n_s     = len(idx_arr)
 
-            rng = np.random.default_rng(random_seed + cid)
+            rng = np.random.default_rng(pseed + cid)
             rng.shuffle(idx_arr)
 
             split         = int(n_s * train_ratio)

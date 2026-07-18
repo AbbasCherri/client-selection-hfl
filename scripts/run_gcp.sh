@@ -35,8 +35,8 @@ set -euo pipefail
 # since this was last run; `gcloud compute instances list` to check)
 # ---------------------------------------------------------------------------
 PROJECT_ID="${GCP_PROJECT_ID:-project-bacf2da8-2fce-4137-a90}"
-ZONE="${GCP_ZONE:-us-central1-a}"
-INSTANCE_NAME="${GCP_INSTANCE_NAME:-instance-20260703-060853}"
+ZONE="${GCP_ZONE:-europe-west4-a}"
+INSTANCE_NAME="${GCP_INSTANCE_NAME:-instance-20260715-110613}"
 
 SMOKE="${SMOKE:-0}"
 SELF_STOP="${SELF_STOP:-1}"

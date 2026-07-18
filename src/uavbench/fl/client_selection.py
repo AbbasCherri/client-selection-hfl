@@ -15,9 +15,14 @@ Selection modes
 ---------------
 "ucb"      — full pipeline (proposed system)
 "random"   — eligibility filter only, then random draw per UAV (hfl_no_selection)
-"all"      — skip all filters; every covered client participates (flat_fl / centralized)
+"all"      — every ELIGIBLE covered client participates (flat_fl). Eligibility
+             still applies: a device with a dead battery, no memory, or a
+             below-threshold channel cannot deliver an update regardless of
+             topology, so exempting flat_fl from the device physics would
+             hand it a free upper bound (and made it invariant to the
+             dropout/SNR stress knobs — the 2026-07-18 fix).
 
-Literature baselines (Algorithms B1-B3, REPORTS/master_implementation_reference.md Appendix C)
+Literature baselines (Algorithms B1-B5, REPORTS/master_implementation_reference.md Appendix C)
 ------------------------------------------------------------------------
 "fedcs"    — B1: FedCS greedy deadline selection per UAV, purely time-driven
              (Nishio & Yonetani, ICC 2019)
@@ -25,10 +30,23 @@ Literature baselines (Algorithms B1-B3, REPORTS/master_implementation_reference.
              exploration, no utility (Zhao et al., Chin. J. Aeronaut. 2024)
 "fair_mab" — B3: w_e·b_n + w_s·staleness_n fairness/energy MAB reward,
              no reputation, no utility (Zhu et al., Sensors 2024)
+"oort"     — B4: Oort guided participant selection (Lai et al., OSDI 2021):
+             statistical utility (last-observed local training loss) ×
+             system-speed penalty (T_max/T̂_n)^α for stragglers. Losses are
+             the last-observed values, exactly as in Oort's own stale-utility
+             design; never-trained clients get the current max utility so
+             they are explored first.
+"power_of_choice" — B5: Power-of-Choice (Cho et al., 2020 / AISTATS 2022):
+             draw d = 2·(slots) candidates uniformly from the eligible pool,
+             keep the highest last-observed local loss. The canonical rule
+             evaluates the current global loss on the candidate set; the
+             simulation uses last-observed local losses (the standard
+             cached-loss variant in FL benchmarks) so no extra forward
+             passes are billed to the baseline.
 
-All three run behind the same eligibility gate as "ucb"; "rep_cap" and
-"fair_mab" rank candidates and feed the identical greedy UAV assignment
-(Algorithm 4), so the selection rule is the only experimental variable.
+All five run behind the same eligibility gate as "ucb"; all except fedcs
+rank candidates and feed the identical greedy UAV assignment (Algorithm 4),
+so the selection rule is the only experimental variable.
 """
 
 from __future__ import annotations
@@ -67,6 +85,14 @@ FAIRMAB_W_STALE = 0.5
 # the documented default so staleness saturates on the same cadence the
 # proposed system reconsiders devices. Callers pass fl.T_sel via select().
 DEFAULT_T_STALE_CAP = 5
+
+# Baseline B4 (Oort, Lai et al. OSDI 2021): system-utility penalty exponent.
+# util_n = stat_n · (T_pref/T̂_n)^α for stragglers (T̂_n > T_pref), stat_n
+# otherwise. Oort leaves the developer-preferred round duration T_pref open;
+# here it is the median compute time of the currently eligible pool (T_max
+# would never fire — eligibility already caps T̂_n ≤ T_max − ε). α = 2 is the
+# paper's default.
+OORT_ALPHA = 2.0
 
 # Noto Peninsula 2024 epicentre (default; override via cfg)
 DEFAULT_EPICENTRE = (37.488, 137.272)  # (lat °N, lon °E)
@@ -157,7 +183,18 @@ class ClientSelector:
         # Round of each client's most recent selection (0 = never selected).
         # Maintained for every mode; consumed by the fair_mab staleness term.
         self._last_selected: dict[int, int] = {cid: 0 for cid in client_ids}
+        # Last-observed local training loss per client (oort/power_of_choice
+        # statistical utility). Harnesses push these via update_losses() after
+        # each training round; None = never trained (gets the exploration
+        # prior: current max observed loss).
+        self._last_loss: dict[int, float] = {}
         self._epicentre = epicentre or DEFAULT_EPICENTRE
+
+    def update_losses(self, losses: dict[int, float]) -> None:
+        """Record the mean local training loss of the clients that trained
+        this round (consumed by the oort / power_of_choice baselines)."""
+        for cid, loss in losses.items():
+            self._last_loss[cid] = float(loss)
 
     def select(
         self,
@@ -174,10 +211,7 @@ class ClientSelector:
         t_stale_cap: int = DEFAULT_T_STALE_CAP,
     ) -> dict[int, int]:
         """Return {client_id: uav_idx} for the clients selected this round."""
-        if mode == "all":
-            return dict(covered)
-
-        # ── Eligibility gate ────────────────────────────────────────────
+        # ── Eligibility gate (every mode — see module docstring on "all") ──
         eligible: dict[int, int] = {}
         for cid, uav_idx in covered.items():
             st = device_states.get(cid)
@@ -186,6 +220,9 @@ class ClientSelector:
 
         if not eligible:
             return {}
+
+        if mode == "all":
+            return self._record_selection(dict(eligible), round_num)
 
         if mode == "random":
             selected = self._random_select(eligible, uav_capacity, round_num, rng=rng)
@@ -198,9 +235,34 @@ class ClientSelector:
             selected = self._fedcs_select(eligible, device_states, uav_capacity)
             return self._record_selection(selected, round_num)
 
-        if mode in ("rep_cap", "fair_mab"):
+        if mode == "power_of_choice":
+            # B5: uniform candidate draw, then rank by loss. The candidate
+            # subset d = 2·(total slots) approximated as 2·capacity per
+            # covering UAV, bounded by the pool size.
+            _rng = rng if rng is not None else np.random.default_rng(round_num * 6271)
+            n_uavs = len(set(eligible.values()))
+            d = min(len(eligible_ids), max(1, 2 * uav_capacity * max(n_uavs, 1)))
+            candidate_ids = [
+                eligible_ids[i]
+                for i in _rng.choice(len(eligible_ids), size=d, replace=False)
+            ]
+            scores = self._loss_scores(candidate_ids)
+            selected = self._greedy_assign(
+                candidate_ids,
+                eligible,
+                scores,
+                uav_capacity,
+                client_coords,
+                uav_coords_latlon,
+                R_comm,
+            )
+            return self._record_selection(selected, round_num)
+
+        if mode in ("rep_cap", "fair_mab", "oort"):
             if mode == "rep_cap":
                 scores = self._rep_cap_scores(eligible_ids, device_states, reputation_scores)
+            elif mode == "oort":
+                scores = self._oort_scores(eligible_ids, device_states)
             else:
                 scores = self._fair_mab_scores(eligible_ids, device_states, round_num, t_stale_cap)
             selected = self._greedy_assign(
@@ -337,6 +399,34 @@ class ClientSelector:
             [min(1.0, (round_num - self._last_selected.get(cid, 0)) / cap) for cid in eligible_ids]
         )
         return FAIRMAB_W_ENERGY * batteries + FAIRMAB_W_STALE * staleness
+
+    def _loss_scores(self, ids: list[int]) -> np.ndarray:
+        """Last-observed local losses; never-trained clients get the current
+        max observed loss (exploration prior — matches Oort's init-to-max)."""
+        observed = [self._last_loss[c] for c in ids if c in self._last_loss]
+        prior = max(observed) if observed else 1.0
+        return np.array([self._last_loss.get(c, prior) for c in ids])
+
+    def _oort_scores(
+        self,
+        eligible_ids: list[int],
+        device_states: dict[int, DeviceState],
+    ) -> np.ndarray:
+        """Baseline B4 — Oort utility (Lai et al., OSDI 2021).
+
+        util_n = stat_n · (T_pref/T̂_n)^α for stragglers, stat_n otherwise,
+        with stat_n the last-observed local loss and T_pref the median
+        compute time of the eligible pool (see OORT_ALPHA note).
+        """
+        stat = self._loss_scores(eligible_ids)
+        compute_s = np.array([device_states[cid].compute_time_s for cid in eligible_ids])
+        t_pref = float(np.median(compute_s))
+        penalty = np.where(
+            compute_s > t_pref,
+            (t_pref / np.maximum(compute_s, 1e-9)) ** OORT_ALPHA,
+            1.0,
+        )
+        return stat * penalty
 
     def _greedy_assign(
         self,

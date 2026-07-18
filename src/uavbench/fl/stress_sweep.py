@@ -34,7 +34,7 @@ from joblib import Parallel, delayed
 
 from ..reporting.tables import read_table, write_table
 from .federated import _dump_resolved_cfg
-from .seeds import sweep_job_seed
+from .seeds import partition_seed_for, sweep_job_seed
 
 logger = logging.getLogger("uavbench.fl.stress_sweep")
 
@@ -83,7 +83,9 @@ def _job(
     job_cfg["data"]["black_chip_rate"] = black_chip
     # Seed depends only on seed_idx (constant N): identical base problem in
     # every cell → paired along-axis comparisons. Method identity is folded
-    # in exactly once inside run_full_hfl.
+    # in exactly once inside run_full_hfl. The partition seed likewise varies
+    # only with seed_idx, never the knobs.
+    job_cfg["data"]["partition_seed"] = partition_seed_for(seed_idx)
     job_cfg["fl"]["seed"] = sweep_job_seed(
         cfg.get("optimizer_seed", 9876), seed_idx, cfg["data"]["N_clients"]
     )
@@ -159,6 +161,17 @@ def _prefetch(cfg: dict) -> None:
         random_seed=data_cfg.get("seed", 42),
         hf_token=os.environ.get("HF_TOKEN", data_cfg.get("hf_token")),
     )
+    # Warm the per-seed partition caches (cheap; avoids worker races).
+    for seed_idx in range(cfg.get("n_seeds", 1)):
+        get_hfl_data_partitions(
+            csv_path=data_cfg.get("csv_path"),
+            data_dir=data_cfg.get("data_dir", "./data"),
+            N=data_cfg["N_clients"],
+            subsample=data_cfg.get("subsample", 0.05),
+            random_seed=data_cfg.get("seed", 42),
+            hf_token=os.environ.get("HF_TOKEN", data_cfg.get("hf_token")),
+            partition_seed=partition_seed_for(seed_idx),
+        )
     compute_feature_cache(
         full_dataset,
         cache_path=str(cache_path),

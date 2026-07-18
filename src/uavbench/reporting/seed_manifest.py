@@ -18,7 +18,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from uavbench.fl.seeds import fullsim_method_seed, sweep_job_seed, tier2_seed
+from uavbench.fl.seeds import (
+    fullsim_method_seed,
+    partition_seed_for,
+    sweep_job_seed,
+    tier2_seed,
+)
 
 HARNESSES = (
     "tier1",
@@ -125,6 +130,7 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
                             "seed_idx": seed_idx,
                             "job_seed": job_seed,
                             "seed": fullsim_method_seed(job_seed, method),
+                            "partition_seed": partition_seed_for(seed_idx),
                         }
                     )
 
@@ -143,6 +149,7 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
                             # Shared across modes by design: identical problem
                             # instance per (N, seed) isolates the selection rule.
                             "seed": sweep_job_seed(opt_seed, seed_idx, N),
+                            "partition_seed": partition_seed_for(seed_idx),
                         }
                     )
 
@@ -167,6 +174,7 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
                             # the identical base problem per seed.
                             "job_seed": job_seed,
                             "seed": fullsim_method_seed(job_seed, method),
+                            "partition_seed": partition_seed_for(seed_idx),
                         }
                     )
 

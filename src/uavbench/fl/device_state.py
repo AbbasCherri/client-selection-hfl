@@ -108,8 +108,14 @@ class DeviceStateManager:
                 # Active discharge: -0.02 per round (paper §IV-B)
                 self._battery[cid] = max(0.0, self._battery[cid] - 0.02)
             else:
-                # Slow passive recharge
-                self._battery[cid] = min(1.0, self._battery[cid] + 0.005)
+                # Passive recharge at half the discharge rate. The
+                # discharge:recharge ratio sets the sustainable participating
+                # fraction f via f·discharge = (1−f)·recharge → f = 1/3 of the
+                # fleet, so the eligible pool rotates instead of collapsing.
+                # (The pre-2026-07-18 value 0.005 gave f = 1/5: with 100-round
+                # runs the fleet drained to ~20 permanently-cycling devices and
+                # global accuracy decayed with the shrinking aggregate.)
+                self._battery[cid] = min(1.0, self._battery[cid] + 0.01)
             self._snr_noise[cid] = float(self._rng.normal(0.0, 2.0))
             self._compute_noise[cid] = float(self._rng.normal(0.0, 30.0))
             if cid in selected_ids:

@@ -157,7 +157,10 @@ def cmd_significance(args: argparse.Namespace) -> None:
         test=args.test,
         alpha=args.alpha,
     )
-    out_path = results_dir / "significance.csv"
+    # Metric-suffixed filename for non-default metrics so a macro_f1 pass
+    # doesn't overwrite the accuracy table (plain name kept for back-compat).
+    out_name = "significance.csv" if args.metric == "accuracy" else f"significance_{args.metric}.csv"
+    out_path = results_dir / out_name
     table.to_csv(out_path, index=False)
     with pd.option_context("display.max_rows", None, "display.width", 200):
         print(f"\n=== Paired {args.test} on '{args.metric}' (source: {fname}, Holm-corrected) ===")

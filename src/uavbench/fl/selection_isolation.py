@@ -75,13 +75,21 @@ from .federated import (
 )
 from .model import CachedFusionModel, fedavg, reputation_fedavg
 from .reputation import ReputationManager, trimmed_mean
-from .seeds import sweep_job_seed
+from .seeds import partition_seed_for, sweep_job_seed
 
 logger = logging.getLogger("uavbench.fl.selection_isolation")
 
 # Selection rules under test. "ucb" is the proposed system (Algorithms 1-4);
 # the rest are the random ablation and literature baselines B1-B3.
-DEFAULT_MODES: list[str] = ["ucb", "random", "fedcs", "rep_cap", "fair_mab"]
+DEFAULT_MODES: list[str] = [
+    "ucb",
+    "random",
+    "fedcs",
+    "rep_cap",
+    "fair_mab",
+    "oort",
+    "power_of_choice",
+]
 
 _UAV_ALTITUDE_M = 70.0  # hover altitude used throughout the repo
 
@@ -316,14 +324,18 @@ def run_selection_isolation(cfg: dict) -> dict:
             global_trainable = global_model.trainable_state_dict()
             client_updates: dict[int, tuple[dict, int, float]] = {}
             client_deltas: dict[int, dict] = {}
+            client_losses: dict[int, float] = {}
             for cid in selected:
                 loader = client_loaders.get(cid)
                 if loader is None:
                     continue
-                sd, n = _local_train(global_model, loader, n_local_epochs, lr)
+                sd, n, mean_loss = _local_train(global_model, loader, n_local_epochs, lr)
                 rep = rep_scores.get(cid, 0.5)
                 client_updates[cid] = (sd, n, rep)
+                client_losses[cid] = mean_loss
                 client_deltas[cid] = {k: v - global_trainable[k] for k, v in sd.items()}
+            # Statistical-utility feed for the oort / power_of_choice modes.
+            selector.update_losses(client_losses)
 
             for cid in selected:
                 if cid not in client_updates:
@@ -472,6 +484,8 @@ def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     """
     job_cfg = copy.deepcopy(cfg)
     job_cfg["data"]["N_clients"] = N
+    # Partition varies per seed repetition, mode-free (see seeds.partition_seed_for).
+    job_cfg["data"]["partition_seed"] = partition_seed_for(seed_idx)
     job_cfg["modes"] = [mode]
     # Deliberately NO mode hash in the seed: every mode for a given (N, seed)
     # must share model init, device heterogeneity, and the static UAV layout,

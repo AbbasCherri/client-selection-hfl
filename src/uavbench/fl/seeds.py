@@ -50,3 +50,17 @@ def sweep_job_seed(optimizer_seed: int, seed_idx: int, N: int) -> int:
     paper sweep folds the method in later via :func:`fullsim_method_seed`.
     """
     return optimizer_seed + seed_idx * 7919 + N * 31
+
+
+def partition_seed_for(seed_idx: int) -> int:
+    """Data-partition seed for seed repetition ``seed_idx`` (all sweeps).
+
+    Varies the K-means client partition and per-client train/test splits
+    across seed repetitions (their variance belongs in the CIs — with a
+    fixed partition, an unlucky layout at one N distorts the whole scaling
+    curve, as the pre-2026-07-18 N=100 dip did). Depends only on seed_idx —
+    never on method/mode or stress knobs — so paired comparisons still see
+    the identical problem instance per seed. seed_idx=0 keeps a distinct
+    offset from the historical data seed (42) to make the change explicit.
+    """
+    return 5309 + seed_idx
