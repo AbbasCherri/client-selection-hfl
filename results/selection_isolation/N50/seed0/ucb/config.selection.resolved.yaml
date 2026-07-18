@@ -1,0 +1,44 @@
+name: selection_isolation
+results_dir: results/selection_isolation/N50/seed0/ucb
+n_workers: 12
+n_seeds: 3
+optimizer_seed: 9876
+epicentre:
+- 37.488
+- 137.272
+data:
+  source: real
+  subsample: 0.1
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  N_clients: 50
+  feature_cache_path: results/selection_isolation/N50/img_features.npy
+fl:
+  R_comm: 20000.0
+  capacity: 10
+  n_rounds: 200
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  lr: 0.0005
+  uav_lr: 0.0005
+  batch_size: 32
+  target_accuracy: 0.7
+  T_sel: 5
+  lambda_min: 0.5
+  R_min: 0.3
+  seed: 11426
+elbow:
+  k_min: 2
+  k_max: 30
+N_values:
+- 30
+- 50
+- 100
+- 200
+- 350
+- 500
+modes:
+- ucb
+_diagnostics:
+  black_chip_rate: 0.0
