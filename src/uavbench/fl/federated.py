@@ -72,6 +72,7 @@ from .model import (
     CachedFusionModel,
     clone_model,
     fedavg,
+    make_loss_fn,
     reputation_fedavg,
 )
 from .reputation import ReputationManager, trimmed_mean
@@ -277,6 +278,105 @@ def _uav_local_train(
             n_seen += labels.shape[0]
 
     return local.full_trainable_state_dict(), n_seen // max(n_epochs, 1)
+
+
+def _make_optimizer(params, opt_cfg: dict, lr: float):
+    """Build the per-round local optimizer from ``fl.local_optimizer`` config.
+
+    Default SGD+momentum: unlike Adam (whose moment estimates reset on every
+    fresh per-round clone and never amortize), momentum SGD carries no stale
+    per-round warm-up bias and is the standard choice under FedAvg.
+    """
+    name = str(opt_cfg.get("name", "sgd")).lower()
+    wd = float(opt_cfg.get("weight_decay", 0.0))
+    if name == "adam":
+        return optim.Adam(params, lr=lr, weight_decay=wd)
+    return optim.SGD(
+        params,
+        lr=lr,
+        momentum=float(opt_cfg.get("momentum", 0.9)),
+        weight_decay=wd,
+        nesterov=bool(opt_cfg.get("nesterov", False)),
+    )
+
+
+def _train_blocks(
+    model: CachedFusionModel,
+    loader: BalancedShardLoader,
+    n_epochs: int,
+    lr: float,
+    loss_fn,
+    blocks: tuple[str, ...],
+    opt_cfg: dict,
+) -> tuple[dict, int, float]:
+    """Train a clone with gradients enabled only on ``blocks`` (Tier B owner).
+
+    Returns ``(block_state_dict, n_samples, mean_loss)``. The frozen blocks
+    still participate in the forward pass at their current global weights, so
+    the trained block is optimized against the exact value of its counterpart.
+    ``mean_loss`` is the sample-weighted training loss (statistical-utility feed
+    for the oort / power_of_choice selectors).
+    """
+    local = clone_model(model)
+    local.set_trainable_blocks(blocks)
+    local.train()
+    trainable = [p for p in local.parameters() if p.requires_grad]
+    opt = _make_optimizer(trainable, opt_cfg, lr)
+
+    n_seen = 0
+    loss_sum = 0.0
+    for _ in range(n_epochs):
+        for img_feat, struct, labels in loader:
+            opt.zero_grad()
+            logits = local(img_feat, struct)
+            loss = loss_fn(logits, labels)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            opt.step()
+            n_seen += labels.shape[0]
+            loss_sum += float(loss.detach()) * labels.shape[0]
+
+    mean_loss = loss_sum / max(n_seen, 1)
+    return local.block_state_dict(blocks), n_seen // max(n_epochs, 1), mean_loss
+
+
+def _lr_scale(rnd: int, n_rounds: int, schedule: str) -> float:
+    """Across-round learning-rate multiplier in (0, 1].
+
+    A fixed client LR under non-IID FedAvg orbits the optimum indefinitely
+    (the plateau-plus-oscillation seen in the diagnostics); decaying it lets the
+    global model settle. ``rnd`` is 1-indexed.
+    """
+    if schedule == "cosine":
+        return 0.5 * (1.0 + math.cos(math.pi * (rnd - 1) / max(n_rounds - 1, 1)))
+    if schedule in ("sqrt", "inv_sqrt"):
+        return 1.0 / math.sqrt(rnd)
+    return 1.0
+
+
+def _apply_server_momentum(
+    global_state: dict[str, torch.Tensor],
+    aggregate: dict[str, torch.Tensor],
+    velocity: dict[str, torch.Tensor],
+    momentum: float,
+    server_lr: float,
+) -> dict[str, torch.Tensor]:
+    """FedAvgM server update over the blocks present in ``aggregate``.
+
+    Treats ``(global − aggregate)`` as the server pseudo-gradient, applies
+    heavy-ball momentum, and returns the new weights for exactly those keys.
+    Reduces to plain FedAvg when ``momentum=0`` and ``server_lr=1``. ``velocity``
+    is mutated in place so it persists across rounds.
+    """
+    out: dict[str, torch.Tensor] = {}
+    for k, agg in aggregate.items():
+        g = global_state[k].float()
+        pseudo_grad = g - agg.float()
+        v = velocity.get(k)
+        v = pseudo_grad if v is None else momentum * v + pseudo_grad
+        velocity[k] = v
+        out[k] = g - server_lr * v
+    return out
 
 
 def _report_black_chip_rate(full_dataset, cfg: dict) -> None:
@@ -718,20 +818,27 @@ def _run_centralized(
     n_local_epochs: int,
     lr: float,
     batch_size: int,
+    loss_fn,
+    opt_cfg: dict,
+    balanced: bool,
 ) -> tuple[list[dict], list[dict]]:
     """Oracle: train on all data at one node, report metrics every n_local_epochs epochs.
+
+    Shares the paper pipeline's logit-adjusted loss and configured optimizer so
+    the upper bound is measured under the same training recipe as the federated
+    methods. The optimizer is created once and persists across rounds (single
+    continuous optimization), so momentum/Adam state amortizes here as intended.
 
     Returns (round_rows, confusion_rows) — confusion was silently dropped for
     this baseline before 2026-07-18 (empty confusion.parquet columns for the
     centralized method)."""
     rows: list[dict] = []
     conf_rows: list[dict] = []
-    loader = make_client_loader(cached_dataset, all_train_indices, batch_size)
+    loader = make_client_loader(cached_dataset, all_train_indices, batch_size, balanced=balanced)
     # Centralized has full compute — train the entire model including img_proj.
     global_model.unfreeze_img_proj()
     trainable = [p for p in global_model.parameters() if p.requires_grad]
-    opt = optim.Adam(trainable, lr=lr)
-    loss_fn = nn.CrossEntropyLoss()
+    opt = _make_optimizer(trainable, opt_cfg, lr)
 
     for rnd in range(1, n_rounds + 1):
         t0 = time.perf_counter()
@@ -812,6 +919,26 @@ def run_full_hfl(cfg: dict) -> dict:
     uav_lr = fl.get("uav_lr", lr)
     placement_override = fl.get("placement_method")
 
+    # ── Training-recipe knobs (Tier A/B) ────────────────────────────────────
+    # Logit-adjusted loss + uniform sampling (A1), momentum SGD (A2), server
+    # momentum + LR decay (A3), EMA-of-global evaluation (A4), and modality-
+    # aligned block ownership (B). Defaults are the improved recipe; every knob
+    # is captured in the resume signature so a config change reruns the job.
+    logit_tau = float(fl.get("logit_adjust_tau", 1.0))  # 0 → plain cross-entropy
+    balanced_sampling = bool(fl.get("balanced_sampling", False))
+    local_opt_cfg: dict = fl.get("local_optimizer", {"name": "sgd", "momentum": 0.9})
+    server_momentum = float(fl.get("server_momentum", 0.9))
+    server_lr = float(fl.get("server_lr", 1.0))
+    lr_decay = str(fl.get("lr_decay", "cosine")).lower()  # "cosine" | "none"
+    ema_decay = float(fl.get("ema_decay", 0.9))  # 0 → evaluate the raw global model
+    fusion_owner = str(fl.get("fusion_owner", "uav")).lower()  # "uav" | "client"
+    reselect_every = int(fl.get("reselect_every", 1))  # selection cadence (≠ placement T_sel)
+    placement_class_aware = bool(fl.get("placement_class_aware", True))
+    # Rounds-to-target now tracks the reported primary metric (macro-F1) against
+    # a meaningful floor, not raw accuracy against an 0.82 majority-class ceiling.
+    target_metric = str(fl.get("target_metric", "macro_f1"))
+    target_value = float(fl.get("target_value", fl.get("target_accuracy", 0.45)))
+
     P = cfg["budget"]["P"]
     G_max = cfg["budget"]["G_max"]
     optimizer_params: dict = cfg.get("optimizer_params", {})
@@ -835,6 +962,32 @@ def run_full_hfl(cfg: dict) -> dict:
     client_ids = [c.client_id for c in clients]
     all_train_indices: list[int] = [idx for c in clients for idx in c.train_indices]
     logger.info("%d clients loaded (full system).", len(clients))
+
+    # ── Class statistics (shared by logit adjustment, selection, placement) ──
+    # Global training-label prior → logit-adjustment shift (A1). Per-client
+    # class histograms → class-coverage selection utility and class-scarcity
+    # placement value (Tier C). A client discloses only its 4-bin label counts,
+    # a minimal statistic (differential-privacy noise is a drop-in future step).
+    _all_train_t = torch.as_tensor(all_train_indices, dtype=torch.long)
+    _train_label_counts = torch.bincount(
+        cached_dataset.labels[_all_train_t].to(torch.long), minlength=4
+    ).to(torch.float64)
+    _prior = _train_label_counts / _train_label_counts.sum().clamp_min(1.0)
+    log_prior = torch.log(_prior.clamp_min(1e-8)).to(torch.float32) if logit_tau > 0 else None
+    loss_fn = make_loss_fn(log_prior, tau=logit_tau)
+    # Inverse-prior class scarcity weights (rarer class → higher weight), used to
+    # value clients/positions by the minority information they contribute.
+    class_scarcity = (1.0 / _prior.clamp_min(1e-8)).numpy()
+    class_scarcity = class_scarcity / class_scarcity.sum()
+    client_class_counts: dict[int, np.ndarray] = {
+        c.client_id: np.bincount(
+            cached_dataset.labels[torch.as_tensor(c.train_indices, dtype=torch.long)]
+            .numpy()
+            .astype(int),
+            minlength=4,
+        ).astype(np.float64)
+        for c in clients
+    }
 
     # Epicentre — use config override or default to Noto Peninsula 2024
     epicentre = tuple(cfg.get("epicentre", [37.488, 137.272]))  # type: ignore[assignment]
@@ -882,11 +1035,32 @@ def run_full_hfl(cfg: dict) -> dict:
                 n_local_epochs,
                 lr,
                 batch_size,
+                loss_fn,
+                local_opt_cfg,
+                balanced_sampling,
             )
             all_rows.extend(rows)
             confusion_rows.extend(cent_conf)
             models_by_method[method] = global_model
             continue
+
+        # Block ownership (Tier B). Hierarchical methods let the UAV tier own
+        # img_proj + fusion (both modalities co-located there) and clients own
+        # struct_branch alone. flat_fl has no UAV tier, so its clients must
+        # still own struct_branch + fusion (img_proj stays at init — it cannot
+        # use imagery, which is precisely the limitation the hierarchy removes).
+        has_uav_tier = placement_method is not None
+        if has_uav_tier:
+            uav_blocks = ("img_proj", "fusion") if fusion_owner == "uav" else ("img_proj",)
+            client_blocks = ("struct_branch",) if fusion_owner == "uav" else ("struct_branch", "fusion")
+        else:
+            uav_blocks = ()
+            client_blocks = ("struct_branch", "fusion")
+
+        # EMA-of-global evaluation model (A4) and server-momentum buffer (A3),
+        # both per-method (reset each method).
+        ema_model = clone_model(global_model) if ema_decay > 0 else None
+        server_velocity: dict[str, torch.Tensor] = {}
 
         # ── Federated path ───────────────────────────────────────────────
         device_mgr = DeviceStateManager(
@@ -896,7 +1070,7 @@ def run_full_hfl(cfg: dict) -> dict:
             snr_degradation_db=fl.get("snr_degradation_db", 0.0),
         )
         rep_mgr = ReputationManager(client_ids)
-        selector = ClientSelector(client_ids, epicentre=epicentre)
+        selector = ClientSelector(client_ids, epicentre=epicentre, seed=_seed)
 
         # Precompute static client-coord lookup (avoid rebuilding each round)
         client_coord_map: dict[int, tuple[float, float]] = {c.client_id: c.coords for c in clients}
@@ -924,6 +1098,16 @@ def run_full_hfl(cfg: dict) -> dict:
         _device_coords_m = np.column_stack([_client_xy_m, np.zeros(len(clients))])
         _epicentre_m = np.append(_epi_xy_m[0], 0.0)
         _samples_arr = np.array([len(c.train_indices) for c in clients], dtype=np.float64)
+        # Per-client minority-information weight (Σ_c scarcity_c · count_c),
+        # normalized to mean 1 so it re-weights placement value without changing
+        # its overall scale. Positions UAV capacity toward rare-class-rich zones.
+        _client_class_value = np.array(
+            [float(np.dot(class_scarcity, client_class_counts[c.client_id])) for c in clients]
+        )
+        _cv_mean = float(_client_class_value.mean())
+        _client_class_value = (
+            _client_class_value / _cv_mean if _cv_mean > 0 else np.ones(len(clients))
+        )
 
         for rnd in range(1, n_rounds + 1):
             t0 = time.perf_counter()
@@ -978,6 +1162,11 @@ def run_full_hfl(cfg: dict) -> dict:
                         beta_mode="scheduled",
                         R_comm=R_comm,
                     )
+                    # Class-scarcity re-weighting (Tier C placement): bias UAV
+                    # coverage toward clients carrying rare-class information, so
+                    # per-UAV capacity lands where the minority classes are.
+                    if placement_class_aware:
+                        device_values = device_values * _client_class_value
                     uav_pos_m, ref, last_placement_fitness, uav_radii = _place_uavs(
                         client_coords=client_coord_map,
                         K=K,
@@ -1003,9 +1192,13 @@ def run_full_hfl(cfg: dict) -> dict:
                         client_coord_map, uav_pos_m, ref, R_comm, radii=uav_radii
                     )
                 placement_fitness = last_placement_fitness
-                # Client selection runs every T_sel rounds or on trigger (§IV-C),
-                # not every round; between selections the roster persists.
-                reselect = (rnd - 1) % T_sel == 0 or low_eligible or not selected
+                # Selection cadence is decoupled from the (expensive) placement
+                # cadence: reselecting every round lets the roster rotate
+                # smoothly under the UCB count bonus instead of the whole cohort
+                # being held for T_sel rounds and then swapped wholesale — the
+                # non-IID ping-pong that made the frozen-roster method the most
+                # volatile of all. Placement still runs only every T_sel rounds.
+                reselect = (rnd - 1) % reselect_every == 0 or low_eligible or not selected
 
             # ── Client selection ──────────────────────────────────────────
             if reselect:
@@ -1021,6 +1214,8 @@ def run_full_hfl(cfg: dict) -> dict:
                     rng=rng,
                     R_comm=R_comm,
                     t_stale_cap=T_sel,  # fair_mab staleness saturates on the reselection cadence
+                    class_counts=client_class_counts,  # proposed (ucb) class-coverage utility
+                    class_scarcity=class_scarcity,
                 )
 
             coverage_pct = 100.0 * len(covered_all) / max(len(clients), 1)
@@ -1034,38 +1229,63 @@ def run_full_hfl(cfg: dict) -> dict:
                 if cid in client_by_id:
                     uav_groups[uav_idx].append(client_by_id[cid])
 
-            # ── UAV local training on imagery (paper §IV-A Step 3) ───────
-            # Each UAV trains the full model (img_proj + struct + fusion) on
-            # the pooled shard of all its assigned clients.  Uses the existing
-            # 512-dim ResNet feature cache — no backbone forward pass needed.
-            # flat_fl has no UAVs (placement_method is None), so it skips this.
-            uav_img_updates: dict[int, tuple[dict, int]] = {}
-            if placement_method is not None:
+            # Per-round learning-rate decay (A3).
+            lr_r = lr * _lr_scale(rnd, n_rounds, lr_decay)
+            uav_lr_r = uav_lr * _lr_scale(rnd, n_rounds, lr_decay)
+
+            # ── UAV-tier training (Tier B) ────────────────────────────────
+            # Each active UAV trains its owned blocks (img_proj [+ fusion]) on
+            # the pooled shard of its assigned clients, with the client-owned
+            # block frozen at the current global weights — vision/fusion learn
+            # against the exact structured representation they deploy with,
+            # rather than two tiers drifting in parallel and being glued
+            # together. Uses the cached 512-dim ResNet features (no image
+            # forward pass). flat_fl has no UAV tier (uav_blocks empty).
+            uav_own_updates: dict[int, tuple[dict, int]] = {}
+            if uav_blocks:
                 for uav_idx, group in uav_groups.items():
                     uav_indices = [idx for c in group for idx in c.train_indices]
                     if not uav_indices:
                         continue
-                    uav_loader = make_client_loader(cached_dataset, uav_indices, batch_size)
-                    sd, n = _uav_local_train(global_model, uav_loader, n_uav_epochs, uav_lr)
-                    uav_img_updates[uav_idx] = (sd, n)
+                    uav_loader = make_client_loader(
+                        cached_dataset, uav_indices, batch_size, balanced=balanced_sampling
+                    )
+                    sd, n, _uloss = _train_blocks(
+                        global_model,
+                        uav_loader,
+                        n_uav_epochs,
+                        uav_lr_r,
+                        loss_fn,
+                        uav_blocks,
+                        local_opt_cfg,
+                    )
+                    uav_own_updates[uav_idx] = (sd, n)
 
-            # ── IoT local training on structured data (paper §IV-A Step 5) ─
-            # img_proj is frozen on global_model → clone inherits the freeze →
-            # only struct_branch + fusion are updated (IoT-level payload).
-            global_trainable = global_model.trainable_state_dict()
+            # ── Client-tier training (Tier B): owns struct_branch [+ fusion] ─
+            global_owned = global_model.block_state_dict(client_blocks)
             client_updates: dict[int, tuple[dict, int, float]] = {}
             client_deltas: dict[int, dict] = {}
             client_losses: dict[int, float] = {}
             for c in clients:
                 if c.client_id not in selected or not c.train_indices:
                     continue
-                loader = make_client_loader(cached_dataset, c.train_indices, batch_size)
-                sd, n, mean_loss = _local_train(global_model, loader, n_local_epochs, lr)
+                loader = make_client_loader(
+                    cached_dataset, c.train_indices, batch_size, balanced=balanced_sampling
+                )
+                sd, n, mean_loss = _train_blocks(
+                    global_model,
+                    loader,
+                    n_local_epochs,
+                    lr_r,
+                    loss_fn,
+                    client_blocks,
+                    local_opt_cfg,
+                )
                 rep = rep_scores.get(c.client_id, 0.5)
                 client_updates[c.client_id] = (sd, n, rep)
                 client_losses[c.client_id] = mean_loss
                 # Reputation scores the update *delta* Δw_n, not absolute weights.
-                client_deltas[c.client_id] = {k: v - global_trainable[k] for k, v in sd.items()}
+                client_deltas[c.client_id] = {k: v - global_owned[k] for k, v in sd.items()}
             # Statistical-utility feed for the oort / power_of_choice baselines
             # (harmless no-op for every other mode).
             selector.update_losses(client_losses)
@@ -1088,73 +1308,84 @@ def run_full_hfl(cfg: dict) -> dict:
                     },
                 )
 
-            # ── UAV-level aggregation (paper §IV-A Step 6) ───────────────
-            # struct_branch + fusion: plain data-size FedAvg over the IoT
-            # updates (reputation weighting is server-level only, §IV-A Step 7).
-            # img_proj: overlaid from the UAV's own image training. The UAV's
-            # struct+fusion update is *not* mixed in: in this simulation the
-            # UAV trains on the pooled shards of its assigned IoT clients (no
-            # separate aerial dataset exists), so including it would count
-            # every sample twice; its unique contribution is the vision head.
+            # ── Hierarchical aggregation (client → UAV → server) ──────────
+            # Client-owned block(s) flow client→UAV as data-size FedAvg within
+            # each coverage zone; UAV-owned block(s) originate at the UAV. Both
+            # are assembled per UAV, then combined at the server with reputation
+            # weighting. A zone missing either contribution falls back to the
+            # current global weights for those blocks (no double counting).
             iot_by_uav: dict[int, list[tuple[dict, int, float]]] = {}
             for cid, triple in client_updates.items():
-                uav_idx = selected[cid]
-                iot_by_uav.setdefault(uav_idx, []).append(triple)
+                iot_by_uav.setdefault(selected[cid], []).append(triple)
 
             uav_updates: list[tuple[dict, int, float]] = []
             for uav_idx in range(K):
                 iot_upds = iot_by_uav.get(uav_idx, [])
-                uav_img = uav_img_updates.get(uav_idx)
-
-                if not iot_upds and uav_img is None:
+                uav_own = uav_own_updates.get(uav_idx)
+                if not iot_upds and uav_own is None:
                     continue
 
+                parts: dict = {}
                 if iot_upds:
-                    sf_agg = fedavg([(sd, n) for sd, n, _ in iot_upds])
+                    parts.update(fedavg([(sd, n) for sd, n, _ in iot_upds]))
                     total_n = sum(n for _, n, _ in iot_upds)
                 else:
-                    # Coverage zone with UAV imagery but no IoT deliveries:
-                    # struct+fusion stay at the current global weights.
-                    sf_agg = global_model.trainable_state_dict()
-                    total_n = uav_img[1]
+                    parts.update(global_model.block_state_dict(client_blocks))
+                    total_n = uav_own[1] if uav_own else 0
 
-                if uav_img is not None:
-                    img_part = {k: v for k, v in uav_img[0].items() if k.startswith("img_proj.")}
-                else:
-                    img_part = {
-                        f"img_proj.{k}": v.clone()
-                        for k, v in global_model.img_proj.state_dict().items()
-                    }
-                full_agg = {**img_part, **sf_agg}
+                if uav_own is not None:
+                    parts.update(uav_own[0])
+                elif uav_blocks:
+                    parts.update(global_model.block_state_dict(uav_blocks))
 
                 # UAV reputation = trimmed mean (10% per tail) of its assigned
                 # cluster's IoT reputations (paper §IV-C7).
                 cluster_reps = [rep_scores.get(c.client_id, 0.5) for c in uav_groups[uav_idx]]
                 uav_rep = trimmed_mean(cluster_reps) if cluster_reps else 1.0
+                uav_updates.append((parts, total_n, uav_rep))
 
-                uav_updates.append((full_agg, total_n, uav_rep))
-
-            # ── Server-level aggregation ──────────────────────────────────
+            # ── Server-level aggregation + momentum (A3) ──────────────────
             # Reputation-weighted FedAvg; UAVs whose cluster trimmed-mean
-            # reputation falls below R_min are excluded this round (§IV-D).
+            # reputation falls below R_min are excluded this round (§IV-D). The
+            # aggregate is then applied through a heavy-ball server-momentum step
+            # (FedAvgM) to damp the non-IID round-to-round oscillation.
             if uav_updates:
-                if rep_weighted:
-                    active = [u for u in uav_updates if u[2] >= R_min]
-                    if active:
-                        server_agg = reputation_fedavg(active)
-                        global_model.load_full_trainable_state_dict(server_agg)
-                else:
-                    server_agg = fedavg([(sd, n) for sd, n, _ in uav_updates])
-                    global_model.load_full_trainable_state_dict(server_agg)
+                active = [u for u in uav_updates if u[2] >= R_min] if rep_weighted else uav_updates
+                if active:
+                    server_agg = (
+                        reputation_fedavg(active)
+                        if rep_weighted
+                        else fedavg([(sd, n) for sd, n, _ in active])
+                    )
+                    new_full = _apply_server_momentum(
+                        global_model.full_trainable_state_dict(),
+                        server_agg,
+                        server_velocity,
+                        server_momentum,
+                        server_lr,
+                    )
+                    global_model.load_full_trainable_state_dict(new_full)
+
+            # ── EMA of the global model for evaluation (A4) ───────────────
+            # The round-100 snapshot is a lottery ticket under ±0.05/round
+            # oscillation; evaluate a slow EMA of the global weights instead.
+            if ema_model is not None:
+                ema_sd = ema_model.full_trainable_state_dict()
+                cur = global_model.full_trainable_state_dict()
+                blended = {k: ema_decay * ema_sd[k] + (1.0 - ema_decay) * cur[k] for k in cur}
+                ema_model.load_full_trainable_state_dict(blended)
+                eval_model = ema_model
+            else:
+                eval_model = global_model
 
             # ── Device state update ───────────────────────────────────────
             device_mgr.update_round(set(selected.keys()))
 
             # ── Evaluate ─────────────────────────────────────────────────
-            metrics = _evaluate(global_model, cached_dataset, global_test_indices)
+            metrics = _evaluate(eval_model, cached_dataset, global_test_indices)
             elapsed = time.perf_counter() - t0
 
-            if metrics["accuracy"] >= target_accuracy:
+            if metrics.get(target_metric, 0.0) >= target_value:
                 target_streak += 1
                 if rounds_to_target is None and target_streak >= _TARGET_CONSEC_ROUNDS:
                     rounds_to_target = rnd - _TARGET_CONSEC_ROUNDS + 1
@@ -1166,7 +1397,7 @@ def run_full_hfl(cfg: dict) -> dict:
             if placement_method is None:
                 comm_mb = round_comm_mb(n_selected)
             else:
-                comm_mb = round_comm_mb(n_selected, n_active_uavs=len(uav_img_updates))
+                comm_mb = round_comm_mb(n_selected, n_active_uavs=len(uav_own_updates))
 
             for cid in selected:
                 sel_counts[cid] += 1
