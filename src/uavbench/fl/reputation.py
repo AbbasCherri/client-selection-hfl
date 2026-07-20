@@ -17,20 +17,25 @@ R_temp     (0.3) — temporal reliability: 0.5·success_rate + 0.5/(1 + σ_RT),
                    where σ_RT is the variance of the client's recent response
                    times (seconds).
 
-The component weights start at (0.4, 0.3, 0.3) and are adapted every 10 rounds
+The component weights start at the prior below and are adapted every 10 rounds
 via a Dirichlet-posterior update (paper §IV-C4 "Bayesian inference"): each
 component's score on a delivering client counts as evidence that the component
 predicted reliability correctly; (1 − score) counts as evidence on an absent
 client. Weights are the normalized posterior concentrations.
+
+The starting prior is the 2026-07-20 Optuna weight search's result (see
+scripts/tune_weights.py), not the paper's stated (0.4, 0.3, 0.3) — the search
+found temporal reliability a much stronger prior than contribution quality or
+anomaly detection. Deliberately deviates from §IV-C4's stated split.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-W_CONTRIB: float = 0.4
-W_ANOMALY: float = 0.3
-W_TEMP: float = 0.3
+W_CONTRIB: float = 0.091
+W_ANOMALY: float = 0.134
+W_TEMP: float = 0.775
 EMA_ALPHA: float = 0.30  # legacy score-smoothing constant (kept for back-compat)
 
 # EMA on the update *vector* (paper Algorithm 3: 0.7 new / 0.3 old).

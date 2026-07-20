@@ -44,14 +44,19 @@ POSITIONS = np.array([[0.0, 0.0, 50.0], [10.0, 0.0, 50.0]])
 
 
 def fitness_hand_computed():
+    # Explicit w1/w2/w3 here, independent of Fitness's own defaults (which
+    # get retuned — see problem/fitness.py) — this checks the *formula* is
+    # right, not today's production weight values.
     inst = _two_device_one_position()
-    fit = Fitness(inst)
+    fit = Fitness(inst, w1=0.6, w2=0.3, w3=0.1)
     b = fit.components(np.array([0.0, 0.0, 0.0]))  # coincides with prev, covers both
     assert b.f_cover == 2.0 and abs(b.f_cover_norm - 1.0) < 1e-9
     assert abs(b.d_move) < 1e-9 and abs(b.l_imb) < 1e-9
     assert abs(b.fitness - 0.6) < 1e-9  # w1 * 1.0
     # Movement penalty: 10 m up, both still covered.
-    b2 = Fitness(_two_device_one_position()).components(np.array([0.0, 0.0, 10.0]))
+    b2 = Fitness(_two_device_one_position(), w1=0.6, w2=0.3, w3=0.1).components(
+        np.array([0.0, 0.0, 10.0])
+    )
     diag = np.sqrt(3 * 100.0**2)
     assert abs(b2.d_move - 10.0) < 1e-9
     assert abs(b2.fitness - (0.6 - 0.3 * 10.0 / diag)) < 1e-9

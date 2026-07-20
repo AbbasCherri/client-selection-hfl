@@ -52,9 +52,16 @@ class Fitness:
     def __init__(
         self,
         instance: ProblemInstance,
-        w1: float = 0.6,
-        w2: float = 0.3,
-        w3: float = 0.1,
+        # Paper §IV-E1 states 0.6/0.3/0.1; these defaults are instead the
+        # 2026-07-20 Optuna weight search's result (scripts/tune_weights.py) —
+        # coverage should dominate far more, movement penalty far less, than
+        # the paper's stated split. Only affects callers that don't pass
+        # explicit weights (run_full_hfl's _place_uavs); Tier-1 configs
+        # (tier1_core.yaml, smoke.yaml) always pass explicit w1/w2/w3 and are
+        # unaffected by this default.
+        w1: float = 0.811,
+        w2: float = 0.03,
+        w3: float = 0.159,
     ) -> None:
         self.instance = instance
         self.w1, self.w2, self.w3 = w1, w2, w3

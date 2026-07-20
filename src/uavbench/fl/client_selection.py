@@ -69,10 +69,13 @@ W_UTILITY = 0.35
 # a hard eligibility gate; scoring by it made UCB drain the highest-charge
 # cohort in lockstep and then swap wholesale to the rested cohort every T_sel —
 # the non-IID ping-pong (highest volatility of all methods, worse than random
-# on macro-F1). Learning-capability + class-coverage utility now carry the
-# reweighted mass (0.4 / 0.6, summing to 1).
-W_LEARNING_NB = 0.4
-W_UTILITY_NB = 0.6
+# on macro-F1). Learning-capability + class-coverage utility carry the
+# reweighted mass (summing to 1) — values from the 2026-07-20 Optuna weight
+# search (scripts/tune_weights.py, 120 trials, real data; +22% over the prior
+# hand-picked 0.4/0.6 split on the search's objective). Not re-derived from
+# the paper; see that script's docstring for the search protocol.
+W_LEARNING_NB = 0.702
+W_UTILITY_NB = 0.298
 
 # Class-coverage roster construction (proposed system, Tier C). Roster building
 # is a submodular class-coverage maximization: value(S) = Σ_c scarcity_c·√(Σ_{i∈S}
@@ -80,16 +83,22 @@ W_UTILITY_NB = 0.6
 # fast, scarce classes keep paying), so greedy is near-optimal. The static
 # priority and a Gumbel perturbation are blended in (Gumbel-top-k = sampling
 # clients ∝ score without replacement), replacing the deterministic argsort that
-# locked the roster in place.
-SEL_STATIC_BLEND = 0.5   # weight of normalized static priority vs coverage gain
-SEL_GUMBEL_SCALE = 0.5   # stochasticity of the roster (0 → deterministic greedy)
+# locked the roster in place. Values from the 2026-07-20 Optuna search (see
+# W_LEARNING_NB above) — the search pushed SEL_GUMBEL_SCALE near the top of its
+# searched range, i.e. more roster randomness helps more than intuition suggested.
+SEL_STATIC_BLEND = 0.435   # weight of normalized static priority vs coverage gain
+SEL_GUMBEL_SCALE = 1.475   # stochasticity of the roster (0 → deterministic greedy)
 SEL_MIN_MARGINAL = 0.0   # stop a UAV early below this normalized gain (0 → fill capacity)
 
-# Utility sub-weights (§IV-C3)
-W_EPI = 0.4
-W_SNR = 0.3
-W_DENS = 0.2
-W_PROX = 0.1
+# Utility sub-weights (§IV-C3 states 0.4/0.3/0.2/0.1; these are the 2026-07-20
+# Optuna-searched values instead — see W_LEARNING_NB above. Deliberately
+# deviates from the paper text: the search found UAV-proximity dominant and
+# epicentre-distance/SNR nearly irrelevant, the opposite emphasis from the
+# paper's stated split.
+W_EPI = 0.043
+W_SNR = 0.078
+W_DENS = 0.295
+W_PROX = 0.584
 
 UCB_C = math.sqrt(2)  # exploration constant from paper
 
