@@ -1,9 +1,0 @@
-harness,method,dropout_rate,snr_degradation_db,black_chip_rate,seed_idx,job_seed,seed
-stress_sweep,proposed_hfl,0.0,0.0,0.0,0,20270014,20260381
-stress_sweep,proposed_hfl,0.0,0.0,0.0,1,20277933,20252430
-stress_sweep,flat_fl,0.0,0.0,0.0,0,20270014,20297518
-stress_sweep,flat_fl,0.0,0.0,0.0,1,20277933,20289085
-stress_sweep,proposed_hfl,0.3,0.0,0.0,0,20270014,20260381
-stress_sweep,proposed_hfl,0.3,0.0,0.0,1,20277933,20252430
-stress_sweep,flat_fl,0.3,0.0,0.0,0,20270014,20297518
-stress_sweep,flat_fl,0.3,0.0,0.0,1,20277933,20289085

@@ -1,3 +1,0 @@
-dropout_rate,snr_degradation_db,black_chip_rate,method_a,method_b,n_pairs,statistic,p_value,mean_diff,significant,metric,test,correction
-0.0,0.0,0.0,flat_fl,proposed_hfl,2,0.0,0.5,-0.15000000000000002,False,accuracy,wilcoxon,holm
-0.3,0.0,0.0,flat_fl,proposed_hfl,2,0.0,0.5,-0.14166666666666672,False,accuracy,wilcoxon,holm
