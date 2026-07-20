@@ -37,7 +37,7 @@ logger = logging.getLogger("uavbench.fl.sweep")
 # 2026-07-17 tensor-sliced shard loader): checkpoints written by an older
 # version are no longer reproducible under the current code, so the resume
 # gate refuses them and the affected jobs rerun.
-PIPELINE_VERSION = 2
+PIPELINE_VERSION = 3
 
 # Checkpoint-resume config comparison: sections that define what a job
 # computes. Keys in _RESUME_VOLATILE_DATA_KEYS are locations/credentials, not

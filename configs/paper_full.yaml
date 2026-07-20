@@ -63,16 +63,33 @@ fl:
   n_rounds: 100
   n_local_epochs: 2
   n_uav_epochs: 2      # UAV image-branch training epochs per round (paper §IV-A Step 3)
-  lr: 5.0e-4
-  uav_lr: 5.0e-4       # UAV learning rate (can tune independently from IoT lr)
+  lr: 2.0e-2           # momentum-SGD client LR (higher than the old fresh-Adam 5e-4)
+  uav_lr: 2.0e-2       # UAV learning rate (can tune independently from IoT lr)
   batch_size: 32
-  target_accuracy: 0.60  # rounds-to-target threshold; 0.70 exceeded even the
-                         # centralized oracle (~0.68), so the metric was NaN
-                         # in every 2026-07-18 run
-  T_sel: 5           # reposition UAVs + reselect clients every 5 FL rounds (paper §IV-E)
+  T_sel: 5           # reposition UAVs every 5 FL rounds (placement cadence, paper §IV-E)
+  reselect_every: 1  # client selection cadence — decoupled from placement (Tier C)
   lambda_min: 0.5    # early-reselection trigger: eligible < λ_min·min(ΣC_u, N) (§IV-E6)
   R_min: 0.3         # UAV clusters below this trimmed-mean reputation are excluded (§IV-D)
   placement_method: pso   # authoritative placement optimizer ("ga" for the ablation)
+
+  # ── Training recipe (Tier A) ──────────────────────────────────────────
+  logit_adjust_tau: 1.0     # logit-adjusted CE vs the global prior; 0 → plain CE
+  balanced_sampling: false  # uniform shard sampling (imbalance handled in the loss)
+  local_optimizer:          # momentum SGD amortizes across rounds (unlike fresh Adam)
+    name: sgd
+    momentum: 0.9
+  server_momentum: 0.9      # FedAvgM server-side momentum (damps non-IID oscillation)
+  server_lr: 1.0
+  lr_decay: cosine          # across-round client-LR decay ("none" to disable)
+  ema_decay: 0.9            # evaluate an EMA of the global model (0 → raw snapshot)
+
+  # ── Hierarchy / method design (Tier B + C) ────────────────────────────
+  fusion_owner: uav         # UAV tier owns img_proj+fusion (both modalities co-located)
+  placement_class_aware: true   # bias PSO coverage toward rare-class-rich clients
+
+  # ── Rounds-to-target on the reported primary metric (macro-F1) ─────────
+  target_metric: macro_f1
+  target_value: 0.45     # a meaningful floor (vs raw accuracy under an 0.82 majority)
 
 budget:
   P: 50              # PSO swarm size

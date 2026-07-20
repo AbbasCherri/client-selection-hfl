@@ -140,9 +140,20 @@ def cmd_significance(args: argparse.Namespace) -> None:
 
     group_cols = [c for c in group_spec if c in df.columns]
 
-    # Round tables → final round per (method, group, seed).
+    # Round tables → per (method, group, seed) summary. The mean of the last K
+    # rounds is the reported statistic (not the final-round snapshot): under
+    # ±0.05/round oscillation a single round is a lottery draw, so the paired
+    # test would mostly measure snapshot noise. --last-k 1 restores the old
+    # final-round behaviour.
     if "round" in df.columns:
-        df = df.sort_values("round").groupby(["method", "seed"] + group_cols, as_index=False).last()
+        keys = ["method", "seed"] + group_cols
+        last_k = max(int(getattr(args, "last_k", 10)), 1)
+        ordered = df.sort_values(keys + ["round"])
+        if last_k == 1:
+            df = ordered.groupby(keys, as_index=False).last()
+        else:
+            tail = ordered.groupby(keys, group_keys=False).tail(last_k)
+            df = tail.groupby(keys, as_index=False)[args.metric].mean()
 
     if not group_cols:
         df = df.assign(_all="all")
@@ -423,6 +434,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_sig.add_argument("--methods", default=None, help="comma-separated; default = all in table")
     p_sig.add_argument("--test", default="wilcoxon", choices=["wilcoxon", "ttest_rel"])
     p_sig.add_argument("--alpha", type=float, default=0.05)
+    p_sig.add_argument(
+        "--last-k",
+        type=int,
+        default=10,
+        dest="last_k",
+        help="reduce round tables to the mean of the last K rounds per seed "
+        "(default 10; 1 = final-round snapshot). Averaging tames the "
+        "±0.05/round oscillation that made a single round a lottery draw.",
+    )
     p_sig.set_defaults(func=cmd_significance)
 
     p_cl = sub.add_parser("clean", help="remove results (of a config, or all)")

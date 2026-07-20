@@ -1,0 +1,91 @@
+# Reduced real-data smoke of the FULL paper pipeline (run_paper_sim / run_full_hfl).
+#
+# The purpose is to validate the improved training recipe (Tier A/B) and the
+# redesigned selection/placement (Tier C) on REAL data quickly, before
+# committing the VM to the ~45 h full grid. tier2_reduced.yaml cannot do this:
+# it drives the legacy run_tier2 harness, which none of these changes touch.
+#
+# Run (needs HF_TOKEN on first call; warm ./data caches after that):
+#   python -m uavbench run_paper_sim --config configs/paper_smoke.yaml
+#
+# Falsifiable signatures to check against results/paper_smoke/*/fullsim_rounds.parquet:
+#   1. round-to-round |Δmacro_f1| collapses (< ~0.01 after round ~10)   [Tier A]
+#   2. the HFL family's macro_f1 climbs above flat_fl within ~30 rounds  [Tier B]
+#   3. proposed_hfl ≥ hfl_no_selection on last-10 macro_f1               [Tier C]
+name: paper_smoke
+results_dir: results/paper_smoke
+
+n_workers: 6
+n_seeds: 3
+optimizer_seed: 9876
+
+epicentre: [37.488, 137.272]
+
+data:
+  source: real
+  subsample: 0.2          # ~25 k rows — fast but enough class signal
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  feature_num_workers: 8
+  N_clients: 50           # overwritten per-job by run_paper_sweep
+
+fl:
+  K: 20
+  R_comm: 20000.0
+  capacity: 6
+  n_rounds: 30            # enough to see the plateau/climb, not the full 100
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  lr: 2.0e-2
+  uav_lr: 2.0e-2
+  batch_size: 32
+  T_sel: 5
+  reselect_every: 1
+  lambda_min: 0.5
+  R_min: 0.3
+  placement_method: pso
+
+  logit_adjust_tau: 1.0
+  balanced_sampling: false
+  local_optimizer:
+    name: sgd
+    momentum: 0.9
+  server_momentum: 0.9
+  server_lr: 1.0
+  lr_decay: cosine
+  ema_decay: 0.9
+  fusion_owner: uav
+  placement_class_aware: true
+
+  target_metric: macro_f1
+  target_value: 0.45
+
+budget:
+  P: 50
+  G_max: 30
+
+N_values:
+  - 30
+  - 50
+
+optimizer_params:
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+
+# A representative subset: the proposed system, the two references it must beat
+# (flat_fl for Tier B, hfl_no_selection for Tier C), the oracle, and one strong
+# literature selector. The full 13-method grid stays in paper_full.yaml.
+methods:
+  - proposed_hfl
+  - flat_fl
+  - centralized
+  - hfl_no_selection
+  - hfl_static
+  - oort
