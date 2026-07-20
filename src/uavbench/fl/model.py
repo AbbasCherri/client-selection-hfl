@@ -104,7 +104,29 @@ class CachedFusionModel(nn.Module):
         struct_emb = self.struct_branch(struct)
         return self.fusion(torch.cat([img_emb, struct_emb], dim=1))
 
-    # --- img_proj freeze control (paper §IV-B asymmetric training) --------
+    # --- block freeze control (paper §IV-B asymmetric / modality-aligned training) --
+
+    #: canonical block names, in state-dict prefix order
+    BLOCKS = ("img_proj", "struct_branch", "fusion")
+
+    def _block(self, name: str) -> nn.Module:
+        return getattr(self, name)
+
+    def set_trainable_blocks(self, blocks: set[str] | tuple[str, ...]) -> None:
+        """Enable gradients on exactly the named blocks; freeze the rest.
+
+        Modality-aligned training (Tier B) assigns one owner per block: the UAV
+        tier trains ``img_proj``+``fusion`` (both modalities co-located) with
+        ``struct_branch`` frozen; IoT clients train ``struct_branch`` alone with
+        the other two frozen. Each block is thus optimized against the exact
+        frozen value of its counterpart, rather than two tiers drifting apart
+        in parallel and being glued together at aggregation time.
+        """
+        want = set(blocks)
+        for name in self.BLOCKS:
+            flag = name in want
+            for p in self._block(name).parameters():
+                p.requires_grad_(flag)
 
     def freeze_img_proj(self) -> None:
         """Freeze img_proj — used for the global model so IoT clients cannot update it."""
@@ -116,43 +138,69 @@ class CachedFusionModel(nn.Module):
         for p in self.img_proj.parameters():
             p.requires_grad_(True)
 
+    # --- generic per-block parameter communication -----------------------
+
+    def block_state_dict(self, blocks: set[str] | tuple[str, ...]) -> dict[str, torch.Tensor]:
+        """Prefixed clone of the parameters in the named blocks."""
+        out: dict[str, torch.Tensor] = {}
+        for name in self.BLOCKS:
+            if name in blocks:
+                out.update({f"{name}.{k}": v.clone() for k, v in self._block(name).state_dict().items()})
+        return out
+
+    def load_block_state_dict(self, d: dict[str, torch.Tensor]) -> None:
+        """Load whichever ``<block>.<param>`` prefixes are present; ignore the rest."""
+        for name in self.BLOCKS:
+            prefix = f"{name}."
+            sub = {k[len(prefix) :]: v for k, v in d.items() if k.startswith(prefix)}
+            if sub:
+                self._block(name).load_state_dict(sub, strict=True)
+
     # --- IoT-level parameter communication (struct_branch + fusion only) --
 
     def trainable_state_dict(self) -> dict[str, torch.Tensor]:
-        """Return struct_branch + fusion parameters (IoT-level FedAvg payload)."""
-        return {
-            **{f"struct_branch.{k}": v.clone() for k, v in self.struct_branch.state_dict().items()},
-            **{f"fusion.{k}": v.clone() for k, v in self.fusion.state_dict().items()},
-        }
+        """Return struct_branch + fusion parameters (legacy IoT-level payload)."""
+        return self.block_state_dict(("struct_branch", "fusion"))
 
     def load_trainable_state_dict(self, d: dict[str, torch.Tensor]) -> None:
-        """Load aggregated IoT-level parameters (struct_branch + fusion)."""
-        sb = {k[len("struct_branch.") :]: v for k, v in d.items() if k.startswith("struct_branch.")}
-        fh = {k[len("fusion.") :]: v for k, v in d.items() if k.startswith("fusion.")}
-        if sb:
-            self.struct_branch.load_state_dict(sb, strict=True)
-        if fh:
-            self.fusion.load_state_dict(fh, strict=True)
+        """Load aggregated struct_branch + fusion (whichever prefixes are present)."""
+        self.load_block_state_dict(d)
 
     # --- UAV-level parameter communication (img_proj + struct_branch + fusion)
 
     def full_trainable_state_dict(self) -> dict[str, torch.Tensor]:
         """Return img_proj + struct_branch + fusion parameters (UAV-level payload)."""
-        return {
-            **{f"img_proj.{k}": v.clone() for k, v in self.img_proj.state_dict().items()},
-            **self.trainable_state_dict(),
-        }
+        return self.block_state_dict(self.BLOCKS)
 
     def load_full_trainable_state_dict(self, d: dict[str, torch.Tensor]) -> None:
-        """Load aggregated UAV-level parameters; img_proj keys are optional.
+        """Load aggregated parameters; any subset of block prefixes is accepted.
 
-        If img_proj keys are absent (e.g. flat_fl server aggregation), only
-        struct_branch and fusion are updated — img_proj stays unchanged.
+        Missing prefixes leave that block unchanged (e.g. flat_fl server
+        aggregation carries no img_proj keys → img_proj stays put).
         """
-        ip = {k[len("img_proj.") :]: v for k, v in d.items() if k.startswith("img_proj.")}
-        if ip:
-            self.img_proj.load_state_dict(ip, strict=True)
-        self.load_trainable_state_dict(d)
+        self.load_block_state_dict(d)
+
+
+def make_loss_fn(log_prior: torch.Tensor | None = None, tau: float = 1.0):
+    """Logit-adjusted cross-entropy (Menon et al., ICLR 2021) if a class
+    log-prior is supplied, else plain cross-entropy.
+
+    Training shifts the logits by ``tau·log_prior`` so the long-tailed prior is
+    corrected inside the loss — every client optimizes the *same* objective on
+    its raw shard, instead of each resampling its shard to a different effective
+    distribution (the per-shard ``BalancedShardLoader`` behaviour this replaces,
+    which manufactured client drift). Inference uses the raw logits (no shift),
+    so only the training gradient changes.
+    """
+    ce = nn.CrossEntropyLoss()
+    if log_prior is None:
+        return ce
+    shift = tau * log_prior
+
+    def _loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return ce(logits + shift, target)
+
+    return _loss
 
 
 def fedavg(updates: list[tuple[dict, int]]) -> dict[str, torch.Tensor]:

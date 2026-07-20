@@ -84,23 +84,33 @@ class CachedDataset(Dataset):
 
 
 class BalancedShardLoader:
-    """Class-balanced batch iterator over one client/UAV shard.
+    """Batch iterator over one client/UAV shard.
 
-    Sampling semantics match the DataLoader + WeightedRandomSampler it
-    replaces: each epoch draws ``len(indices)`` samples with replacement,
-    weighted by inverse class frequency within the shard, from the global
-    torch RNG (deterministic under ``torch.manual_seed``). Batches are built
-    by slicing the in-memory feature tensors instead of per-item
-    ``__getitem__`` + collate, which dominated training wall-time.
+    ``balanced=True`` (default) draws ``len(indices)`` samples per epoch with
+    replacement, weighted by inverse class frequency within the shard — the
+    original WeightedRandomSampler behaviour. ``balanced=False`` draws a uniform
+    random permutation (no resampling): each client then trains on its true
+    shard distribution, and class imbalance is corrected in the loss instead
+    (logit adjustment), so every client shares one objective. Both draw from the
+    global torch RNG (deterministic under ``torch.manual_seed``). Batches slice
+    the in-memory feature tensors rather than per-item ``__getitem__`` + collate.
     """
 
-    def __init__(self, dataset: CachedDataset, indices: list[int], batch_size: int) -> None:
+    def __init__(
+        self,
+        dataset: CachedDataset,
+        indices: list[int],
+        batch_size: int,
+        balanced: bool = True,
+    ) -> None:
         if not indices:
             raise ValueError("BalancedShardLoader needs a non-empty shard")
         self.indices = torch.as_tensor(indices, dtype=torch.long)
-        shard_labels = dataset.labels[self.indices].to(torch.long)
-        counts = torch.bincount(shard_labels, minlength=N_CLASSES).to(torch.float64)
-        self.weights = 1.0 / (counts[shard_labels] + 1e-6)
+        self.balanced = balanced
+        if balanced:
+            shard_labels = dataset.labels[self.indices].to(torch.long)
+            counts = torch.bincount(shard_labels, minlength=N_CLASSES).to(torch.float64)
+            self.weights = 1.0 / (counts[shard_labels] + 1e-6)
         self.batch_size = min(batch_size, len(indices))
         self._img = dataset.img_features
         self._struct = dataset.struct_features
@@ -110,7 +120,10 @@ class BalancedShardLoader:
         return (len(self.indices) + self.batch_size - 1) // self.batch_size
 
     def __iter__(self):
-        order = torch.multinomial(self.weights, len(self.indices), replacement=True)
+        if self.balanced:
+            order = torch.multinomial(self.weights, len(self.indices), replacement=True)
+        else:
+            order = torch.randperm(len(self.indices))
         sel = self.indices[order]
         for start in range(0, len(sel), self.batch_size):
             b = sel[start : start + self.batch_size]
@@ -121,6 +134,7 @@ def make_client_loader(
     dataset: CachedDataset,
     indices: list[int],
     batch_size: int = 16,
+    balanced: bool = True,
 ) -> BalancedShardLoader:
-    """Loader for one client's shard with value-balanced sampling."""
-    return BalancedShardLoader(dataset, indices, batch_size)
+    """Loader for one client's shard (value-balanced sampling by default)."""
+    return BalancedShardLoader(dataset, indices, batch_size, balanced=balanced)
