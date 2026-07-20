@@ -65,6 +65,7 @@ from pathlib import Path
 import numpy as np
 import optuna
 import pandas as pd
+import torch
 from joblib import Parallel, delayed
 
 import uavbench.fl.client_selection as cs
@@ -115,6 +116,14 @@ def _run_one_job(job_cfg: dict, w: dict) -> pd.DataFrame | None:
     set explicitly from `w` (never assumed inherited from a prior call on a
     reused worker process) — see module docstring.
     """
+    # Same reason every other parallel worker in this codebase does this
+    # (sweep.py, stress_sweep.py): without it, each worker's own BLAS/MKL
+    # intra-op parallelism fights every other worker for the same cores —
+    # n_parallel single-job workers oversubscribe to n_parallel x (cores)
+    # threads instead of using one each, and everything gets slower than a
+    # single unparallelized job (confirmed: 283-291% CPU per "1-job" worker
+    # before this fix).
+    torch.set_num_threads(1)
     cs.W_LEARNING_NB = w["w_learning_nb"]
     cs.W_UTILITY_NB = w["w_utility_nb"]
     cs.SEL_STATIC_BLEND = w["sel_static_blend"]
