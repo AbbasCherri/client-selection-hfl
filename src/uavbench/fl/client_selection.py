@@ -65,6 +65,26 @@ W_BATTERY = 0.35
 W_LEARNING = 0.30
 W_UTILITY = 0.35
 
+# Proposed (ucb) priority with battery removed from the *score*. Battery stays
+# a hard eligibility gate; scoring by it made UCB drain the highest-charge
+# cohort in lockstep and then swap wholesale to the rested cohort every T_sel —
+# the non-IID ping-pong (highest volatility of all methods, worse than random
+# on macro-F1). Learning-capability + class-coverage utility now carry the
+# reweighted mass (0.4 / 0.6, summing to 1).
+W_LEARNING_NB = 0.4
+W_UTILITY_NB = 0.6
+
+# Class-coverage roster construction (proposed system, Tier C). Roster building
+# is a submodular class-coverage maximization: value(S) = Σ_c scarcity_c·√(Σ_{i∈S}
+# count_c(i)), whose √ gives diminishing returns per class (majority saturates
+# fast, scarce classes keep paying), so greedy is near-optimal. The static
+# priority and a Gumbel perturbation are blended in (Gumbel-top-k = sampling
+# clients ∝ score without replacement), replacing the deterministic argsort that
+# locked the roster in place.
+SEL_STATIC_BLEND = 0.5   # weight of normalized static priority vs coverage gain
+SEL_GUMBEL_SCALE = 0.5   # stochasticity of the roster (0 → deterministic greedy)
+SEL_MIN_MARGINAL = 0.0   # stop a UAV early below this normalized gain (0 → fill capacity)
+
 # Utility sub-weights (§IV-C3)
 W_EPI = 0.4
 W_SNR = 0.3
@@ -178,7 +198,14 @@ class ClientSelector:
         self,
         client_ids: list[int],
         epicentre: tuple[float, float] | None = None,
+        seed: int = 0,
     ) -> None:
+        # Dedicated stochastic-roster RNG (Gumbel-top-k), seeded from the run's
+        # per-method seed. Kept separate from the shared placement/device RNG so
+        # the selection sampler does not perturb the environment simulation
+        # (battery/SNR trajectories) — decoupling that also keeps every non-ucb
+        # baseline's device physics byte-identical to a deterministic-greedy run.
+        self._sel_rng = np.random.default_rng(seed)
         self._counts: dict[int, int] = {cid: 0 for cid in client_ids}
         # Round of each client's most recent selection (0 = never selected).
         # Maintained for every mode; consumed by the fair_mab staleness term.
@@ -209,8 +236,16 @@ class ClientSelector:
         rng: np.random.Generator | None = None,
         R_comm: float = DEFAULT_R_COMM_M,
         t_stale_cap: int = DEFAULT_T_STALE_CAP,
+        class_counts: dict[int, np.ndarray] | None = None,
+        class_scarcity: np.ndarray | None = None,
     ) -> dict[int, int]:
-        """Return {client_id: uav_idx} for the clients selected this round."""
+        """Return {client_id: uav_idx} for the clients selected this round.
+
+        ``class_counts`` (per-client 4-bin label histogram) and
+        ``class_scarcity`` (inverse-prior class weights) drive the proposed
+        ``ucb`` mode's class-coverage roster; every other mode ignores them, so
+        the selection rule stays the only experimental variable.
+        """
         # ── Eligibility gate (every mode — see module docstring on "all") ──
         eligible: dict[int, int] = {}
         for cid, uav_idx in covered.items():
@@ -290,26 +325,28 @@ class ClientSelector:
             R_comm,
         )
 
-        batteries = np.array([device_states[cid].battery for cid in eligible_ids])
         compute_s = np.array([device_states[cid].compute_time_s for cid in eligible_ids])
         reputations = np.array([reputation_scores.get(cid, 0.5) for cid in eligible_ids])
         utilities = np.array([utility.get(cid, 0.5) for cid in eligible_ids])
 
-        # Paper §IV-C2: b̃ = b_n, ℓ̃ = 1 − (T̂_n/T_max)², Ũ = β·Û + (1−β)·R.
+        # Paper §IV-C2 with battery dropped from the score (eligibility gate only):
+        # ℓ̃ = 1 − (T̂_n/T_max)², Ũ = β·Û + (1−β)·R.
         l_feat = np.clip(1.0 - (compute_s / T_MAX_S) ** 2, 0.0, 1.0)
         beta = beta_schedule(round_num)
         u_tilde = beta * utilities + (1.0 - beta) * reputations
 
-        priority = W_BATTERY * batteries + W_LEARNING * l_feat + W_UTILITY * u_tilde
+        priority = W_LEARNING_NB * l_feat + W_UTILITY_NB * u_tilde
 
         t = max(round_num, 1)
         sel_cnts = np.array([self._counts[cid] for cid in eligible_ids], dtype=float)
-        ucb = priority + UCB_C * np.sqrt(math.log(t) / (sel_cnts + 1.0))
+        static = priority + UCB_C * np.sqrt(math.log(t) / (sel_cnts + 1.0))
 
-        selected = self._greedy_assign(
+        selected = self._class_coverage_assign(
             eligible_ids,
             eligible,
-            ucb,
+            static,
+            class_counts,
+            class_scarcity,
             uav_capacity,
             client_coords,
             uav_coords_latlon,
@@ -479,6 +516,98 @@ class ClientSelector:
             selected[cid] = j_star
             fill[j_star] = fill.get(j_star, 0) + 1
             self._counts[cid] += 1
+        return selected
+
+    def _class_coverage_assign(
+        self,
+        eligible_ids: list[int],
+        eligible: dict[int, int],
+        static: np.ndarray,
+        class_counts: dict[int, np.ndarray] | None,
+        class_scarcity: np.ndarray | None,
+        uav_capacity: int,
+        client_coords: dict[int, tuple[float, float]],
+        uav_coords_latlon: list[tuple[float, float]],
+        R_comm: float,
+    ) -> dict[int, int]:
+        """Proposed roster construction: per-UAV submodular class-coverage greedy.
+
+        For each UAV, fill slots by repeatedly adding the feasible unassigned
+        client that maximizes
+
+            marginal_coverage_gain / gain₀  +  blend·statiĉ  +  scale·Gumbel
+
+        where the coverage value of a roster is Σ_c scarcity_c·√(Σ count_c) (√ →
+        diminishing returns per class → submodular → greedy near-optimal),
+        ``gain₀`` normalizes it to the first-pick scale, ``statiĉ`` is the
+        min-max-normalized learning/utility/UCB priority, and the per-client
+        Gumbel term makes the roster a sample rather than a fixed argsort. Falls
+        back to the plain priority greedy when class information is absent.
+        """
+        if class_counts is None or class_scarcity is None:
+            return self._greedy_assign(
+                eligible_ids, eligible, static, uav_capacity,
+                client_coords, uav_coords_latlon, R_comm,
+            )
+
+        _rng = self._sel_rng  # decoupled from the shared placement/device RNG
+        n = len(eligible_ids)
+        scarcity = np.asarray(class_scarcity, dtype=np.float64)
+        n_cls = scarcity.shape[0]
+        counts = np.array(
+            [np.asarray(class_counts.get(cid, np.zeros(n_cls)), dtype=np.float64) for cid in eligible_ids]
+        )
+
+        static_n = _minmax(static)
+        gumbel = -np.log(-np.log(_rng.uniform(1e-12, 1.0, size=n)))
+        perturbed_static = SEL_STATIC_BLEND * static_n + SEL_GUMBEL_SCALE * gumbel
+
+        dist: np.ndarray | None = None
+        if uav_coords_latlon:
+            dist = haversine_matrix(
+                np.asarray([client_coords[cid] for cid in eligible_ids]),
+                np.asarray(uav_coords_latlon),
+            )
+            n_uav = len(uav_coords_latlon)
+        else:
+            n_uav = (max(eligible.values()) + 1) if eligible else 0
+
+        def cov(acc: np.ndarray) -> float:
+            return float(np.dot(scarcity, np.sqrt(acc)))
+
+        selected: dict[int, int] = {}
+        assigned: set[int] = set()
+        for j in range(n_uav):
+            if dist is not None:
+                cand = [i for i in range(n) if i not in assigned and dist[i, j] <= R_comm]
+            else:
+                cand = [
+                    i for i in range(n)
+                    if i not in assigned and eligible[eligible_ids[i]] == j
+                ]
+            if not cand:
+                continue
+            acc = np.zeros(n_cls)
+            base = cov(acc)
+            gain0 = max((cov(counts[i]) - base for i in cand), default=0.0) or 1.0
+            for slot in range(uav_capacity):
+                best_i, best_score, best_mg = None, -np.inf, 0.0
+                for i in cand:
+                    mg = (cov(acc + counts[i]) - base) / gain0
+                    score = mg + perturbed_static[i]
+                    if score > best_score:
+                        best_score, best_i, best_mg = score, i, mg
+                if best_i is None:
+                    break
+                if slot > 0 and best_mg < SEL_MIN_MARGINAL:
+                    break  # only redundant coverage remains → stop (energy-aware)
+                cid = eligible_ids[best_i]
+                selected[cid] = j
+                assigned.add(best_i)
+                cand.remove(best_i)
+                acc = acc + counts[best_i]
+                base = cov(acc)
+                self._counts[cid] += 1
         return selected
 
     def _random_select(
