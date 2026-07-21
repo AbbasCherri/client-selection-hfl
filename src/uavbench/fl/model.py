@@ -201,28 +201,43 @@ def make_loss_fn(log_prior: torch.Tensor | None = None, tau: float = 1.0):
     return _loss
 
 
-def fedavg(updates: list[tuple[dict, int]]) -> dict[str, torch.Tensor]:
-    """Sample-weighted FedAvg of (state_dict, n_samples) pairs.
+def _weighted_accumulate(
+    sds: list[dict[str, torch.Tensor]], weights: list[float]
+) -> dict[str, torch.Tensor]:
+    """agg[k] = Σ_i weights[i]·sds[i][k], batched with ``torch._foreach_*``.
 
-    Accumulates in place (first contribution seeds the accumulator, the rest
-    ``+=``) instead of allocating a ``zeros_like`` plus a fresh sum tensor per
-    key per update. Numerically identical to the out-of-place form: in-place
-    and out-of-place float add invoke the same kernel, and the first update's
-    ``w·v`` is exactly what ``0 + w·v`` produced before.
+    One mul + one in-place add call per *update* (instead of one small torch op
+    per key per update — per-op dispatch overhead dominated the aggregation
+    cost at ~14 keys × tens of updates). Per-element math and accumulation
+    order are unchanged: each element still receives w₀·v₀ then += wᵢ·vᵢ in
+    update order, via the same mul/add kernels, so the result is bit-identical
+    to the per-key loop (pinned in check_integration_hfl). Falls back to that
+    loop if the updates do not share one key set (no current caller does, but
+    the function contract never required homogeneity).
     """
+    keys = list(sds[0].keys())
+    if any(len(sd) != len(keys) or any(k not in sd for k in keys) for sd in sds[1:]):
+        agg: dict[str, torch.Tensor] = {}
+        for sd, w in zip(sds, weights):
+            for k, v in sd.items():
+                contrib = v.float() * w
+                if k in agg:
+                    agg[k] += contrib
+                else:
+                    agg[k] = contrib
+        return agg
+    agg_list = torch._foreach_mul([sds[0][k].float() for k in keys], weights[0])
+    for sd, w in zip(sds[1:], weights[1:]):
+        torch._foreach_add_(agg_list, torch._foreach_mul([sd[k].float() for k in keys], w))
+    return dict(zip(keys, agg_list))
+
+
+def fedavg(updates: list[tuple[dict, int]]) -> dict[str, torch.Tensor]:
+    """Sample-weighted FedAvg of (state_dict, n_samples) pairs."""
     total = sum(n for _, n in updates)
     if total == 0:
         return {k: v.clone() for k, v in updates[0][0].items()}
-    agg: dict[str, torch.Tensor] = {}
-    for sd, n in updates:
-        w = n / total
-        for k, v in sd.items():
-            contrib = v.float() * w
-            if k in agg:
-                agg[k] += contrib
-            else:
-                agg[k] = contrib
-    return agg
+    return _weighted_accumulate([sd for sd, _ in updates], [n / total for _, n in updates])
 
 
 def reputation_fedavg(
@@ -237,16 +252,7 @@ def reputation_fedavg(
     total_w = sum(weights)
     if total_w < 1e-10:
         return fedavg([(sd, n) for sd, n, _ in updates])
-    agg: dict[str, torch.Tensor] = {}
-    for (sd, _n, _rep), w in zip(updates, weights):
-        w_norm = w / total_w
-        for k, v in sd.items():
-            contrib = v.float() * w_norm
-            if k in agg:
-                agg[k] += contrib
-            else:
-                agg[k] = contrib
-    return agg
+    return _weighted_accumulate([sd for sd, _n, _rep in updates], [w / total_w for w in weights])
 
 
 # NOTE: mixed_fedavg / mixed_reputation_fedavg (paper §IV-A Step 6 mixed

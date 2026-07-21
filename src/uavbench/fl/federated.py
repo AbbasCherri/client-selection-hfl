@@ -308,6 +308,7 @@ def _train_blocks(
     loss_fn,
     blocks: tuple[str, ...],
     opt_cfg: dict,
+    scratch: CachedFusionModel | None = None,
 ) -> tuple[dict, int, float]:
     """Train a clone with gradients enabled only on ``blocks`` (Tier B owner).
 
@@ -316,8 +317,25 @@ def _train_blocks(
     the trained block is optimized against the exact value of its counterpart.
     ``mean_loss`` is the sample-weighted training loss (statistical-utility feed
     for the oort / power_of_choice selectors).
+
+    ``scratch``, if given, is a reusable same-architecture module the caller
+    owns: its params are overwritten from ``model`` instead of constructing a
+    fresh module per call (construction re-runs every layer initializer and the
+    nn.Module bookkeeping just to be overwritten — measurably the dominant cost
+    of cloning). Safe to reuse across sequential calls because the returned
+    state dict is cloned (block_state_dict) and the optimizer is per-call;
+    requires_grad and train() are (re)set below either way. Bit-identical:
+    param copy consumes no RNG (clone_model already guaranteed that), stale
+    grads are cleared, and training then follows the identical op sequence.
     """
-    local = clone_model(model)
+    if scratch is None:
+        local = clone_model(model)
+    else:
+        local = scratch
+        with torch.no_grad():
+            for src, dst in zip(model.parameters(), local.parameters()):
+                dst.copy_(src)
+        local.zero_grad(set_to_none=True)
     local.set_trainable_blocks(blocks)
     local.train()
     trainable = [p for p in local.parameters() if p.requires_grad]
@@ -368,15 +386,25 @@ def _apply_server_momentum(
     Reduces to plain FedAvg when ``momentum=0`` and ``server_lr=1``. ``velocity``
     is mutated in place so it persists across rounds.
     """
-    out: dict[str, torch.Tensor] = {}
-    for k, agg in aggregate.items():
-        g = global_state[k].float()
-        pseudo_grad = g - agg.float()
-        v = velocity.get(k)
-        v = pseudo_grad if v is None else momentum * v + pseudo_grad
+    # Batched with torch._foreach_* (one call per step across all keys instead
+    # of ~5 small torch ops per key). Per-element op sequence is unchanged —
+    # pseudo = g − agg; v = m·v + pseudo; out = g − lr·v — so the result is
+    # bit-identical to the per-key loop this replaces.
+    keys = list(aggregate.keys())
+    g_list = [global_state[k].float() for k in keys]
+    pseudo = torch._foreach_sub(g_list, [aggregate[k].float() for k in keys])
+    if all(k in velocity for k in keys):
+        new_v = torch._foreach_mul([velocity[k] for k in keys], momentum)
+        torch._foreach_add_(new_v, pseudo)
+    else:  # first round for (some of) these keys — seed velocity with pseudo
+        new_v = [
+            pseudo[i] if k not in velocity else momentum * velocity[k] + pseudo[i]
+            for i, k in enumerate(keys)
+        ]
+    for k, v in zip(keys, new_v):
         velocity[k] = v
-        out[k] = g - server_lr * v
-    return out
+    out_list = torch._foreach_sub(g_list, torch._foreach_mul(new_v, server_lr))
+    return dict(zip(keys, out_list))
 
 
 def _report_black_chip_rate(full_dataset, cfg: dict) -> None:
@@ -996,6 +1024,11 @@ def run_full_hfl(cfg: dict) -> dict:
     confusion_rows: list[dict] = []
     models_by_method: dict[str, CachedFusionModel] = {}
 
+    # Reusable per-client/per-UAV training module (see _train_blocks). Built
+    # BEFORE the per-method torch.manual_seed so its construction-time RNG
+    # draws cannot shift any seeded stream.
+    scratch_model = CachedFusionModel()
+
     # ── 2. Per-method outer loop ─────────────────────────────────────────────
     for method in cfg["methods"]:
         logger.info("=== Full-system method: %s ===", method)
@@ -1258,6 +1291,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         loss_fn,
                         uav_blocks,
                         local_opt_cfg,
+                        scratch=scratch_model,
                     )
                     uav_own_updates[uav_idx] = (sd, n)
 
@@ -1280,12 +1314,18 @@ def run_full_hfl(cfg: dict) -> dict:
                     loss_fn,
                     client_blocks,
                     local_opt_cfg,
+                    scratch=scratch_model,
                 )
                 rep = rep_scores.get(c.client_id, 0.5)
                 client_updates[c.client_id] = (sd, n, rep)
                 client_losses[c.client_id] = mean_loss
-                # Reputation scores the update *delta* Δw_n, not absolute weights.
-                client_deltas[c.client_id] = {k: v - global_owned[k] for k, v in sd.items()}
+                # Reputation scores the update *delta* Δw_n, not absolute
+                # weights. One batched _foreach_sub call per client (same
+                # per-key subtraction as the dict comprehension it replaces).
+                ks = list(sd.keys())
+                client_deltas[c.client_id] = dict(
+                    zip(ks, torch._foreach_sub([sd[k] for k in ks], [global_owned[k] for k in ks]))
+                )
             # Statistical-utility feed for the oort / power_of_choice baselines
             # (harmless no-op for every other mode).
             selector.update_losses(client_losses)
@@ -1357,8 +1397,12 @@ def run_full_hfl(cfg: dict) -> dict:
                         if rep_weighted
                         else fedavg([(sd, n) for sd, n, _ in active])
                     )
+                    # state_dict() (same "<block>.<param>" keys, no buffers in
+                    # this model) is read-only here — the momentum step never
+                    # mutates global_state — so skip full_trainable_state_dict's
+                    # per-round full-model clone.
                     new_full = _apply_server_momentum(
-                        global_model.full_trainable_state_dict(),
+                        global_model.state_dict(),
                         server_agg,
                         server_velocity,
                         server_momentum,
@@ -1370,10 +1414,19 @@ def run_full_hfl(cfg: dict) -> dict:
             # The round-100 snapshot is a lottery ticket under ±0.05/round
             # oscillation; evaluate a slow EMA of the global weights instead.
             if ema_model is not None:
-                ema_sd = ema_model.full_trainable_state_dict()
-                cur = global_model.full_trainable_state_dict()
-                blended = {k: ema_decay * ema_sd[k] + (1.0 - ema_decay) * cur[k] for k in cur}
-                ema_model.load_full_trainable_state_dict(blended)
+                # In-place blend on the EMA params (d·ema then += (1−d)·cur —
+                # the same mul/add sequence the out-of-place dict blend
+                # performed, so bit-identical) instead of cloning both full
+                # state dicts and load_state_dict-ing the result back every
+                # round. parameters() order is aligned across the two
+                # same-class instances; the model registers no buffers.
+                with torch.no_grad():
+                    ema_params = list(ema_model.parameters())
+                    torch._foreach_mul_(ema_params, ema_decay)
+                    torch._foreach_add_(
+                        ema_params,
+                        torch._foreach_mul(list(global_model.parameters()), 1.0 - ema_decay),
+                    )
                 eval_model = ema_model
             else:
                 eval_model = global_model

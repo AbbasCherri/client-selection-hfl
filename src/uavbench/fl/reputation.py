@@ -101,8 +101,11 @@ class ReputationManager:
         # Per-client norm history (diagnostics)
         self._norm_history: dict[int, list[float]] = {cid: [] for cid in client_ids}
 
-        # Per-client EMA of the update delta (paper Δw̄_n).
+        # Per-client EMA of the update delta (paper Δw̄_n), and the cached
+        # float64 norm of that stored EMA (recomputing it next round on the
+        # unchanged array returns the identical value — cache is bit-exact).
         self._update_ema: dict[int, np.ndarray] = {}
+        self._update_ema_norm: dict[int, float] = {}
         # Global per-parameter statistics across all clients' updates.
         self._param_mean: np.ndarray | None = None
         self._param_var: np.ndarray | None = None
@@ -133,16 +136,19 @@ class ReputationManager:
         if not updates:
             return
 
+        # One float32 norm and one float64 conversion per client, computed
+        # up front and reused — the previous version recomputed the same
+        # norm twice and ran .astype(float64) three times per client.
         vecs: dict[int, np.ndarray] = {cid: _vec(sd) for cid, sd in updates.items()}
-        norms = [float(np.linalg.norm(v)) for v in vecs.values()]
+        norms32: dict[int, float] = {cid: float(np.linalg.norm(v)) for cid, v in vecs.items()}
+        v64s: dict[int, np.ndarray] = {cid: v.astype(np.float64) for cid, v in vecs.items()}
 
         # Keep the global norm window (capped at self._window_size entries).
-        self._norm_window.extend(norms)
+        self._norm_window.extend(norms32.values())
         self._norm_window = self._norm_window[-self._window_size :]
 
         # Global per-parameter mean/variance across all clients' updates (EMA).
-        for v in vecs.values():
-            v64 = v.astype(np.float64)
+        for v64 in v64s.values():
             if self._param_mean is None:
                 self._param_mean = v64.copy()
                 self._param_var = np.zeros_like(v64)
@@ -153,27 +159,39 @@ class ReputationManager:
                     self._param_var + _STATS_ALPHA * diff * diff
                 )
 
+        # _param_mean/_param_var are final for this round from here on, so the
+        # per-parameter std is a loop invariant — hoist the full-length sqrt
+        # out of the per-client loop.
+        std = np.sqrt(self._param_var + _EPS)
+
         for cid, vec in vecs.items():
-            norm = float(np.linalg.norm(vec))
+            norm = norms32[cid]
+            v64 = v64s[cid]
 
             # --- R_contrib: cos(Δw̄_n(t), Δw̄_n(t−1)) with 0.7/0.3 vector EMA ---
             prev_ema = self._update_ema.get(cid)
             if prev_ema is None:
-                self._update_ema[cid] = vec.astype(np.float64).copy()
+                self._update_ema[cid] = v64.copy()
+                self._update_ema_norm.pop(cid, None)  # lazily recomputed next round
                 r_c = 0.5  # cold start: no history to compare against
             else:
-                new_ema = _VEC_EMA_NEW * vec.astype(np.float64) + _VEC_EMA_OLD * prev_ema
-                denom = np.linalg.norm(new_ema) * np.linalg.norm(prev_ema)
+                new_ema = _VEC_EMA_NEW * v64 + _VEC_EMA_OLD * prev_ema
+                new_norm = np.linalg.norm(new_ema)
+                prev_norm = self._update_ema_norm.get(cid)
+                if prev_norm is None:
+                    prev_norm = np.linalg.norm(prev_ema)
+                denom = new_norm * prev_norm
                 if denom > _EPS:
                     cos = float(np.dot(new_ema, prev_ema) / denom)
                     r_c = (np.clip(cos, -1.0, 1.0) + 1.0) / 2.0
                 else:
                     r_c = 0.5
                 self._update_ema[cid] = new_ema
+                self._update_ema_norm[cid] = float(new_norm)
             self._R_contrib[cid] = float(r_c)
 
             # --- R_anomaly: diagonal Mahalanobis vs global per-parameter stats ---
-            z = (vec.astype(np.float64) - self._param_mean) / np.sqrt(self._param_var + _EPS)
+            z = (v64 - self._param_mean) / std
             d = float(np.sqrt(np.mean(z * z)))  # Mahalanobis / sqrt(J)
             r_a = 1.0 if d <= 2.0 else float(np.exp(-0.5 * (d - 2.0)))
             self._R_anomaly[cid] = r_a
