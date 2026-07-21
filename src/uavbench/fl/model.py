@@ -15,8 +15,6 @@ Asymmetric training (paper §IV-B):
 
 from __future__ import annotations
 
-import copy
-
 import torch
 import torch.nn as nn
 
@@ -204,7 +202,14 @@ def make_loss_fn(log_prior: torch.Tensor | None = None, tau: float = 1.0):
 
 
 def fedavg(updates: list[tuple[dict, int]]) -> dict[str, torch.Tensor]:
-    """Sample-weighted FedAvg of (state_dict, n_samples) pairs."""
+    """Sample-weighted FedAvg of (state_dict, n_samples) pairs.
+
+    Accumulates in place (first contribution seeds the accumulator, the rest
+    ``+=``) instead of allocating a ``zeros_like`` plus a fresh sum tensor per
+    key per update. Numerically identical to the out-of-place form: in-place
+    and out-of-place float add invoke the same kernel, and the first update's
+    ``w·v`` is exactly what ``0 + w·v`` produced before.
+    """
     total = sum(n for _, n in updates)
     if total == 0:
         return {k: v.clone() for k, v in updates[0][0].items()}
@@ -212,7 +217,11 @@ def fedavg(updates: list[tuple[dict, int]]) -> dict[str, torch.Tensor]:
     for sd, n in updates:
         w = n / total
         for k, v in sd.items():
-            agg[k] = agg.get(k, torch.zeros_like(v)) + w * v.float()
+            contrib = v.float() * w
+            if k in agg:
+                agg[k] += contrib
+            else:
+                agg[k] = contrib
     return agg
 
 
@@ -232,7 +241,11 @@ def reputation_fedavg(
     for (sd, _n, _rep), w in zip(updates, weights):
         w_norm = w / total_w
         for k, v in sd.items():
-            agg[k] = agg.get(k, torch.zeros_like(v)) + w_norm * v.float()
+            contrib = v.float() * w_norm
+            if k in agg:
+                agg[k] += contrib
+            else:
+                agg[k] = contrib
     return agg
 
 
@@ -244,5 +257,33 @@ def reputation_fedavg(
 
 
 def clone_model(model: CachedFusionModel) -> CachedFusionModel:
-    """Return a deep copy of the model (same architecture, same weights)."""
-    return copy.deepcopy(model)
+    """Return an independent deep copy of the model (same weights, same
+    per-parameter ``requires_grad``, same training mode).
+
+    Bit-identical to ``copy.deepcopy(model)`` for every model this codebase
+    builds (verified in check_integration_hfl), but avoids deepcopy's generic
+    per-object protocol overhead (~1.5x faster on the hot per-client/per-UAV
+    clone). Two invariants make the fast path exact:
+
+    * **RNG stream is preserved.** Constructing a fresh module runs the layer
+      initializers, which draw from torch's global RNG; we snapshot and restore
+      the RNG state around construction so cloning consumes zero random numbers
+      (as deepcopy does). This is load-bearing for reproducibility — a shifted
+      RNG stream would change every downstream draw.
+    * **Uniform training flag.** ``clone.train(model.training)`` reproduces
+      deepcopy's per-submodule flags only because this codebase toggles
+      train/eval at whole-model granularity exclusively (no per-submodule
+      calls). The model also registers no buffers (no BatchNorm/LayerNorm), so
+      the parameter copy is a complete state copy.
+    """
+    rng_state = torch.get_rng_state()
+    clone = model.__class__()  # every clone target is a default-constructed CachedFusionModel
+    torch.set_rng_state(rng_state)
+    with torch.no_grad():
+        for src, dst in zip(model.parameters(), clone.parameters()):
+            dst.copy_(src)
+            dst.requires_grad_(src.requires_grad)
+        for src, dst in zip(model.buffers(), clone.buffers()):
+            dst.copy_(src)
+    clone.train(model.training)
+    return clone

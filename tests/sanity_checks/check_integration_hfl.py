@@ -93,8 +93,77 @@ def different_seeds_differ():
     assert len(set(results)) > 1, "all seeds produced identical selections — rng unused"
 
 
+def clone_model_matches_deepcopy():
+    # clone_model is a hand-rolled fast path replacing copy.deepcopy. It must
+    # stay bit-identical: same param values, same per-parameter requires_grad,
+    # same training mode, independent storage, AND (load-bearing for
+    # reproducibility) it must consume zero random numbers from torch's global
+    # RNG — a shifted stream would change every downstream draw.
+    import copy as _copy
+
+    import torch
+
+    from uavbench.fl.model import CachedFusionModel, clone_model
+
+    torch.manual_seed(1)
+    m = CachedFusionModel()
+    m.freeze_img_proj()          # realistic: global model has img_proj frozen
+    m.train(False)               # exercise training-mode preservation
+    ref = _copy.deepcopy(m)
+    got = clone_model(m)
+    assert all(torch.equal(a, b) for a, b in zip(ref.parameters(), got.parameters()))
+    assert all(a.requires_grad == b.requires_grad for a, b in zip(ref.parameters(), got.parameters()))
+    assert all(a.training == b.training for a, b in zip(ref.modules(), got.modules()))
+    # independent storage
+    before = next(m.parameters()).clone()
+    with torch.no_grad():
+        next(got.parameters()).add_(1.0)
+    assert torch.equal(next(m.parameters()), before)
+    # RNG stream untouched
+    torch.manual_seed(7)
+    s = torch.get_rng_state()
+    expect = torch.rand(4)
+    torch.set_rng_state(s)
+    _ = clone_model(m)
+    assert torch.equal(expect, torch.rand(4))
+
+
+def fedavg_inplace_matches_naive():
+    # fedavg / reputation_fedavg accumulate in place; pin numerical identity
+    # to the out-of-place reference formula they replaced.
+    import torch
+
+    from uavbench.fl.model import fedavg, reputation_fedavg
+
+    rng = np.random.default_rng(0)
+    for _ in range(50):
+        m = int(rng.integers(1, 6))
+        updates = [({"w": torch.randn(8, 3), "b": torch.randn(8)}, int(rng.integers(1, 40))) for _ in range(m)]
+        total = sum(n for _, n in updates)
+        ref = {}
+        for sd, n in updates:
+            w = n / total
+            for k, v in sd.items():
+                ref[k] = ref.get(k, torch.zeros_like(v)) + w * v.float()
+        got = fedavg(updates)
+        assert all(torch.equal(ref[k], got[k]) for k in ref)
+
+        rep_updates = [(sd, n, float(rng.uniform(0, 1))) for sd, n in updates]
+        weights = [max(r, 0.0) * n for _, n, r in rep_updates]
+        tw = sum(weights)
+        ref_r = {}
+        for (sd, _n, _r), w in zip(rep_updates, weights):
+            wn = w / tw
+            for k, v in sd.items():
+                ref_r[k] = ref_r.get(k, torch.zeros_like(v)) + wn * v.float()
+        got_r = reputation_fedavg(rep_updates)
+        assert all(torch.equal(ref_r[k], got_r[k]) for k in ref_r)
+
+
 check("all ablations share one schema; bounds hold; files on disk", schema_and_bounds)
 check("T_sel repositioning cadence; hfl_static truly static", placement_cadence)
 check("same seed -> identical accuracy/selection trajectories", same_seed_reproduces)
 check("different seeds -> different random selections", different_seeds_differ)
+check("clone_model is bit-identical to deepcopy and preserves the RNG stream", clone_model_matches_deepcopy)
+check("fedavg/reputation_fedavg in-place accumulation matches naive formula", fedavg_inplace_matches_naive)
 finish()

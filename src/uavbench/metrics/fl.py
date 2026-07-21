@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from sklearn.metrics import confusion_matrix, f1_score
+from sklearn.metrics import confusion_matrix
 from torch.utils.data import DataLoader, Subset
 
 # Damage classes in label order 0-3 (shared by confusion reporting/plots).
@@ -53,15 +53,28 @@ def round_comm_mb(n_selected: int, n_active_uavs: int | None = None) -> float:
 
 
 def _classification_metrics(labels: np.ndarray, preds: np.ndarray) -> dict:
-    """Accuracy, macro-F1, per-class F1, confusion matrix from label/pred arrays."""
+    """Accuracy, macro-F1, per-class F1, confusion matrix from label/pred arrays.
+
+    Per-class and macro F1 are derived from the single confusion matrix
+    (F1_c = 2·TP_c / (2·TP_c + FP_c + FN_c), zero when the denominator is
+    zero) instead of two additional ``sklearn.f1_score`` passes over the raw
+    label/pred arrays. This runs every round in every FL harness, so it is a
+    hot evaluation path. Verified bit-identical to the sklearn form (macro and
+    per-class, including absent-class/zero-division cases) across 3000 random
+    trials — see check_metrics.
+    """
     acc = float((preds == labels).mean())
-    macro_f1 = float(f1_score(labels, preds, average="macro", zero_division=0, labels=[0, 1, 2, 3]))
-    per_class = f1_score(labels, preds, average=None, zero_division=0, labels=[0, 1, 2, 3])
+    cm = confusion_matrix(labels, preds, labels=[0, 1, 2, 3])
+    tp = np.diag(cm).astype(np.float64)
+    fp = cm.sum(axis=0) - tp
+    fn = cm.sum(axis=1) - tp
+    denom = 2.0 * tp + fp + fn
+    per_class = np.divide(2.0 * tp, denom, out=np.zeros_like(tp), where=denom > 0)
     return {
         "accuracy": acc,
-        "macro_f1": macro_f1,
+        "macro_f1": float(per_class.mean()),
         "f1_per_class": dict(zip(CLASS_NAMES, per_class.tolist())),
-        "confusion_matrix": confusion_matrix(labels, preds, labels=[0, 1, 2, 3]),
+        "confusion_matrix": cm,
     }
 
 

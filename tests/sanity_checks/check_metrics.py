@@ -59,6 +59,29 @@ def confusion_and_f1():
     assert cm2[:, 1:].sum() == 0
 
 
+def classification_metrics_match_sklearn():
+    # _classification_metrics derives per-class/macro F1 from the confusion
+    # matrix instead of extra sklearn.f1_score passes (hot per-round path).
+    # Pin that it stays bit-identical to the sklearn form — macro AND
+    # per-class — including absent-class / zero-division cases. macro_f1 can
+    # gate rounds_to_target, so this must be exact, not merely close.
+    from sklearn.metrics import f1_score
+
+    from uavbench.metrics.fl import _classification_metrics
+
+    rng = np.random.default_rng(0)
+    for _ in range(500):
+        n = int(rng.integers(1, 300))
+        present = rng.choice([0, 1, 2, 3], size=int(rng.integers(1, 5)), replace=False)
+        labels = rng.choice(present, size=n)
+        preds = rng.choice([0, 1, 2, 3], size=n)
+        got = _classification_metrics(labels, preds)
+        sk_macro = float(f1_score(labels, preds, average="macro", zero_division=0, labels=[0, 1, 2, 3]))
+        sk_per = f1_score(labels, preds, average=None, zero_division=0, labels=[0, 1, 2, 3])
+        assert got["macro_f1"] == sk_macro  # exact, not approximate
+        assert list(got["f1_per_class"].values()) == sk_per.tolist()
+
+
 def confusion_long_form():
     cm = np.arange(16).reshape(4, 4)
     rows = confusion_rows("proposed_hfl", 7, cm)
@@ -113,6 +136,7 @@ def convergence_metrics():
 
 
 check("classification metrics: diagonal, majority collapse, macro-F1", confusion_and_f1)
+check("confusion-derived F1 is bit-identical to sklearn (macro + per-class)", classification_metrics_match_sklearn)
 check("confusion long-form rows self-describing", confusion_long_form)
 check("Jain index bounds and conventions", jain_bounds)
 check("payload MB constants match the live model's parameter counts", payload_constants_match_live_model)
