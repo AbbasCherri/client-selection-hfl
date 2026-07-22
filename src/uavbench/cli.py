@@ -104,7 +104,7 @@ _SIG_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("runs.parquet", ("scenario",)),
     ("paper_sweep_rounds.parquet", ("N",)),
     ("stress_rounds.parquet", ("dropout_rate", "snr_degradation_db", "black_chip_rate")),
-    ("selection_rounds.parquet", ("N",)),
+    ("selection_sweep_rounds.parquet", ("N",)),
     ("sweep_rounds.parquet", ("N",)),
     ("fullsim_rounds.parquet", ()),
     ("tier2_rounds.parquet", ()),
