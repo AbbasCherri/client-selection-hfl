@@ -1,0 +1,54 @@
+name: stress_test
+results_dir: results/stress_test/d0.0_s6.0_b0.0/seed9/proposed_hfl
+n_workers: 8
+n_seeds: 10
+optimizer_seed: 20260714
+data:
+  source: real
+  subsample: 0.1
+  N_clients: 60
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  feature_cache_path: results/stress_test/img_features.npy
+  black_chip_rate: 0.0
+  partition_seed: 5318
+fl:
+  K: 6
+  R_comm: 20000.0
+  capacity: 10
+  n_rounds: 30
+  n_local_epochs: 1
+  lr: 0.001
+  batch_size: 16
+  target_accuracy: 0.6
+  T_sel: 5
+  placement_method: pso
+  dropout_rate: 0.0
+  snr_degradation_db: 6.0
+  seed: 20333845
+budget:
+  P: 30
+  G_max: 20
+methods:
+- proposed_hfl
+sweep:
+  full_grid: false
+  dropout_rates:
+  - 0.0
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
+  snr_degradations_db:
+  - 0.0
+  - 3.0
+  - 6.0
+  - 10.0
+  black_chip_rates:
+  - 0.0
+  - 0.05
+  - 0.1
+  - 0.2
+_diagnostics:
+  black_chip_rate: 0.0

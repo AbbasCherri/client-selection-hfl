@@ -1,0 +1,67 @@
+name: paper_smoke
+results_dir: results/paper_smoke/N50/seed2/proposed_hfl
+n_workers: 6
+n_seeds: 3
+optimizer_seed: 9876
+epicentre:
+- 37.488
+- 137.272
+data:
+  source: real
+  subsample: 0.2
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  feature_num_workers: 8
+  N_clients: 50
+  partition_seed: 5311
+  feature_cache_path: results/paper_smoke/N50/img_features.npy
+fl:
+  K: 20
+  R_comm: 20000.0
+  capacity: 6
+  n_rounds: 30
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  lr: 0.02
+  uav_lr: 0.02
+  batch_size: 32
+  T_sel: 5
+  reselect_every: 1
+  lambda_min: 0.5
+  R_min: 0.3
+  placement_method: pso
+  logit_adjust_tau: 1.0
+  balanced_sampling: false
+  local_optimizer:
+    name: sgd
+    momentum: 0.9
+  server_momentum: 0.9
+  server_lr: 1.0
+  lr_decay: cosine
+  ema_decay: 0.9
+  fusion_owner: uav
+  placement_class_aware: true
+  target_metric: macro_f1
+  target_value: 0.45
+  seed: 27264
+budget:
+  P: 50
+  G_max: 30
+N_values:
+- 30
+- 50
+optimizer_params:
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+methods:
+- proposed_hfl
+_pipeline_version: 3
+_diagnostics:
+  black_chip_rate: 0.0

@@ -1,7 +1,7 @@
 name: selection_isolation
 results_dir: results/selection_isolation
 n_workers: 12
-n_seeds: 3
+n_seeds: 10
 optimizer_seed: 9876
 epicentre:
 - 37.488
@@ -22,7 +22,7 @@ fl:
   lr: 0.0005
   uav_lr: 0.0005
   batch_size: 32
-  target_accuracy: 0.7
+  target_accuracy: 0.6
   T_sel: 5
   lambda_min: 0.5
   R_min: 0.3
@@ -42,3 +42,5 @@ modes:
 - fedcs
 - rep_cap
 - fair_mab
+- oort
+- power_of_choice
