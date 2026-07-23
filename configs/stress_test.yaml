@@ -24,8 +24,15 @@ extends: tuned_weights.yaml   # lr, uav_lr, logit_adjust_tau, server_momentum
 name: stress_test
 results_dir: results/stress_test
 
-n_workers: 8
-n_seeds: 10         # paired-Wilcoxon power: n=5 gave min p 0.0625 — nothing could ever be significant
+n_workers: 12       # match the 12-vCPU VM (was 8 — left ~a third of the box idle)
+# Paired two-sided Wilcoxon has a hard p floor of 2/2^n_seeds, and Holm is
+# applied over the WHOLE family of (pair x cell) comparisons
+# (analysis/significance.py). With 8 methods x 11 cells = 308 comparisons the
+# first Holm threshold is 0.05/308 = 1.62e-4, so n must satisfy
+# 2/2^n < 1.62e-4  ->  n >= 14. n=10 made significance mathematically
+# impossible: the 2026-07-22 and 2026-07-23 runs both returned 0 significant
+# results out of every comparison, at any effect size. 16 leaves margin.
+n_seeds: 16
 optimizer_seed: 20260714
 
 data:
@@ -60,11 +67,36 @@ budget:
   P: 30
   G_max: 20
 
+# Channel model for the placement-literature baselines. Must match paper_full's
+# values or their stress numbers would not be comparable to their clean-data
+# ones. (These two are exempt from fl.placement_method above — their placement
+# rule IS the experimental variable; see _METHOD_CFG in fl/federated.py.)
+optimizer_params:
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+
+# The proposed system plus the comparators the robustness claim needs. The two
+# PLACEMENT baselines matter most here: on clean data (paper_full) alzenad2017
+# edges proposed_hfl at every N, so the paper's claim rests on showing that the
+# proposed system degrades more gracefully than they do under real degradation.
+# Without them in this grid there was no evidence either way.
 methods:
   - proposed_hfl
-  - flat_fl
-  - hfl_no_selection
+  - flat_fl              # no-UAV FedAvg floor (Tier B reference)
+  - hfl_no_selection     # random-selection ablation (Tier C reference)
+  # Placement literature baselines — the ones that beat proposed_hfl on clean data
+  - alzenad2017
+  - mozaffari2016
+  # Selection literature baselines (strongest performers from paper_full)
   - fair_mab
+  - oort
+  - fedcs
 
 sweep:
   full_grid: false
