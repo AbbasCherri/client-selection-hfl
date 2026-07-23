@@ -35,6 +35,7 @@ from joblib import Parallel, delayed
 from ..reporting.tables import read_table, write_table
 from .federated import _dump_resolved_cfg
 from .seeds import partition_seed_for, sweep_job_seed
+from .sweep import PIPELINE_VERSION, _stale_checkpoint_reason
 
 logger = logging.getLogger("uavbench.fl.stress_sweep")
 
@@ -74,10 +75,16 @@ def _job(
     """One (knob-cell, method, seed) full-system run inside a joblib worker.
 
     Resumable: see ``sweep._job`` — ``run_full_hfl`` writes
-    ``config.fullsim.resolved.yaml`` last, so its presence gates the skip.
+    ``config.fullsim.resolved.yaml`` last, so its presence gates the skip. The
+    gate compares the stored resume signature (and PIPELINE_VERSION) against
+    this job's, so a checkpoint written under a different training recipe is
+    rerun rather than silently reused — without this, the 2026-07-23 stress
+    config fix (lr 1.0e-3 -> tuned 1.775e-2) would have skipped all 440 jobs
+    and returned the undertrained numbers unchanged.
     """
     job_cfg = copy.deepcopy(cfg)
     job_cfg["methods"] = [method]
+    job_cfg["_pipeline_version"] = PIPELINE_VERSION
     job_cfg["fl"]["dropout_rate"] = dropout
     job_cfg["fl"]["snr_degradation_db"] = snr_deg
     job_cfg["data"]["black_chip_rate"] = black_chip
@@ -94,21 +101,34 @@ def _job(
     )
     job_cfg["results_dir"] = str(job_results_dir)
 
-    if (job_results_dir / "config.fullsim.resolved.yaml").exists():
-        logger.info(
-            "[d=%.2f snr-%.0fdB chip=%.2f  %-16s seed=%d] checkpoint found — skipping (resume)",
+    ckpt = job_results_dir / "config.fullsim.resolved.yaml"
+    if ckpt.exists():
+        stale = _stale_checkpoint_reason(ckpt, job_cfg)
+        if stale is None:
+            logger.info(
+                "[d=%.2f snr-%.0fdB chip=%.2f  %-16s seed=%d] checkpoint found — skipping (resume)",
+                dropout,
+                snr_deg,
+                black_chip,
+                method,
+                seed_idx,
+            )
+            df = read_table(job_results_dir / "fullsim_rounds.parquet")
+            df.insert(0, "seed", seed_idx)
+            df.insert(0, "black_chip_rate", black_chip)
+            df.insert(0, "snr_degradation_db", snr_deg)
+            df.insert(0, "dropout_rate", dropout)
+            return df
+        logger.warning(
+            "[d=%.2f snr-%.0fdB chip=%.2f  %-16s seed=%d] STALE checkpoint at %s — rerunning (%s)",
             dropout,
             snr_deg,
             black_chip,
             method,
             seed_idx,
+            job_results_dir,
+            stale,
         )
-        df = read_table(job_results_dir / "fullsim_rounds.parquet")
-        df.insert(0, "seed", seed_idx)
-        df.insert(0, "black_chip_rate", black_chip)
-        df.insert(0, "snr_degradation_db", snr_deg)
-        df.insert(0, "dropout_rate", dropout)
-        return df
 
     import torch
 
