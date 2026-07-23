@@ -19,6 +19,8 @@
 # Requires HF_TOKEN on first run; the dataset + ResNet feature cache are
 # prefetched once sequentially, then the grid runs in parallel from disk.
 
+extends: tuned_weights.yaml   # lr, uav_lr, logit_adjust_tau, server_momentum
+
 name: stress_test
 results_dir: results/stress_test
 
@@ -40,10 +42,17 @@ fl:
   R_comm: 20000.0     # metres — Noto Peninsula scale
   capacity: 10        # clients per UAV
   n_rounds: 30
-  n_local_epochs: 1
-  lr: 1.0e-3
+  # lr / uav_lr / logit_adjust_tau / server_momentum inherited from
+  # tuned_weights.yaml. Before 2026-07-23 this file pinned lr: 1.0e-3 — 17.75x
+  # below the tuned value — so the whole 2026-07-22 stress grid trained at a
+  # near-flat rate and produced undertrained, uniformly non-significant
+  # results (flat_fl collapsed to macro_f1 ~0.07). Do not re-pin lr here.
+  n_local_epochs: 2   # match the paper recipe (was 1)
+  n_uav_epochs: 2     # match the paper recipe (previously inherited n_local_epochs=1)
   batch_size: 16
   target_accuracy: 0.60
+  target_metric: macro_f1   # primary reported metric, as in paper_full
+  target_value: 0.45
   T_sel: 5
   placement_method: pso
 

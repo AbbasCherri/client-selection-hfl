@@ -12,6 +12,8 @@
 #   1. round-to-round |Δmacro_f1| collapses (< ~0.01 after round ~10)   [Tier A]
 #   2. the HFL family's macro_f1 climbs above flat_fl within ~30 rounds  [Tier B]
 #   3. proposed_hfl ≥ hfl_no_selection on last-10 macro_f1               [Tier C]
+extends: tuned_weights.yaml   # lr, uav_lr, logit_adjust_tau, server_momentum
+
 name: paper_smoke
 results_dir: results/paper_smoke
 
@@ -37,8 +39,7 @@ fl:
   n_rounds: 30            # enough to see the plateau/climb, not the full 100
   n_local_epochs: 2
   n_uav_epochs: 2
-  lr: 1.775e-2            # 2026-07-20 Optuna weight search value (scripts/tune_weights.py)
-  uav_lr: 1.775e-2
+  # lr / uav_lr inherited from tuned_weights.yaml
   batch_size: 32
   T_sel: 5
   reselect_every: 1
@@ -46,12 +47,10 @@ fl:
   R_min: 0.3
   placement_method: pso
 
-  logit_adjust_tau: 0.601  # 2026-07-20 Optuna weight search value
   balanced_sampling: false
   local_optimizer:
     name: sgd
     momentum: 0.9
-  server_momentum: 0.528   # 2026-07-20 Optuna weight search value
   server_lr: 1.0
   lr_decay: cosine
   ema_decay: 0.9

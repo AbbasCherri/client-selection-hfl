@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Optuna-tuned training weights — THE single source of truth.
+#
+# Inherit these from any experiment config with:
+#
+#     extends: tuned_weights.yaml
+#
+# and then override only what that experiment genuinely needs to differ on.
+# Do NOT copy these numbers into another config: a duplicated value silently
+# drifts. That is exactly what happened to configs/stress_test.yaml, which sat
+# at lr 1.0e-3 (17.75x below the tuned value) through the 2026-07-22 full run
+# and produced 440 jobs of undertrained, non-significant robustness results.
+#
+# Source: scripts/tune_weights.py, 2026-07-20 weight search (+22% on the
+# search objective vs the prior hand-picked recipe).
+#
+# NOT from that search: ema_decay (its short 20-round evaluation horizon made
+# heavy EMA smoothing look structurally bad regardless of its merit at full
+# 100-round scale) — it stays at the original pick, set per-config.
+# ─────────────────────────────────────────────────────────────────────────────
+fl:
+  lr: 1.775e-2            # momentum-SGD client learning rate
+  uav_lr: 1.775e-2        # UAV-tier learning rate (tunable independently of lr)
+  logit_adjust_tau: 0.601 # logit-adjusted CE vs the global prior; 0 -> plain CE
+  server_momentum: 0.528  # FedAvgM server-side momentum (damps non-IID oscillation)

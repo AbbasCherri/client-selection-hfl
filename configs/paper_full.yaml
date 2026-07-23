@@ -26,6 +26,8 @@
 # Requires HF_TOKEN for the real dataset. The pipeline is real-data only;
 # for a fast end-to-end check use `uavbench smoke_tier2` (reduced real config).
 
+extends: tuned_weights.yaml   # lr, uav_lr, logit_adjust_tau, server_momentum
+
 name: paper_full_system
 results_dir: results/paper_full
 
@@ -63,8 +65,7 @@ fl:
   n_rounds: 100
   n_local_epochs: 2
   n_uav_epochs: 2      # UAV image-branch training epochs per round (paper §IV-A Step 3)
-  lr: 1.775e-2         # momentum-SGD client LR; 2026-07-20 Optuna weight search value
-  uav_lr: 1.775e-2     # UAV learning rate (can tune independently from IoT lr)
+  # lr / uav_lr inherited from tuned_weights.yaml
   batch_size: 32
   T_sel: 5           # reposition UAVs every 5 FL rounds (placement cadence, paper §IV-E)
   reselect_every: 1  # client selection cadence — decoupled from placement (Tier C)
@@ -73,19 +74,18 @@ fl:
   placement_method: pso   # authoritative placement optimizer ("ga" for the ablation)
 
   # ── Training recipe (Tier A) ──────────────────────────────────────────
-  # logit_adjust_tau, server_momentum, lr/uav_lr above: 2026-07-20 Optuna
-  # weight search values (scripts/tune_weights.py), not the original
-  # hand-picked recipe — +22% on the search's objective vs the prior values.
+  # lr, uav_lr, logit_adjust_tau and server_momentum come from
+  # tuned_weights.yaml (see `extends:` at the top) — the 2026-07-20 Optuna
+  # weight search, +22% on the search's objective vs the prior hand-picked
+  # recipe. Override them here only with a deliberate reason.
   # ema_decay is NOT from that search (its short 20-round evaluation horizon
   # made heavy EMA smoothing structurally look bad regardless of whether it
   # actually is at full 100-round scale) — kept at the original pick pending
   # a longer-horizon follow-up check.
-  logit_adjust_tau: 0.601   # logit-adjusted CE vs the global prior; 0 → plain CE
   balanced_sampling: false  # uniform shard sampling (imbalance handled in the loss)
   local_optimizer:          # momentum SGD amortizes across rounds (unlike fresh Adam)
     name: sgd
     momentum: 0.9
-  server_momentum: 0.528    # FedAvgM server-side momentum (damps non-IID oscillation)
   server_lr: 1.0
   lr_decay: cosine          # across-round client-LR decay ("none" to disable)
   ema_decay: 0.9            # evaluate an EMA of the global model (0 → raw snapshot)

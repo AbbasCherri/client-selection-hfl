@@ -28,10 +28,49 @@ from .reporting.tables import write_table as _write_table
 logger = logging.getLogger("uavbench.runner")
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge ``override`` onto ``base``; ``override`` always wins.
+
+    Nested mappings merge key-by-key (so a config can override a single ``fl``
+    entry without restating the block); every other type replaces wholesale.
+    """
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def load_config(path: str | Path) -> dict:
-    """Load a YAML experiment config."""
+    """Load a YAML experiment config, resolving ``extends:`` inheritance.
+
+    ``extends: <file>`` (relative to the config's own directory) loads that
+    file first and deep-merges this config over it, so shared values — notably
+    the Optuna-tuned training weights in ``configs/tuned_weights.yaml`` — live
+    in exactly one place. Chains are followed recursively; cycles raise.
+    """
+    return _load_config_inner(Path(path), _seen=())
+
+
+def _load_config_inner(path: Path, _seen: tuple[Path, ...]) -> dict:
+    resolved = path.resolve()
+    if resolved in _seen:
+        chain = " -> ".join(p.name for p in (*_seen, resolved))
+        raise ValueError(f"circular 'extends' in config chain: {chain}")
     with open(path) as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f) or {}
+
+    parent = cfg.pop("extends", None)
+    if parent is None:
+        return cfg
+
+    parent_path = path.parent / parent
+    if not parent_path.exists():
+        raise FileNotFoundError(f"{path}: 'extends' target not found: {parent_path}")
+    base = _load_config_inner(parent_path, _seen=(*_seen, resolved))
+    return _deep_merge(base, cfg)
 
 
 def _build_optimizer(method: str, budget: dict, method_params: dict | None = None):
