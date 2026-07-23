@@ -1,0 +1,70 @@
+fl:
+  lr: 0.01775
+  uav_lr: 0.01775
+  logit_adjust_tau: 0.601
+  server_momentum: 0.528
+  K: 6
+  R_comm: 20000.0
+  capacity: 10
+  n_rounds: 30
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  batch_size: 16
+  target_accuracy: 0.6
+  target_metric: macro_f1
+  target_value: 0.45
+  T_sel: 5
+  placement_method: pso
+  dropout_rate: 0.0
+  snr_degradation_db: 0.0
+  seed: 20325926
+name: stress_test
+results_dir: results/stress_test/d0.0_s0.0_b0.2/seed8/mozaffari2016
+n_workers: 12
+n_seeds: 16
+optimizer_seed: 20260714
+data:
+  source: real
+  subsample: 0.1
+  N_clients: 60
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  feature_cache_path: results/stress_test/img_features.npy
+  black_chip_rate: 0.2
+  partition_seed: 5317
+budget:
+  P: 30
+  G_max: 20
+optimizer_params:
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+methods:
+- mozaffari2016
+sweep:
+  full_grid: false
+  dropout_rates:
+  - 0.0
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
+  snr_degradations_db:
+  - 0.0
+  - 3.0
+  - 6.0
+  - 10.0
+  black_chip_rates:
+  - 0.0
+  - 0.05
+  - 0.1
+  - 0.2
+_pipeline_version: 3
+_diagnostics:
+  black_chip_rate: 0.0

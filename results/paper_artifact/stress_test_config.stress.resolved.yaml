@@ -17,8 +17,8 @@ fl:
   placement_method: pso
 name: stress_test
 results_dir: results/stress_test
-n_workers: 8
-n_seeds: 10
+n_workers: 12
+n_seeds: 16
 optimizer_seed: 20260714
 data:
   source: real
@@ -31,11 +31,24 @@ data:
 budget:
   P: 30
   G_max: 20
+optimizer_params:
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
 methods:
 - proposed_hfl
 - flat_fl
 - hfl_no_selection
+- alzenad2017
+- mozaffari2016
 - fair_mab
+- oort
+- fedcs
 sweep:
   full_grid: false
   dropout_rates:
