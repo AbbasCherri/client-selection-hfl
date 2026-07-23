@@ -339,6 +339,11 @@ def cmd_run_stress_sweep(args: argparse.Namespace) -> None:
     with pd.option_context("display.max_rows", None, "display.width", 200):
         print(summary.round(4).to_string(index=False))
 
+    from .plotting import plot_stress
+
+    figs = plot_stress(out["results_dir"])
+    logger.info("%d stress-robustness figures written", len(figs))
+
     _print_timing(out["results_dir"])
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 

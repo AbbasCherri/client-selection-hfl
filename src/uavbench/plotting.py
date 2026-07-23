@@ -449,6 +449,67 @@ def plot_sweep(results_dir: Path) -> list[Path]:
     return paths
 
 
+_STRESS_AXES: tuple[tuple[str, str], ...] = (
+    ("dropout_rate", "Per-round device dropout probability"),
+    ("snr_degradation_db", "Area-wide SNR degradation (dB)"),
+    ("black_chip_rate", "Additional black-chip (missing-imagery) rate"),
+)
+
+
+def plot_stress(results_dir: Path, last_k: int = 10) -> list[Path]:
+    """Robustness figures for the stress sweep (``stress_rounds.parquet``).
+
+    One degradation curve per swept axis: metric vs knob value, one line per
+    method, averaged over the last ``last_k`` rounds and across seeds (with a
+    +/-1 std band over seeds). The default grid varies one axis at a time with
+    the others at baseline, so each panel is sliced to the rows where the two
+    off-axis knobs sit at their minimum — matching how the grid was generated.
+    """
+    df = _read_table(results_dir / "stress_rounds.parquet")
+    axes = [(c, lbl) for c, lbl in _STRESS_AXES if c in df.columns]
+    if not axes:
+        logger.warning("stress figures skipped: no knob columns in stress_rounds.parquet")
+        return []
+
+    tail = df[df["round"] > df["round"].max() - last_k]
+    paths: list[Path] = []
+
+    for axis, xlabel in axes:
+        others = [c for c, _ in axes if c != axis]
+        # One-axis-at-a-time slice: off-axis knobs pinned to their baseline.
+        sel = tail
+        for o in others:
+            sel = sel[sel[o] == df[o].min()]
+        if sel.empty or sel[axis].nunique() < 2:
+            logger.warning("stress figure for %s skipped: no varying slice", axis)
+            continue
+
+        for metric, ylabel in (("macro_f1", "Macro F1"), ("accuracy", "Accuracy")):
+            if metric not in sel.columns:
+                continue
+            per_seed = sel.groupby(["method", axis, "seed"])[metric].mean().reset_index()
+            stats = per_seed.groupby(["method", axis])[metric].agg(["mean", "std"]).reset_index()
+
+            fig, ax = plt.subplots(figsize=(7, 4.5))
+            for method in sorted(stats["method"].unique()):
+                s = stats[stats["method"] == method].sort_values(axis)
+                sd = s["std"].fillna(0.0).to_numpy()
+                ax.plot(s[axis], s["mean"], label=method, linewidth=1.8, marker="o", markersize=5)
+                ax.fill_between(s[axis], s["mean"] - sd, s["mean"] + sd, alpha=0.15, linewidth=0)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(f"{ylabel} (mean of last {last_k} rounds)")
+            ax.set_title(f"Robustness: {ylabel} vs {axis}")
+            ax.legend(frameon=False, fontsize=8)
+            fig.tight_layout()
+            out = results_dir / f"stress_{metric}_vs_{axis}.png"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(out, dpi=150)
+            plt.close(fig)
+            paths.append(out)
+
+    return paths
+
+
 def plot_selection_sim(results_dir: Path) -> list[Path]:
     """Figures for the selection-isolation benchmark (selection_sweep_rounds.parquet).
 

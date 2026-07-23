@@ -77,10 +77,13 @@ fi
 # 5. Synthetic stress-test sweep (robustness evidence; no HF_TOKEN needed)
 step "Stress-test sweep ($STRESS_CFG)"
 python -m uavbench run_stress_sweep --config "$STRESS_CFG"
-step "Stress-sweep significance (accuracy)"
-python -m uavbench significance --config \
-    "$(python -c "import yaml;print(yaml.safe_load(open('$STRESS_CFG'))['results_dir'])")" \
-    --metric accuracy
+step "Stress-sweep significance (accuracy + macro_f1)"
+STRESS_RESULTS="$(python -c "import yaml;print(yaml.safe_load(open('$STRESS_CFG'))['results_dir'])")"
+python -m uavbench significance --config "$STRESS_RESULTS" --metric accuracy
+# macro_f1 is the primary reported metric (fl.target_metric) — it was missing
+# here through the 2026-07-22 run, leaving the robustness claims on accuracy
+# alone, which barely separates methods under an ~0.8 majority class.
+python -m uavbench significance --config "$STRESS_RESULTS" --metric macro_f1
 
 # 6. Stage the paper artifact: seed manifests + resolved configs + significance tables
 step "Staging results/paper_artifact"
