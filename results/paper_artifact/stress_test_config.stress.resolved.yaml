@@ -1,3 +1,20 @@
+fl:
+  lr: 0.01775
+  uav_lr: 0.01775
+  logit_adjust_tau: 0.601
+  server_momentum: 0.528
+  K: 6
+  R_comm: 20000.0
+  capacity: 10
+  n_rounds: 30
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  batch_size: 16
+  target_accuracy: 0.6
+  target_metric: macro_f1
+  target_value: 0.45
+  T_sel: 5
+  placement_method: pso
 name: stress_test
 results_dir: results/stress_test
 n_workers: 8
@@ -11,17 +28,6 @@ data:
   data_dir: ./data
   feature_batch_size: 32
   feature_cache_path: results/stress_test/img_features.npy
-fl:
-  K: 6
-  R_comm: 20000.0
-  capacity: 10
-  n_rounds: 30
-  n_local_epochs: 1
-  lr: 0.001
-  batch_size: 16
-  target_accuracy: 0.6
-  T_sel: 5
-  placement_method: pso
 budget:
   P: 30
   G_max: 20
