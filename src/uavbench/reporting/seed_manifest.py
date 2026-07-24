@@ -31,6 +31,7 @@ HARNESSES = (
     "full_hfl",
     "sweep",
     "paper_sweep",
+    "coverage",
     "selection_sweep",
     "stress_sweep",
 )
@@ -127,6 +128,28 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
                             "harness": harness,
                             "method": method,
                             "N": N,
+                            "seed_idx": seed_idx,
+                            "job_seed": job_seed,
+                            "seed": fullsim_method_seed(job_seed, method),
+                            "partition_seed": partition_seed_for(seed_idx),
+                        }
+                    )
+
+    elif harness == "coverage":
+        # R_comm sweep at fixed N: seed depends on (seed_idx, N) exactly as
+        # paper_sweep; R_comm is a within-seed condition, not a seed input.
+        opt_seed = cfg.get("optimizer_seed", 9876)
+        N = int(cfg["N"])
+        for r_comm in cfg["R_comm_values"]:
+            for method in cfg["methods"]:
+                for seed_idx in range(cfg.get("n_seeds", 1)):
+                    job_seed = sweep_job_seed(opt_seed, seed_idx, N)
+                    rows.append(
+                        {
+                            "harness": harness,
+                            "method": method,
+                            "N": N,
+                            "R_comm": r_comm,
                             "seed_idx": seed_idx,
                             "job_seed": job_seed,
                             "seed": fullsim_method_seed(job_seed, method),
