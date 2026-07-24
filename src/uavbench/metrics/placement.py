@@ -79,10 +79,16 @@ def compute_metrics(
     scorer = Fitness(instance, w1, w2, w3)
     b = scorer.components(result.best_position, radii=radii)
 
-    joules, batt_frac = (
-        energy_model.energy_joules(b.d_move),
-        energy_model.battery_fraction(b.d_move),
-    )
+    # Energy is per-UAV: charging the fleet-summed distance b.d_move to a single
+    # battery (as this once did) reported movement_battery_frac > 2 — ten drones'
+    # movement billed to one battery. Compute per-UAV distances, sum their energy
+    # for the fleet total (hover counted once per UAV), and report the *mean*
+    # per-UAV battery fraction, which is the physical [0, 1] per-drone quantity.
+    positions = instance.positions_from_vector(result.best_position)
+    per_uav_dist = np.sqrt(np.sum((positions - instance.prev_positions) ** 2, axis=1))
+    per_uav_joules = np.array([energy_model.energy_joules(d) for d in per_uav_dist])
+    joules = float(per_uav_joules.sum())
+    batt_frac = float(np.mean(per_uav_joules / energy_model.battery_capacity_j))
 
     return {
         "method": result.method,
