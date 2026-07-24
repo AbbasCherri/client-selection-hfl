@@ -293,3 +293,35 @@ def clone_model(model: CachedFusionModel) -> CachedFusionModel:
             dst.copy_(src)
     clone.train(model.training)
     return clone
+
+
+class EndToEndFusionModel(nn.Module):
+    """Same head as :class:`CachedFusionModel`, but the 512-dim image feature is
+    produced by a *trainable* ResNet-18 backbone from raw images instead of the
+    frozen cache. Used only by the centralized end-to-end validation
+    (scripts/e2e_centralized.py) to check the frozen-feature simplification.
+    """
+
+    _MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    _STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+
+    def __init__(
+        self,
+        struct_dim: int = 9,
+        img_embed: int = 128,
+        struct_embed: int = 64,
+        num_classes: int = 4,
+    ) -> None:
+        super().__init__()
+        from torchvision.models import ResNet18_Weights, resnet18
+
+        self.backbone = resnet18(weights=ResNet18_Weights.DEFAULT)
+        self.backbone.fc = nn.Identity()  # -> 512-dim features, fully trainable
+        self.img_proj = ImageProjection(512, img_embed)
+        self.struct_branch = StructuredBranch(struct_dim, struct_embed)
+        self.fusion = FusionHead(img_embed + struct_embed, num_classes)
+
+    def forward(self, img: torch.Tensor, struct: torch.Tensor) -> torch.Tensor:
+        img = (img - self._MEAN.to(img.device)) / self._STD.to(img.device)
+        feat = self.backbone(img)
+        return self.fusion(torch.cat([self.img_proj(feat), self.struct_branch(struct)], dim=1))
