@@ -7,12 +7,16 @@ because reviewers and practitioners read those differently.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from ..optimizers.base import Result
 from ..problem.energy import EnergyModel
 from ..problem.fitness import Fitness
 from ..problem.instance import ProblemInstance
+
+logger = logging.getLogger(__name__)
 
 
 def evals_to_threshold(convergence: list[float], best: float, frac: float = 0.95) -> int:
@@ -75,6 +79,23 @@ def compute_metrics(
     ``result.meta["radii"]`` by the runner); ``None`` uses ``instance.R_comm``.
     """
     energy_model = energy_model or EnergyModel()
+
+    # Equal-radius fairness guard: a method scored at a coverage radius larger
+    # than the system gate R_comm gets more coverage per UAV for free (this is
+    # exactly the mozaffari/alzenad 618-vs-500 m bug). Warn — never silently
+    # compare methods on different coverage models. A warning, not an error, so
+    # a deliberate future design that varies the radius stays possible.
+    if radii is not None:
+        r_max = float(np.max(radii))
+        if r_max > instance.R_comm * 1.02:
+            logger.warning(
+                "%s scored at coverage radius %.0f m > R_comm %.0f m — coverage-area "
+                "advantage over methods scored at the gate; comparison is not equal-radius.",
+                result.method,
+                r_max,
+                instance.R_comm,
+            )
+
     w1, w2, w3 = fitness_weights
     scorer = Fitness(instance, w1, w2, w3)
     b = scorer.components(result.best_position, radii=radii)
