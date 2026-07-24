@@ -1,0 +1,24 @@
+# Stage-3 assessment: realistic incremental repositioning (warm prev), equal radius.
+#
+# tier1_core measures the movement penalty against prev_mode="stale" — a prior
+# layout fitted to an epicenter shifted ~1.25 km away, forcing a near-total
+# redeploy every reconfiguration (fleet-summed d_move 17-30 km). That is the
+# "the situation just changed" regime. This config instead uses prev_mode="warm"
+# (previous UAVs already near current device sub-centroids), the deployed-system
+# regime where repositioning is small and incremental — the conservative case
+# for the movement term, where a good optimizer should barely move and the
+# penalty barely bites.
+#
+# Purpose: confirm PSO's win is robust to the movement model, not an artifact of
+# the large stale-prev moves. Equal radius (r*=499 m baselines) is inherited so
+# the coverage comparison stays fair. Original saturating capacity (30) kept so
+# this isolates the prev-mode variable against tier1_equal_radius cell-for-cell.
+extends: tier1_equal_radius.yaml
+
+name: tier1_warmprev
+results_dir: results/tier1_warmprev
+
+n_seeds: 20
+
+problem:
+  prev_mode: warm

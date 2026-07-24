@@ -1,0 +1,20 @@
+# Stage-2 assessment: binding-capacity regime, HETEROGENEOUS fleet, equal radius.
+#
+# Paired treatment for tier1_regime.yaml. Same equal radius, same binding mean
+# capacity (15), same device layouts per seed (heterogeneity is drawn after all
+# other RNG). The only change: per-UAV capacity is drawn uniformly in 15*(1+/-0.5)
+# -> caps in [7, 22], and battery in 1.0*(1+/-0.3). Now placement must co-optimize
+# WHICH UAV (large vs small) covers WHICH region — a joint capacity/coverage/value
+# problem that greedy physics placement (mozaffari/alzenad/centroid) is blind to.
+#
+# Hypothesis: PSO's margin over the baselines is LARGER here than in the
+# homogeneous control — i.e. a more realistic, heterogeneous fleet makes the
+# proposed optimizer look better, not worse.
+extends: tier1_regime.yaml
+
+name: tier1_regime_hetero
+results_dir: results/tier1_regime_hetero
+
+problem:
+  capacity_cv: 0.5    # per-UAV capacity ~ U(7, 22) around mean 15
+  battery_cv: 0.3     # per-UAV battery ~ U(0.7, 1.0)
