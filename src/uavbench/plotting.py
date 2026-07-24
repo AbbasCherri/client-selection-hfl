@@ -377,6 +377,47 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
     return paths
 
 
+def analyze_fl_reporting(results_dir: Path) -> list[Path]:
+    """Per-method FL operational-cost and per-class-F1 tables from a paper sweep.
+
+    Reads the consolidated ``paper_sweep_rounds.parquet`` (falls back to globbing
+    per-job ``fullsim_rounds.parquet``), takes the final round per (method, N,
+    seed), and writes:
+      * ``operational_summary.csv`` — coverage %, participation %, comm MB,
+        movement energy (J), round time, placement fitness, Jain fairness. Shows
+        placement/selection *cost* even where accuracy saturates (the honest
+        reframing of the placement contribution).
+      * ``per_class_f1.csv`` — F1 for each of the 4 damage classes (the imbalance
+        story behind the macro-F1 headline).
+    """
+    results_dir = Path(results_dir)
+    consolidated = results_dir / "paper_sweep_rounds.parquet"
+    if consolidated.exists():
+        df = _read_table(consolidated)
+    else:
+        parts = [pd.read_parquet(p) for p in results_dir.glob("N*/seed*/**/fullsim_rounds.parquet")]
+        if not parts:
+            return []
+        df = pd.concat(parts, ignore_index=True)
+
+    group = [c for c in ["method", "N", "seed"] if c in df.columns]
+    final = _last_round(df, group)
+    op_cols = [c for c in ["coverage_pct", "participation_pct", "comm_mb_round",
+                           "cumulative_energy_j", "round_time_s", "placement_fitness",
+                           "jain_fairness", "rounds_to_target"] if c in final.columns]
+    pc_cols = [c for c in final.columns if c.startswith("f1_")]
+    paths: list[Path] = []
+    if op_cols:
+        op = final.groupby("method")[op_cols].mean().round(4).reset_index()
+        op.to_csv(results_dir / "operational_summary.csv", index=False)
+        paths.append(results_dir / "operational_summary.csv")
+    if pc_cols:
+        pc = final.groupby("method")[pc_cols].mean().round(4).reset_index()
+        pc.to_csv(results_dir / "per_class_f1.csv", index=False)
+        paths.append(results_dir / "per_class_f1.csv")
+    return paths
+
+
 def plot_tier1_pareto(results_dir: Path) -> list[Path]:
     """Tier-1 multi-objective view: per-method coverage vs movement energy, and a
     per-component table (coverage / movement / imbalance / runtime) — so the
