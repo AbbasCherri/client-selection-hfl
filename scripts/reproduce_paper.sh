@@ -45,15 +45,22 @@ step "Tier-1 placement grid ($TIER1_CFG)"
 python -m uavbench run --config "$TIER1_CFG"
 python -m uavbench analyze --config "$TIER1_CFG"
 python -m uavbench plot --config "$TIER1_CFG"
-step "Tier-1 significance (final_fitness, paired Wilcoxon)"
+step "Tier-1 significance (final_fitness, paired Wilcoxon + effect size + CIs)"
 python -m uavbench significance \
     --config "$(python -c "import yaml;print(yaml.safe_load(open('$TIER1_CFG'))['results_dir'])")" \
     --metric final_fitness
+step "Tier-1 MCLP optimality reference (PSO % of MILP-optimal coverage)"
+python -m uavbench mclp --config "$TIER1_CFG" --n-seeds 3
 
 if [[ $SMOKE -eq 1 ]]; then
     # Reduced real-data stand-ins for the full harnesses.
     step "Tier-2 smoke (real, reduced)"
     python -m uavbench smoke_tier2
+    step "Coverage-sweep smoke (2 R_comm × 2 methods × 1 seed)"
+    python -m uavbench run_coverage_sweep --config configs/coverage_smoke.yaml
+    step "End-to-end centralized smoke (tiny)"
+    python scripts/e2e_centralized.py --subsample 0.03 --n 20 --epochs 1 \
+        --out results/e2e_smoke
 else
     # 2. Full paper system simulation (real data; needs HF_TOKEN)
     step "Full paper simulation (configs/paper_full.yaml)"
@@ -72,6 +79,17 @@ else
     # 4. N-scalability sweep (real data)
     step "N-scalability sweep (configs/tier2_sweep.yaml)"
     python -m uavbench run_sweep --config configs/tier2_sweep.yaml
+
+    # 4b. Coverage-constrained sweep — placement quality vs macro_f1 as R_comm binds
+    step "Coverage-constrained sweep (configs/paper_coverage.yaml)"
+    python -m uavbench run_coverage_sweep --config configs/paper_coverage.yaml
+    step "Coverage-sweep significance (macro_f1, per R_comm)"
+    python -m uavbench significance --config results/paper_coverage --metric macro_f1
+
+    # 4c. End-to-end centralized validation of the frozen-feature simplification
+    step "End-to-end centralized (frozen vs trainable ResNet-18)"
+    python scripts/e2e_centralized.py --subsample 0.2 --n 200 --epochs 15 \
+        --out results/e2e_centralized
 fi
 
 # 5. Synthetic stress-test sweep (robustness evidence; no HF_TOKEN needed)

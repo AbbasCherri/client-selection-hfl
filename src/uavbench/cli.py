@@ -94,6 +94,13 @@ def cmd_plot(args: argparse.Namespace) -> None:
     paths = plot_dir(Path(cfg["results_dir"]))
     for p in paths:
         logger.info("Wrote figure %s", p)
+    try:  # multi-objective Pareto + component/runtime table (non-fatal)
+        from .plotting import plot_tier1_pareto
+
+        for p in plot_tier1_pareto(Path(cfg["results_dir"])):
+            logger.info("Wrote %s", p)
+    except Exception as exc:
+        logger.warning("Tier-1 Pareto/component reporting skipped: %s", exc)
 
 
 # Tables cmd_significance recognises, in probe order, with their group
@@ -103,6 +110,7 @@ def cmd_plot(args: argparse.Namespace) -> None:
 _SIG_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("runs.parquet", ("scenario",)),
     ("paper_sweep_rounds.parquet", ("N",)),
+    ("coverage_sweep_rounds.parquet", ("R_comm",)),
     ("stress_rounds.parquet", ("dropout_rate", "snr_degradation_db", "black_chip_rate")),
     ("selection_sweep_rounds.parquet", ("N",)),
     ("sweep_rounds.parquet", ("N",)),
@@ -318,12 +326,14 @@ def cmd_run_paper_sim(args: argparse.Namespace) -> None:
         print(summary.round(4).to_string(index=False))
 
     try:
-        from .plotting import plot_paper_sim
+        from .plotting import analyze_fl_reporting, plot_paper_sim
 
         figs = plot_paper_sim(out["results_dir"])
         logger.info("%d paper-sim figures written", len(figs))
+        for p in analyze_fl_reporting(out["results_dir"]):
+            logger.info("Wrote %s", p)
     except Exception as exc:
-        logger.warning("Paper-sim plotting skipped: %s", exc)
+        logger.warning("Paper-sim plotting/reporting skipped: %s", exc)
 
     _print_timing(out["results_dir"])
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")

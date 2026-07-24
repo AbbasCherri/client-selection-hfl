@@ -1,0 +1,25 @@
+# Reduced coverage sweep for the smoke pipeline — validates the run_coverage_sweep
+# code path end to end (2 R_comm × 2 methods × 1 seed, tiny data), not for reporting.
+extends: paper_coverage.yaml
+
+name: coverage_smoke
+results_dir: results/coverage_smoke
+
+n_workers: 4
+n_seeds: 1
+
+N: 20
+R_comm_values:
+  - 4000
+  - 20000
+
+data:
+  subsample: 0.05
+  N_clients: 20
+
+fl:
+  n_rounds: 3
+
+methods:
+  - proposed_hfl
+  - hfl_static
