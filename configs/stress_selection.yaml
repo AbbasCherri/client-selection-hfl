@@ -1,0 +1,24 @@
+# Selection-pressure stress sweep — identical to stress_test.yaml in every way
+# EXCEPT UAV capacity, which is dropped so that total UAV slots < N and the
+# client-selection rule actually binds.
+#
+# Why this exists: stress_test.yaml has K*capacity = 6*10 = 60 = N_clients, so
+# every client fits in a slot and the selection rule never has to choose whom
+# to drop — its whole purpose. Under that config proposed_hfl was statistically
+# tied with the placement baselines and the selection baselines alike (only
+# beating flat_fl), because selection was inert. Here K*capacity = 6*6 = 36 for
+# N=60 (60% coverage — the same binding ratio as paper_full's N=200 cell, its
+# one operating point where 120 slots < 200 clients), so the selection
+# mechanism is exercised and can be compared against the selection baselines
+# and the hfl_no_selection ablation under degradation.
+#
+# Everything else — 8 methods, 16 seeds, the three degradation axes, the tuned
+# training weights — is inherited unchanged, so results are directly comparable
+# to results/stress_test cell-for-cell.
+extends: stress_test.yaml
+
+name: stress_selection
+results_dir: results/stress_selection
+
+fl:
+  capacity: 6   # was 10; 6 UAVs * 6 = 36 slots < 60 clients -> selection binds

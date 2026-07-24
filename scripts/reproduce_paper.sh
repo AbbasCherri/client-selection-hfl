@@ -85,6 +85,18 @@ python -m uavbench significance --config "$STRESS_RESULTS" --metric accuracy
 # alone, which barely separates methods under an ~0.8 majority class.
 python -m uavbench significance --config "$STRESS_RESULTS" --metric macro_f1
 
+# 5b. Selection-pressure stress sweep — same grid with K*capacity < N so the
+# client-selection rule binds (stress_test.yaml has slots == N, leaving
+# selection inert). Skipped in smoke runs. See configs/stress_selection.yaml.
+if [[ $SMOKE -ne 1 ]]; then
+    step "Selection-pressure stress sweep (configs/stress_selection.yaml)"
+    python -m uavbench run_stress_sweep --config configs/stress_selection.yaml
+    step "Selection-pressure stress significance (accuracy + macro_f1)"
+    SELSTRESS_RESULTS="$(python -c "import yaml;print(yaml.safe_load(open('configs/stress_selection.yaml'))['results_dir'])")"
+    python -m uavbench significance --config "$SELSTRESS_RESULTS" --metric accuracy
+    python -m uavbench significance --config "$SELSTRESS_RESULTS" --metric macro_f1
+fi
+
 # 6. Stage the paper artifact: seed manifests + resolved configs + significance tables
 step "Staging results/paper_artifact"
 ARTIFACT=results/paper_artifact
