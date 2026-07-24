@@ -24,6 +24,42 @@ from scipy import stats
 _TESTS = ("wilcoxon", "ttest_rel")
 
 
+def _rank_biserial(diff: np.ndarray) -> float:
+    """Matched-pairs rank-biserial correlation (Kerby 2014) — Wilcoxon effect size.
+
+    Rank the nonzero |differences|; ``r = (W+ - W-) / (W+ + W-)`` where W+/W- are
+    the summed ranks of positive/negative differences. Range [-1, 1]; sign matches
+    ``mean_diff``. Returns 0.0 when every pair is tied.
+    """
+    nz = diff[diff != 0.0]
+    if nz.size == 0:
+        return 0.0
+    ranks = stats.rankdata(np.abs(nz))
+    w_pos = ranks[nz > 0].sum()
+    w_neg = ranks[nz < 0].sum()
+    total = w_pos + w_neg
+    return float((w_pos - w_neg) / total) if total > 0 else 0.0
+
+
+def _bootstrap_ci(
+    diff: np.ndarray, n_boot: int = 10000, alpha: float = 0.05, seed: int = 0
+) -> tuple[float, float]:
+    """Percentile bootstrap CI for the mean paired difference.
+
+    Resamples the paired differences with replacement (the pairing is preserved
+    because we resample the diff vector itself). Deterministic given ``seed``.
+    """
+    if diff.size == 0:
+        return (float("nan"), float("nan"))
+    if np.allclose(diff, 0.0):
+        return (0.0, 0.0)
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, diff.size, size=(n_boot, diff.size))
+    means = diff[idx].mean(axis=1)
+    lo, hi = np.quantile(means, [alpha / 2, 1 - alpha / 2])
+    return (float(lo), float(hi))
+
+
 def _paired_values(
     df: pd.DataFrame,
     metric: str,
@@ -84,6 +120,7 @@ def paired_seed_test(
                 statistic, p = stats.wilcoxon(a, b)
         else:
             statistic, p = stats.ttest_rel(a, b)
+        ci_low, ci_high = _bootstrap_ci(diff)
         rows.append(
             {
                 **dict(zip(group_cols, key)),
@@ -93,6 +130,9 @@ def paired_seed_test(
                 "statistic": float(statistic),
                 "p_value": float(p),
                 "mean_diff": float(diff.mean()),
+                "effect_size": _rank_biserial(diff),  # matched-pairs rank-biserial
+                "ci_low": ci_low,                      # 95% bootstrap CI on mean_diff
+                "ci_high": ci_high,
             }
         )
     return pd.DataFrame(rows)
