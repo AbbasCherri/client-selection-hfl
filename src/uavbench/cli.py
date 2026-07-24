@@ -12,7 +12,7 @@ import pandas as pd
 
 from .fl.federated import run_tier2
 from .fl.selection_isolation import run_selection_sweep
-from .fl.sweep import run_paper_sweep, run_sweep
+from .fl.sweep import run_coverage_sweep, run_paper_sweep, run_sweep
 from .plotting import _last_round, analyze_dir, plot_dir, plot_sweep, plot_tier2
 from .reporting import build_seed_manifest, summarize_wall_clock
 from .runner import load_config, run_experiment
@@ -387,6 +387,28 @@ def cmd_run_stress_sweep(args: argparse.Namespace) -> None:
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
 
+def cmd_run_coverage_sweep(args: argparse.Namespace) -> None:
+    """Coverage-constrained sweep: R_comm × placement-method × seed at fixed N."""
+    cfg = load_config(_find_config(args.config))
+    _write_seed_manifest(cfg, "coverage")
+    out = run_coverage_sweep(cfg)
+    df = out["rounds"]
+    print("\n=== Coverage sweep (final-round macro_f1, mean across seeds) ===")
+    summary = (
+        df.sort_values("round").groupby(["method", "R_comm"]).last()["macro_f1"]
+        .reset_index().pivot_table(index="method", columns="R_comm", values="macro_f1")
+    )
+    with pd.option_context("display.max_rows", None, "display.width", 200):
+        print(summary.round(3).to_string())
+    try:
+        from .plotting import plot_coverage_sweep
+
+        plot_coverage_sweep(out["results_dir"])
+    except Exception as exc:  # plotting is non-fatal
+        logger.warning("Coverage plotting skipped: %s", exc)
+    print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
+
+
 def cmd_run_sweep(args: argparse.Namespace) -> None:
     cfg = load_config(_find_config(args.config))
     _write_seed_manifest(cfg, "sweep")
@@ -461,6 +483,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sw.add_argument("--config", default="configs/tier2_sweep.yaml")
     p_sw.set_defaults(func=cmd_run_sweep)
+
+    p_cov = sub.add_parser(
+        "run_coverage_sweep",
+        help="coverage-constrained sweep (R_comm × placement method × seed, fixed N)",
+    )
+    p_cov.add_argument("--config", default="configs/paper_coverage.yaml")
+    p_cov.set_defaults(func=cmd_run_coverage_sweep)
 
     p_st = sub.add_parser(
         "run_stress_sweep",

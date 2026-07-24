@@ -377,6 +377,49 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
     return paths
 
 
+def plot_coverage_sweep(results_dir: Path) -> list[Path]:
+    """Coverage-constrained sweep figures: metric vs R_comm, per placement method.
+
+    The story: at large R_comm the curves converge (coverage saturates,
+    placement moot); as R_comm shrinks they fan out, with proposed_hfl on top —
+    placement quality matters exactly when coverage binds.
+    """
+    df = _read_table(results_dir / "coverage_sweep_rounds.parquet")
+    final = _last_round(df, ["R_comm", "method", "seed"])
+    paths: list[Path] = []
+    for metric, ylabel in [
+        ("macro_f1", "Final Macro F1"),
+        ("coverage_pct", "Coverage (%)"),
+        ("accuracy", "Final Accuracy"),
+    ]:
+        if metric not in final.columns:
+            continue
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for method in sorted(final["method"].unique()):
+            g = (
+                final[final["method"] == method]
+                .groupby("R_comm")[metric]
+                .agg(["mean", "std"])
+                .reset_index()
+                .sort_values("R_comm")
+            )
+            ax.errorbar(
+                g["R_comm"] / 1000.0, g["mean"], yerr=g["std"],
+                label=method, marker="o", markersize=5, linewidth=1.8, capsize=3,
+            )
+        ax.set_xlabel("Coverage radius R_comm (km)")
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"Coverage-constrained: {ylabel} vs R_comm")
+        ax.legend(frameon=False, fontsize=8)
+        fig.tight_layout()
+        out = results_dir / f"coverage_{metric}.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        paths.append(out)
+    return paths
+
+
 def plot_sweep(results_dir: Path) -> list[Path]:
     """Generate scalability sweep figures: accuracy/macro-F1 vs N, per method."""
     df = _read_table(results_dir / "sweep_rounds.parquet")

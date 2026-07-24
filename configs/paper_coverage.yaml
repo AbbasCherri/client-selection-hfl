@@ -1,0 +1,91 @@
+# Coverage-constrained sweep — does placement quality matter for FL accuracy?
+#
+# At the paper_full R_comm = 20 km every client is covered, so placement method
+# barely moves macro_f1 (proposed ≈ mozaffari ≈ alzenad). This sweep varies
+# R_comm at fixed N so coverage BINDS: as the radius shrinks, a better placement
+# (proposed_hfl's adaptive, class-aware PSO) covers more — and more rare-class —
+# clients, so macro_f1 separates by placement. Directly connects the Tier-1
+# placement quality result to the end task.
+#
+# Fairness: uniform_coverage_radius=true gates EVERY method's coverage at the
+# scalar R_comm (the Tier-1 equal-radius rule), so mozaffari/alzenad's fixed
+# path-loss radius can't bypass a tight R_comm — only PLACEMENT differs.
+#
+# Grid: 6 R_comm × 5 methods × 10 seeds = 300 jobs at fixed N=200.
+extends: tuned_weights.yaml
+
+name: paper_coverage
+results_dir: results/paper_coverage
+
+n_workers: 12
+n_seeds: 10
+optimizer_seed: 9876
+epicentre: [37.488, 137.272]
+
+N: 200                       # fixed client count; only R_comm sweeps
+R_comm_values:               # metres
+  - 2000
+  - 4000
+  - 6000
+  - 8000
+  - 12000
+  - 20000
+
+data:
+  source: real
+  subsample: 1.0
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  feature_num_workers: 8
+  N_clients: 200
+
+fl:
+  K: 20
+  R_comm: 20000.0            # overridden per job by run_coverage_sweep
+  uniform_coverage_radius: true   # all methods gated at the swept R_comm (fair)
+  capacity: 6
+  n_rounds: 100
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  batch_size: 32
+  T_sel: 5
+  reselect_every: 1
+  lambda_min: 0.5
+  R_min: 0.3
+  placement_method: pso
+  balanced_sampling: false
+  local_optimizer:
+    name: sgd
+    momentum: 0.9
+  server_lr: 1.0
+  lr_decay: cosine
+  ema_decay: 0.9
+  fusion_owner: uav
+  placement_class_aware: true
+  target_metric: macro_f1
+  target_value: 0.45
+
+budget:
+  P: 50
+  G_max: 30
+
+# Placement comparison: proposed (adaptive PSO placement) vs the physics
+# baselines vs no-repositioning vs no-UAV. All share the proposed selection /
+# reputation / cadence — only the placement rule differs.
+optimizer_params:
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+
+methods:
+  - proposed_hfl
+  - mozaffari2016
+  - alzenad2017
+  - hfl_static
+  - flat_fl

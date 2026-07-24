@@ -578,7 +578,7 @@ def run_tier2(cfg: dict) -> dict:
                         uav_pos_m,
                         ref,
                         R_comm,
-                        radii=uav_radii,
+                        radii=None if uniform_coverage_radius else uav_radii,
                     )
                 placement_fitness = last_placement_fitness
 
@@ -937,6 +937,11 @@ def run_full_hfl(cfg: dict) -> dict:
     batch_size = fl["batch_size"]
     K = fl["K"]
     R_comm = fl["R_comm"]
+    # When True, every method's coverage is gated at the scalar R_comm, ignoring
+    # any path-loss-derived per-UAV radius (mozaffari/alzenad). Needed for the
+    # coverage sweep so their fixed ~20 km radius can't bypass a tight R_comm —
+    # only PLACEMENT differs, not the coverage radius (Tier-1 equal-radius rule).
+    uniform_coverage_radius = bool(fl.get("uniform_coverage_radius", False))
     capacity = fl["capacity"]
     T_sel = fl.get("T_sel", 5)
     lambda_min = fl.get("lambda_min", 0.5)  # early-reselection trigger (paper §IV-E6)
@@ -1222,7 +1227,8 @@ def run_full_hfl(cfg: dict) -> dict:
                     prev_uav_pos_m = uav_pos_m.copy()
                     uav_latlon = _uav_pos_to_latlon(uav_pos_m, ref)
                     covered_all = _covered_clients(
-                        client_coord_map, uav_pos_m, ref, R_comm, radii=uav_radii
+                        client_coord_map, uav_pos_m, ref, R_comm,
+                        radii=None if uniform_coverage_radius else uav_radii
                     )
                 placement_fitness = last_placement_fitness
                 # Selection cadence is decoupled from the (expensive) placement

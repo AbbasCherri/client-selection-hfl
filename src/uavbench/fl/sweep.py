@@ -449,3 +449,88 @@ def run_paper_sweep(cfg: dict) -> dict:
     logger.info("Paper sweep complete — %.2f MB at %s", size_mb, results_dir)
 
     return {"rounds": full_df, "results_dir": results_dir, "size_mb": size_mb}
+
+
+# ---------------------------------------------------------------------------
+# Coverage-constrained sweep (R_comm × method × seed, fixed N)
+# ---------------------------------------------------------------------------
+
+
+def _coverage_job(r_comm: float, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
+    """Single (R_comm, method, seed) run at fixed N — mirrors ``_paper_job``.
+
+    Only ``fl.R_comm`` varies across jobs of one seed; N, partition, and the
+    feature cache are shared, so this isolates *how much placement quality
+    matters as coverage binds*. At large R_comm every client is covered
+    (placement moot); as R_comm shrinks, a better placement covers more (and,
+    class-aware, more rare-class) clients — so macro_f1 separates by placement.
+    """
+    from .seeds import partition_seed_for, sweep_job_seed
+
+    N = int(cfg["N"])
+    job_cfg = copy.deepcopy(cfg)
+    job_cfg["data"]["N_clients"] = N
+    job_cfg["data"]["partition_seed"] = partition_seed_for(seed_idx)
+    job_cfg["methods"] = [method]
+    job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
+    job_cfg["fl"]["R_comm"] = float(r_comm)
+    job_cfg["_pipeline_version"] = PIPELINE_VERSION
+
+    r_tag = f"R{int(round(r_comm))}"
+    job_results_dir = Path(cfg["results_dir"]) / r_tag / f"seed{seed_idx}" / method
+    job_cfg["results_dir"] = str(job_results_dir)
+
+    ckpt = job_results_dir / "config.fullsim.resolved.yaml"
+    if ckpt.exists() and _stale_checkpoint_reason(ckpt, job_cfg) is None:
+        logger.info("[%s method=%-20s seed=%d] checkpoint — skipping", r_tag, method, seed_idx)
+        df = read_table(job_results_dir / "fullsim_rounds.parquet")
+        df.insert(0, "seed", seed_idx)
+        df.insert(0, "R_comm", float(r_comm))
+        return df
+
+    # Share the single-N feature cache (N is fixed across the R_comm sweep).
+    if job_cfg["data"].get("source", "real") == "real":
+        job_cfg["data"]["feature_cache_path"] = str(Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy")
+
+    import torch
+
+    torch.set_num_threads(1)
+    from .federated import run_full_hfl
+
+    logger.info("[%s method=%-20s seed=%d] starting", r_tag, method, seed_idx)
+    df = run_full_hfl(job_cfg)["rounds"].copy()
+    df.insert(0, "seed", seed_idx)
+    df.insert(0, "R_comm", float(r_comm))
+    return df
+
+
+def run_coverage_sweep(cfg: dict) -> dict:
+    """Run the coverage-constrained sweep: R_comm × method × seed at fixed N."""
+    N = int(cfg["N"])
+    r_values: list[float] = cfg["R_comm_values"]
+    methods: list[str] = cfg["methods"]
+    n_seeds: int = cfg.get("n_seeds", 1)
+    n_workers: int = cfg.get("n_workers", 12)
+    results_dir = Path(cfg["results_dir"])
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Phase 1: one-time data + feature prefetch for the single N.
+    logger.info("Phase 1: pre-fetching data for N=%d …", N)
+    _prefetch_all_N({**cfg, "N_values": [N]})
+    logger.info("Phase 1 complete.")
+
+    jobs = [(r, m, s) for r in r_values for m in methods for s in range(n_seeds)]
+    logger.info(
+        "Phase 2: %d R_comm × %d methods × %d seeds = %d jobs — %d workers",
+        len(r_values), len(methods), n_seeds, len(jobs), n_workers,
+    )
+    results = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
+        delayed(_isolated)(_coverage_job, f"R{int(round(r))}/seed{s}/{m}", r, m, s, cfg)
+        for r, m, s in jobs
+    )
+    full_df = _collect_or_raise(results)
+    write_table(full_df, results_dir / "coverage_sweep_rounds.parquet")
+    _dump_resolved_cfg(cfg, results_dir / "config.coverage.resolved.yaml")
+    size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
+    logger.info("Coverage sweep complete — %.2f MB at %s", size_mb, results_dir)
+    return {"rounds": full_df, "results_dir": results_dir, "size_mb": size_mb}
