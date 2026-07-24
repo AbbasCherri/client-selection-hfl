@@ -377,6 +377,41 @@ def plot_paper_sim(results_dir: Path) -> list[Path]:
     return paths
 
 
+def plot_tier1_pareto(results_dir: Path) -> list[Path]:
+    """Tier-1 multi-objective view: per-method coverage vs movement energy, and a
+    per-component table (coverage / movement / imbalance / runtime) — so the
+    scalarized fitness isn't the only thing reported.
+    """
+    runs = _read_table(results_dir / "runs.parquet")
+    comp_cols = [c for c in ["coverage_pct", "movement_battery_frac", "l_imb",
+                             "convergence_auc", "wall_time_s", "final_fitness"] if c in runs.columns]
+    table = (
+        runs.groupby(["distribution", "method"])[comp_cols].mean().reset_index()
+    )
+    write_table(table, results_dir / "component_summary.parquet")
+    table.round(4).to_csv(results_dir / "component_summary.csv", index=False)
+
+    paths: list[Path] = []
+    if not {"coverage_pct", "movement_battery_frac"}.issubset(runs.columns):
+        return paths
+    for dist in sorted(runs["distribution"].unique()):
+        sub = table[table["distribution"] == dist]
+        fig, ax = plt.subplots(figsize=(7, 5))
+        for _, r in sub.iterrows():
+            ax.scatter(r["movement_battery_frac"], r["coverage_pct"], s=60)
+            ax.annotate(r["method"], (r["movement_battery_frac"], r["coverage_pct"]),
+                        fontsize=8, xytext=(4, 4), textcoords="offset points")
+        ax.set_xlabel("Movement energy (mean per-UAV battery fraction)")
+        ax.set_ylabel("Coverage (%)")
+        ax.set_title(f"Tier-1 coverage vs movement cost — {dist}")
+        fig.tight_layout()
+        out = results_dir / f"pareto_{dist}.png"
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        paths.append(out)
+    return paths
+
+
 def plot_coverage_sweep(results_dir: Path) -> list[Path]:
     """Coverage-constrained sweep figures: metric vs R_comm, per placement method.
 
