@@ -111,6 +111,45 @@ _SIG_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+def cmd_mclp(args: argparse.Namespace) -> None:
+    """MILP-optimal coverage reference vs PSO, for the first N seeds per scenario."""
+    from .problem.exact import mclp_reference
+    from .problem.instance import generate_instance
+    from .runner import _instance_seed
+
+    cfg = load_config(_find_config(args.config))
+    results_dir = Path(cfg["results_dir"])
+    runs = pd.read_parquet(results_dir / "runs.parquet")
+    pso = runs[runs["method"] == "pso"]
+    prob = cfg["problem"]
+    rows = []
+    for s_idx, scenario in enumerate(cfg["scenarios"]):
+        scen = f"{scenario['distribution']}_N{scenario['N']}_K{scenario['K']}"
+        for seed_i in range(min(args.n_seeds, cfg["n_seeds"])):
+            inst = generate_instance(
+                distribution=scenario["distribution"], N=scenario["N"], K=scenario["K"],
+                area=cfg["area"], seed=_instance_seed(cfg["instance_seed"], s_idx, seed_i),
+                capacity=prob["capacity"], uav_battery=prob["uav_battery"], R_comm=prob["R_comm"],
+                B_min_uav=prob["B_min_uav"], beta_mode=cfg["value"]["beta_mode"], t=cfg["value"]["t"],
+                T_decay=cfg["value"]["T_decay"], prev_mode=prob.get("prev_mode", "stale"),
+                capacity_cv=prob.get("capacity_cv", 0.0), battery_cv=prob.get("battery_cv", 0.0),
+                data_dir=cfg.get("data", {}).get("data_dir", "./data"),
+            )
+            ref = mclp_reference(inst)
+            pso_cov = float(pso[(pso["scenario"] == scen) & (pso["seed"] == seed_i)]["f_cover_norm"].mean())
+            rows.append({
+                "scenario": scen, "seed": seed_i,
+                "mclp_cover_norm": ref.covered_value_norm, "pso_cover_norm": pso_cov,
+                "pct_of_optimal": 100.0 * pso_cov / ref.covered_value_norm if ref.covered_value_norm else float("nan"),
+                "mclp_optimal": ref.optimal, "n_sites": ref.n_sites,
+            })
+    out = pd.DataFrame(rows)
+    path = results_dir / "mclp_reference.csv"
+    out.to_csv(path, index=False)
+    logger.info("Wrote %s (PSO reaches %.0f%% of MILP-optimal coverage on average)",
+                path, out["pct_of_optimal"].mean())
+
+
 def cmd_significance(args: argparse.Namespace) -> None:
     """Paired multi-seed significance tests over an existing results directory."""
     from .analysis import pairwise_significance_table
@@ -449,6 +488,12 @@ def build_parser() -> argparse.ArgumentParser:
         "±0.05/round oscillation that made a single round a lottery draw.",
     )
     p_sig.set_defaults(func=cmd_significance)
+
+    p_mc = sub.add_parser("mclp", help="MILP-optimal coverage reference vs PSO (near-optimality)")
+    p_mc.add_argument("--config", required=True, help="Tier-1 config YAML")
+    p_mc.add_argument("--n-seeds", type=int, default=3, dest="n_seeds",
+                      help="seeds per scenario to solve the MILP for (default 3; it's a reference)")
+    p_mc.set_defaults(func=cmd_mclp)
 
     p_cl = sub.add_parser("clean", help="remove results (of a config, or all)")
     p_cl.add_argument("--config", default=None)
