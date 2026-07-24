@@ -1,4 +1,21 @@
-# Tier-1 core config: the headline PSO-vs-GA-vs-centroid-vs-static comparison.
+# Tier-1 core config: the headline placement comparison (PSO vs GA vs the
+# physics/greedy baselines).
+#
+# Three design decisions define this benchmark (see REPORTS/results_provenance.md):
+#   1. EQUAL-RADIUS SCORING (fairness). Every method is scored at the same ~500 m
+#      coverage radius. The physics baselines are constrained to max_path_loss_db=95
+#      so their derived radius r*≈499 m matches the R_comm=500 m gate PSO/GA use;
+#      the previous 100 dB gave them r*=618 m (a 1.53x ground-area advantage). This
+#      is a correction of a scoring asymmetry, not a tuning knob.
+#   2. BINDING CAPACITY (informative regime). capacity=15, K=10 -> 150 slots < N=250
+#      clients, so the assignment is non-degenerate and placement must choose whom to
+#      serve. (Slack capacity, 300>250, made coverage saturate and hid method
+#      differences; see the tier1_equal_radius saturating ablation.)
+#   3. BAYESIAN-DERIVED FITNESS WEIGHTS. w=(0.811,0.03,0.159) from the Optuna study in
+#      scripts/tune_weights.py (objective: downstream proposed_hfl macro_f1;
+#      results/hpo/), not the paper's hand-picked 0.6/0.3/0.1. The weights are strongly
+#      identified (coverage corr +0.78 with downstream accuracy) and match fitness.py's
+#      default. Applied identically to every method.
 name: tier1_core
 
 n_workers: 8
@@ -32,14 +49,16 @@ value:
 problem:
   R_comm: 500.0
   B_min_uav: 0.2
-  capacity: 30
+  capacity: 15         # K*capacity = 10*15 = 150 slots < N=250 -> capacity binds
   uav_battery: 1.0
   prev_mode: stale
 
+# Bayesian-derived scalarization weights (Optuna, scripts/tune_weights.py; see the
+# header). Coverage-dominant because an uncovered client cannot participate at all.
 fitness:
-  w1: 0.6
-  w2: 0.3
-  w3: 0.1
+  w1: 0.811
+  w2: 0.03
+  w3: 0.159
 
 budget:
   P: 100
@@ -73,17 +92,18 @@ optimizer_params:
     n_elite: 2
     early_stop_frac: 0.95
   # Placement literature baselines (path-loss-derived coverage radius; see
-  # uavbench/problem/path_loss.py). max_path_loss_db=100 at 2 GHz yields a
-  # ~200-630 m radius over the z=[20,120] band — the same order as the
-  # R_comm=500 m gate PSO/GA operate under, keeping the comparison fair.
+  # uavbench/problem/path_loss.py). EQUAL-RADIUS FAIRNESS FIX: max_path_loss_db=95
+  # at 2 GHz yields r*≈499 m over the z=[20,120] band, matching the R_comm=500 m
+  # gate PSO/GA are scored at. The old 100 dB gave r*=618 m — a 1.53x ground-area
+  # advantage that let the baselines win uniform on range alone, not placement.
   mozaffari2016:
     environment: suburban
     freq_ghz: 2.0
-    max_path_loss_db: 100.0
+    max_path_loss_db: 95.0
   alzenad2017:
     environment: suburban
     freq_ghz: 2.0
-    max_path_loss_db: 100.0
+    max_path_loss_db: 95.0
 
 methods:
   - pso

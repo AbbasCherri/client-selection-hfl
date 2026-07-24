@@ -1,6 +1,8 @@
-# Stage-3 assessment: realistic incremental repositioning (warm prev), equal radius.
+# Movement-robustness supplement: realistic incremental repositioning (warm prev).
 #
-# tier1_core measures the movement penalty against prev_mode="stale" — a prior
+# Inherits equal-radius scoring and the Bayesian fitness weights via
+# tier1_equal_radius (the saturating ablation). tier1_core measures the movement
+# penalty against prev_mode="stale" — a prior
 # layout fitted to an epicenter shifted ~1.25 km away, forcing a near-total
 # redeploy every reconfiguration (fleet-summed d_move 17-30 km). That is the
 # "the situation just changed" regime. This config instead uses prev_mode="warm"

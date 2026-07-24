@@ -1,29 +1,18 @@
-# Equal-radius fairness re-score of the Tier-1 placement benchmark.
+# Saturating-capacity ablation of the Tier-1 placement benchmark.
 #
-# WHY: in tier1_core the physics baselines (mozaffari2016/alzenad2017) are
-# scored at their path-loss-derived coverage radius r* = 618 m, while
-# PSO/GA/centroid/static/random are scored at the R_comm = 500 m gate. That is
-# a 1.53x ground-area advantage handed to the baselines, and it is what lets
-# mozaffari beat PSO in the uniform scenario (58% vs 46% coverage).
+# Identical to the tier1_core headline (equal-radius scoring, Bayesian fitness
+# weights, all inherited) EXCEPT capacity: K*capacity = 10*30 = 300 slots > N=250
+# clients, so capacity never binds and coverage saturates. Purpose: show the
+# optimizer's ranking is not an artifact of the binding regime — PSO still
+# dominates the physics/greedy baselines even when every client fits.
 #
-# This config isolates that single variable: it constrains the baseline link
-# budget to max_path_loss_db = 95, which yields r* = 499.2 m (~= R_comm), so
-# EVERY method now covers with the same ~500 m radius. Nothing else changes.
-#
-# Only mozaffari2016/alzenad2017 recompute; the other five methods are reused
-# byte-identical from results/tier1_core via checkpoint copy (same method_idx,
-# so alzenad's k-means RNG stream is preserved -> radius is the only delta).
+# (Name kept for history; "equal_radius" is now the default everywhere, not a
+# distinguishing feature of this config — the distinguishing feature is the
+# slack capacity.)
 extends: tier1_core.yaml
 
 name: tier1_equal_radius
 results_dir: results/tier1_equal_radius
 
-optimizer_params:
-  mozaffari2016:
-    environment: suburban
-    freq_ghz: 2.0
-    max_path_loss_db: 95.0   # was 100 -> r* 618 m; 95 -> r* 499 m == R_comm
-  alzenad2017:
-    environment: suburban
-    freq_ghz: 2.0
-    max_path_loss_db: 95.0
+problem:
+  capacity: 30   # slack: 300 slots > 250 clients -> capacity does not bind
