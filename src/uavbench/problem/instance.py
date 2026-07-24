@@ -151,6 +151,8 @@ def generate_instance(
     t: int = 0,
     T_decay: int = 20,
     prev_mode: str = "stale",
+    capacity_cv: float = 0.0,
+    battery_cv: float = 0.0,
 ) -> ProblemInstance:
     """Deterministically generate a placement instance from a seed.
 
@@ -168,6 +170,15 @@ def generate_instance(
     * ``"warm"`` — positions at current device sub-centroids (already near
       optimal). Useful to study the conservative regime where holding position is
       nearly best and a good optimizer should barely move.
+
+    ``capacity_cv`` / ``battery_cv`` make the UAV fleet heterogeneous: each
+    per-UAV capacity (resp. battery) is drawn uniformly in ``mean * (1 +/- cv)``
+    around the scalar mean, so placement must co-optimize *which* UAV (large vs
+    small) serves *which* region — a joint problem greedy physics placement
+    cannot see. Both default to ``0.0`` (homogeneous fleet), and the draw
+    happens only when ``cv > 0`` and only *after* every other RNG draw, so a
+    ``cv=0`` instance is byte-identical to before and a heterogeneous instance
+    shares the exact device layout of its homogeneous twin at the same seed.
     """
     rng = np.random.default_rng(seed)
     box_xy = np.array(
@@ -218,11 +229,24 @@ def generate_instance(
     lower = np.array([area["x"][0], area["y"][0], z_lo], dtype=np.float64)
     upper = np.array([area["x"][1], area["y"][1], z_hi], dtype=np.float64)
 
+    # Per-UAV capacity/battery. Drawn last so cv=0 stays byte-identical and a
+    # heterogeneous instance shares its homogeneous twin's device layout.
+    if capacity_cv > 0.0:
+        caps = rng.uniform(capacity * (1.0 - capacity_cv), capacity * (1.0 + capacity_cv), size=K)
+        cap_arr = np.maximum(np.rint(caps), 1.0)
+    else:
+        cap_arr = np.full(K, float(capacity))
+    if battery_cv > 0.0:
+        bats = rng.uniform(uav_battery * (1.0 - battery_cv), uav_battery * (1.0 + battery_cv), size=K)
+        bat_arr = np.clip(bats, B_min_uav + 1e-6, 1.0)
+    else:
+        bat_arr = np.full(K, float(uav_battery))
+
     return ProblemInstance(
         device_coords=device_coords,
         value=value,
-        capacity=np.full(K, float(capacity)),
-        battery=np.full(K, float(uav_battery)),
+        capacity=cap_arr,
+        battery=bat_arr,
         prev_positions=prev_positions,
         lower=lower,
         upper=upper,
