@@ -1,5 +1,5 @@
 name: tier1_equal_radius
-n_workers: 8
+n_workers: 11
 results_dir: results/tier1_equal_radius
 instance_seed: 1234
 optimizer_seed: 9876
@@ -35,9 +35,9 @@ problem:
   uav_battery: 1.0
   prev_mode: stale
 fitness:
-  w1: 0.6
-  w2: 0.3
-  w3: 0.1
+  w1: 0.811
+  w2: 0.03
+  w3: 0.159
 budget:
   P: 100
   G_max: 200

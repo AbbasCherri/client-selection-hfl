@@ -37,9 +37,9 @@ problem:
   capacity_cv: 0.5
   battery_cv: 0.3
 fitness:
-  w1: 0.6
-  w2: 0.3
-  w3: 0.1
+  w1: 0.811
+  w2: 0.03
+  w3: 0.159
 budget:
   P: 100
   G_max: 200

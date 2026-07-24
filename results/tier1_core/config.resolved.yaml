@@ -1,5 +1,5 @@
 name: tier1_core
-n_workers: 8
+n_workers: 11
 results_dir: results/tier1_core
 instance_seed: 1234
 optimizer_seed: 9876
@@ -31,13 +31,13 @@ value:
 problem:
   R_comm: 500.0
   B_min_uav: 0.2
-  capacity: 30
+  capacity: 15
   uav_battery: 1.0
   prev_mode: stale
 fitness:
-  w1: 0.6
-  w2: 0.3
-  w3: 0.1
+  w1: 0.811
+  w2: 0.03
+  w3: 0.159
 budget:
   P: 100
   G_max: 200
@@ -69,11 +69,11 @@ optimizer_params:
   mozaffari2016:
     environment: suburban
     freq_ghz: 2.0
-    max_path_loss_db: 100.0
+    max_path_loss_db: 95.0
   alzenad2017:
     environment: suburban
     freq_ghz: 2.0
-    max_path_loss_db: 100.0
+    max_path_loss_db: 95.0
 methods:
 - pso
 - ga
