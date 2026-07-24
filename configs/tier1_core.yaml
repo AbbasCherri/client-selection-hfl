@@ -35,6 +35,9 @@ scenarios:
   - distribution: epicenter_biased
     N: 250
     K: 10
+  - distribution: real          # actual Noto client geometry (K-means centroids,
+    N: 250                       # normalized into the box); ties the benchmark to
+    K: 10                       # the deployment. Needs the cached metadata in data/.
 
 area:
   x: [0.0, 5000.0]

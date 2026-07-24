@@ -126,6 +126,7 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
         prev_mode=cfg["problem"].get("prev_mode", "stale"),
         capacity_cv=cfg["problem"].get("capacity_cv", 0.0),
         battery_cv=cfg["problem"].get("battery_cv", 0.0),
+        data_dir=cfg.get("data", {}).get("data_dir", "./data"),
     )
 
     fw = (cfg["fitness"]["w1"], cfg["fitness"]["w2"], cfg["fitness"]["w3"])

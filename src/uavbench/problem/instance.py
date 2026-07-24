@@ -29,7 +29,11 @@ from .value import compute_value
 
 _EARTH_RADIUS_M = 6_371_000.0
 
-Distribution = Literal["uniform", "clustered", "epicenter_biased"]
+Distribution = Literal["uniform", "clustered", "epicenter_biased", "real"]
+
+# Noto Peninsula 2024 earthquake epicentre (lat °N, lon °E) — used to anchor the
+# value model's proximity term on the real-geometry scenario.
+_NOTO_EPICENTRE = (37.488, 137.272)
 
 
 @dataclass
@@ -136,6 +140,62 @@ def _sample_devices(
     return xy
 
 
+def _load_real_latlon(data_dir: str) -> np.ndarray:
+    """Load (M, 2) lat/lon from the largest cached Noto metadata parquet."""
+    from pathlib import Path
+
+    caches = sorted(
+        Path(data_dir).glob(".metadata_df_cache_sub*_seed*.parquet"),
+        key=lambda p: p.stat().st_size,
+    )
+    if not caches:
+        raise FileNotFoundError(
+            f"no .metadata_df_cache_sub*.parquet under {data_dir!r}; the real-geometry "
+            "scenario needs the cached Noto metadata (build it once via the FL data loader)."
+        )
+    import pandas as pd
+
+    df = pd.read_parquet(caches[-1], columns=["latitude", "longitude"])
+    return df[["latitude", "longitude"]].to_numpy(dtype=np.float64)
+
+
+def _real_device_xy(N: int, box_xy: np.ndarray, seed: int, data_dir: str) -> tuple[np.ndarray, np.ndarray]:
+    """N real client (x, y) centroids, normalized into ``box_xy``.
+
+    K-means-clusters the real Noto sample coordinates into N geographic clients
+    (the same partition convention the FL harness uses), projects lat/lon to
+    metres, then min-max normalizes the layout into the benchmark box so R_comm
+    and K stay comparable to the synthetic scenarios — only the *spatial
+    structure* is real. Returns ``(client_xy, epicenter_xy)``.
+    """
+    from pathlib import Path
+
+    from hflsim.shared.coords import latlon_to_meters
+
+    # Cache the expensive K-means centres per (N, seed); projection/normalization
+    # below are cheap and box-dependent so they stay out of the cache.
+    cache = Path(data_dir) / f".tier1_real_centers_N{N}_seed{seed}.npy"
+    if cache.exists():
+        centers_latlon = np.load(cache)
+    else:
+        from sklearn.cluster import KMeans
+
+        latlon = _load_real_latlon(data_dir)
+        centers_latlon = KMeans(n_clusters=N, n_init=10, random_state=seed).fit(latlon).cluster_centers_
+        try:
+            np.save(cache, centers_latlon)
+        except OSError:
+            pass
+    # project client centroids + the epicentre in one frame, then normalize together
+    pts_latlon = np.vstack([centers_latlon, np.array([_NOTO_EPICENTRE])])
+    xy_m, _ = latlon_to_meters(pts_latlon)
+    lo, hi = box_xy[0], box_xy[1]
+    mn, mx = xy_m.min(axis=0), xy_m.max(axis=0)
+    span = np.where((mx - mn) > 0, mx - mn, 1.0)
+    xy_norm = lo + (xy_m - mn) / span * (hi - lo)
+    return xy_norm[:-1], xy_norm[-1]
+
+
 def generate_instance(
     distribution: Distribution,
     N: int,
@@ -153,6 +213,7 @@ def generate_instance(
     prev_mode: str = "stale",
     capacity_cv: float = 0.0,
     battery_cv: float = 0.0,
+    data_dir: str = "./data",
 ) -> ProblemInstance:
     """Deterministically generate a placement instance from a seed.
 
@@ -186,8 +247,11 @@ def generate_instance(
     )
     z_lo, z_hi = float(area["z"][0]), float(area["z"][1])
 
-    epicenter = rng.uniform(box_xy[0], box_xy[1])
-    xy = _sample_devices(rng, distribution, N, box_xy, epicenter)
+    if distribution == "real":
+        xy, epicenter = _real_device_xy(N, box_xy, seed, data_dir)
+    else:
+        epicenter = rng.uniform(box_xy[0], box_xy[1])
+        xy = _sample_devices(rng, distribution, N, box_xy, epicenter)
     device_coords = np.column_stack([xy, np.zeros(N)])
 
     # Raw per-device features feeding the utility/value score.
@@ -206,7 +270,11 @@ def generate_instance(
         old_epicenter = np.clip(
             epicenter + rng.normal(0.0, 0.25 * span, size=2), box_xy[0], box_xy[1]
         )
-        old_xy = _sample_devices(rng, distribution, max(K, 8), box_xy, old_epicenter)
+        # For the real-geometry scenario the prior layout is a displaced
+        # epicentre-biased cluster (real coords aren't re-sampleable); synthetic
+        # scenarios keep their own distribution shape (byte-identical to before).
+        old_dist = "epicenter_biased" if distribution == "real" else distribution
+        old_xy = _sample_devices(rng, old_dist, max(K, 8), box_xy, old_epicenter)
         prev_centers = old_xy[rng.choice(old_xy.shape[0], size=K, replace=old_xy.shape[0] < K)]
         prev_xy = prev_centers[:, :2]
     else:
