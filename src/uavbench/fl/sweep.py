@@ -474,6 +474,24 @@ def _coverage_job(r_comm: float, method: str, seed_idx: int, cfg: dict) -> pd.Da
     job_cfg["methods"] = [method]
     job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
     job_cfg["fl"]["R_comm"] = float(r_comm)
+
+    # Equal-radius calibration: the path-loss baselines derive their own coverage
+    # radius from the link budget, so at a swept R_comm they must be re-calibrated
+    # or they place for the wrong radius and lose on the mismatch, not the rule.
+    if job_cfg.get("calibrate_path_loss", True):
+        from ..problem.path_loss import ENV_PRESETS, path_loss_db_for_radius
+
+        op = job_cfg.setdefault("optimizer_params", {})
+        for base in ("mozaffari2016", "alzenad2017"):
+            if base not in op:
+                continue
+            env = ENV_PRESETS[op[base].get("environment", "suburban")]
+            freq_hz = float(op[base].get("freq_ghz", 2.0)) * 1e9
+            op[base]["max_path_loss_db"] = path_loss_db_for_radius(
+                float(r_comm), freq_hz, env["a"], env["b"],
+                env["eta_los_db"], env["eta_nlos_db"], 20.0, 120.0,
+            )
+
     job_cfg["_pipeline_version"] = PIPELINE_VERSION
 
     r_tag = f"R{int(round(r_comm))}"

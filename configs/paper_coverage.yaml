@@ -7,11 +7,25 @@
 # clients, so macro_f1 separates by placement. Directly connects the Tier-1
 # placement quality result to the end task.
 #
-# Fairness: uniform_coverage_radius=true gates EVERY method's coverage at the
-# scalar R_comm (the Tier-1 equal-radius rule), so mozaffari/alzenad's fixed
-# path-loss radius can't bypass a tight R_comm — only PLACEMENT differs.
+# Fairness (two parts):
+#   1. uniform_coverage_radius=true gates EVERY method's coverage at the scalar
+#      R_comm (the Tier-1 equal-radius rule), so a path-loss baseline's own
+#      radius can't bypass a tight R_comm — only PLACEMENT differs.
+#   2. calibrate_path_loss=true re-derives mozaffari/alzenad's max_path_loss_db
+#      per swept R_comm (path_loss_db_for_radius) so they PLACE for the radius
+#      they are gated at. Without it they place for a 20 km radius, get gated at
+#      2 km, and lose on the mismatch rather than on their placement rule — the
+#      first run of this sweep showed exactly that artifact (mozaffari covered
+#      only 7% at R=2 km vs 27% for the others).
 #
-# Grid: 6 R_comm × 5 methods × 10 seeds = 300 jobs at fixed N=200.
+# Baseline design note: hfl_static is NOT a bad-placement arm — it runs PSO
+# placement once instead of every T_sel rounds, so with static clients it ties
+# the proposed system and isolates *repositioning cadence*, not placement
+# quality. centroid_place / random_place supply the missing naive-placement
+# contrast (identical UCB selection, reputation FedAvg, and cadence).
+#
+# Grid: 6 R_comm × 7 methods × 10 seeds = 420 jobs at fixed N=200.
+calibrate_path_loss: true
 extends: tuned_weights.yaml
 
 name: paper_coverage
@@ -84,8 +98,10 @@ optimizer_params:
     max_path_loss_db: 145.0
 
 methods:
-  - proposed_hfl
-  - mozaffari2016
-  - alzenad2017
-  - hfl_static
-  - flat_fl
+  - proposed_hfl      # adaptive class-aware PSO placement, repositioned every T_sel
+  - hfl_static        # PSO placement ONCE (isolates repositioning cadence)
+  - centroid_place    # naive: k-means centroids (isolates placement quality)
+  - random_place      # naive: uniform-random UAV positions (placement floor)
+  - mozaffari2016     # physics baseline, radius-calibrated per R_comm
+  - alzenad2017       # physics baseline, radius-calibrated per R_comm
+  - flat_fl           # no UAVs at all (coverage-independent reference)

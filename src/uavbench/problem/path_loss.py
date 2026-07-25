@@ -224,3 +224,40 @@ def min_altitude_for_radius(
         if r > best_r:
             best_h, best_r = float(h), float(r)
     return best_h, best_r
+
+
+def path_loss_db_for_radius(
+    target_radius_m: float,
+    freq_hz: float,
+    a: float,
+    b: float,
+    eta_los_db: float,
+    eta_nlos_db: float,
+    h_min_m: float = 20.0,
+    h_max_m: float = 120.0,
+    lo_db: float = 60.0,
+    hi_db: float = 200.0,
+    tol_m: float = 1.0,
+) -> float:
+    """Max-path-loss budget whose derived coverage radius ≈ ``target_radius_m``.
+
+    Inverts :func:`optimal_altitude_mozaffari` (monotone in the link budget) by
+    bisection. This is the equal-radius calibration knob: the path-loss
+    placement baselines derive their own coverage radius from the link budget,
+    so comparing them against a system gated at ``R_comm`` is only fair if their
+    derived radius matches ``R_comm``. Without it, a baseline tuned for a 20 km
+    radius but gated at 2 km spreads its UAVs far too thin and loses on the
+    radius mismatch rather than on its placement rule.
+    """
+    for _ in range(60):
+        mid = 0.5 * (lo_db + hi_db)
+        _h, r = optimal_altitude_mozaffari(
+            mid, freq_hz, a, b, eta_los_db, eta_nlos_db, h_min_m=h_min_m, h_max_m=h_max_m
+        )
+        if abs(r - target_radius_m) <= tol_m:
+            return float(mid)
+        if r < target_radius_m:
+            lo_db = mid
+        else:
+            hi_db = mid
+    return float(0.5 * (lo_db + hi_db))

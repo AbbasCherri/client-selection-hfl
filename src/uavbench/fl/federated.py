@@ -724,7 +724,20 @@ _METHOD_CFG: dict[str, tuple] = {
     # the selection baselines above).
     "mozaffari2016": ("mozaffari2016", "ucb", True, True),  # IEEE Comm. Lett. 2016
     "alzenad2017": ("alzenad2017", "ucb", True, True),  # IEEE WCL 2017
+    # Naive placement arms. hfl_static is NOT a bad-placement baseline — it uses
+    # PSO placement, just once instead of every T_sel rounds — so with static
+    # clients it ties the proposed system and isolates *cadence*, not placement
+    # quality. These two supply the missing contrast: identical UCB selection /
+    # reputation FedAvg / cadence, but a naive placement rule.
+    "centroid_place": ("centroid", "ucb", True, True),  # k-means centroids
+    "random_place": ("random", "ucb", True, True),  # uniform-random UAV positions
 }
+
+# Methods whose placement rule IS the experimental variable — exempt from the
+# fl.placement_method override (which otherwise swaps every method to PSO).
+_PLACEMENT_BASELINES = frozenset(
+    {"mozaffari2016", "alzenad2017", "centroid_place", "random_place"}
+)
 
 
 def _uav_pos_to_latlon(
@@ -1047,7 +1060,7 @@ def run_full_hfl(cfg: dict) -> dict:
         # proposed system and its ablations. Placement-literature baselines
         # (entries whose method name IS their placement rule) are exempt:
         # their placement is the experimental variable being compared.
-        is_placement_baseline = placement_method == method
+        is_placement_baseline = method in _PLACEMENT_BASELINES
         if placement_method is not None and placement_override and not is_placement_baseline:
             placement_method = placement_override
 

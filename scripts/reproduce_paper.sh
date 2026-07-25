@@ -66,15 +66,15 @@ else
     step "Full paper simulation (configs/paper_full.yaml)"
     python -m uavbench run_paper_sim --config configs/paper_full.yaml
     step "Paper-sim significance (accuracy + macro_f1, paired Wilcoxon)"
-    python -m uavbench significance --config results/paper_full --metric accuracy
-    python -m uavbench significance --config results/paper_full --metric macro_f1
+    python -m uavbench significance --config results/paper_full --metric accuracy --reference proposed_hfl --correction-scope group
+    python -m uavbench significance --config results/paper_full --metric macro_f1 --reference proposed_hfl --correction-scope group
 
     # 3. Selection-isolation benchmark (real data)
     step "Selection isolation (configs/selection_isolation.yaml)"
     python -m uavbench run_selection_sim --config configs/selection_isolation.yaml
     step "Selection-isolation significance (accuracy + macro_f1)"
-    python -m uavbench significance --config results/selection_isolation --metric accuracy
-    python -m uavbench significance --config results/selection_isolation --metric macro_f1
+    python -m uavbench significance --config results/selection_isolation --metric accuracy --reference ucb --correction-scope group
+    python -m uavbench significance --config results/selection_isolation --metric macro_f1 --reference ucb --correction-scope group
 
     # 4. N-scalability sweep (real data)
     step "N-scalability sweep (configs/tier2_sweep.yaml)"
@@ -84,7 +84,7 @@ else
     step "Coverage-constrained sweep (configs/paper_coverage.yaml)"
     python -m uavbench run_coverage_sweep --config configs/paper_coverage.yaml
     step "Coverage-sweep significance (macro_f1, per R_comm)"
-    python -m uavbench significance --config results/paper_coverage --metric macro_f1
+    python -m uavbench significance --config results/paper_coverage --metric macro_f1 --reference proposed_hfl --correction-scope group
 
     # 4c. End-to-end centralized validation of the frozen-feature simplification
     step "End-to-end centralized (frozen vs trainable ResNet-18)"
@@ -97,11 +97,11 @@ step "Stress-test sweep ($STRESS_CFG)"
 python -m uavbench run_stress_sweep --config "$STRESS_CFG"
 step "Stress-sweep significance (accuracy + macro_f1)"
 STRESS_RESULTS="$(python -c "import yaml;print(yaml.safe_load(open('$STRESS_CFG'))['results_dir'])")"
-python -m uavbench significance --config "$STRESS_RESULTS" --metric accuracy
+python -m uavbench significance --config "$STRESS_RESULTS" --metric accuracy --reference proposed_hfl --correction-scope group
 # macro_f1 is the primary reported metric (fl.target_metric) — it was missing
 # here through the 2026-07-22 run, leaving the robustness claims on accuracy
 # alone, which barely separates methods under an ~0.8 majority class.
-python -m uavbench significance --config "$STRESS_RESULTS" --metric macro_f1
+python -m uavbench significance --config "$STRESS_RESULTS" --metric macro_f1 --reference proposed_hfl --correction-scope group
 
 # 5b. Selection-pressure stress sweep — same grid with K*capacity < N so the
 # client-selection rule binds (stress_test.yaml has slots == N, leaving
@@ -111,8 +111,8 @@ if [[ $SMOKE -ne 1 ]]; then
     python -m uavbench run_stress_sweep --config configs/stress_selection.yaml
     step "Selection-pressure stress significance (accuracy + macro_f1)"
     SELSTRESS_RESULTS="$(python -c "import yaml;print(yaml.safe_load(open('configs/stress_selection.yaml'))['results_dir'])")"
-    python -m uavbench significance --config "$SELSTRESS_RESULTS" --metric accuracy
-    python -m uavbench significance --config "$SELSTRESS_RESULTS" --metric macro_f1
+    python -m uavbench significance --config "$SELSTRESS_RESULTS" --metric accuracy --reference proposed_hfl --correction-scope group
+    python -m uavbench significance --config "$SELSTRESS_RESULTS" --metric macro_f1 --reference proposed_hfl --correction-scope group
 fi
 
 # 6. Stage the paper artifact: seed manifests + resolved configs + significance tables
