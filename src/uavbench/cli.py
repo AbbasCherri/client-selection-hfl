@@ -207,6 +207,9 @@ def cmd_significance(args: argparse.Namespace) -> None:
         group_cols = ["_all"]
 
     methods = args.methods.split(",") if args.methods else sorted(df["method"].unique())
+    reference = getattr(args, "reference", None) or None
+    if reference is not None and reference not in methods:
+        raise ValueError(f"--reference {reference!r} not present in {fname} methods: {methods}")
     table = pairwise_significance_table(
         df,
         metric=args.metric,
@@ -214,7 +217,27 @@ def cmd_significance(args: argparse.Namespace) -> None:
         group_cols=group_cols,
         test=args.test,
         alpha=args.alpha,
+        reference=reference,
+        correction_scope=getattr(args, "correction_scope", "table"),
     )
+    # Warn when the design cannot possibly reject: a paired Wilcoxon on n seeds
+    # has a hard p-floor of 2/2**n, so a Holm family large enough to push the
+    # threshold below it makes every row non-significant regardless of effect.
+    if not table.empty and args.test == "wilcoxon":
+        n_seeds = int(table["n_pairs"].max())
+        fam = (
+            int(table.groupby(list(group_cols)).size().max())
+            if getattr(args, "correction_scope", "table") == "group"
+            else len(table)
+        )
+        floor, thresh = 2 / 2**n_seeds, args.alpha / max(fam, 1)
+        if floor > thresh:
+            logger.warning(
+                "UNDERPOWERED: %d seeds give a Wilcoxon p-floor of %.2e but the Holm "
+                "threshold is %.2e (family=%d) — no comparison can reach significance. "
+                "Use --reference and/or --correction-scope group, or add seeds.",
+                n_seeds, floor, thresh, fam,
+            )
     # Metric-suffixed filename for non-default metrics so a macro_f1 pass
     # doesn't overwrite the accuracy table (plain name kept for back-compat).
     out_name = "significance.csv" if args.metric == "accuracy" else f"significance_{args.metric}.csv"
@@ -517,6 +540,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_sig.add_argument("--methods", default=None, help="comma-separated; default = all in table")
     p_sig.add_argument("--test", default="wilcoxon", choices=["wilcoxon", "ttest_rel"])
     p_sig.add_argument("--alpha", type=float, default=0.05)
+    p_sig.add_argument(
+        "--reference",
+        default=None,
+        help="compare only this method against each other method (M-1 tests) "
+        "instead of all M(M-1)/2 pairs. Strongly recommended for the FL tables: "
+        "at 10 seeds the Wilcoxon p-floor (0.00195) cannot clear an all-pairs "
+        "Holm threshold, so every row comes back non-significant regardless of "
+        "effect size (e.g. proposed_hfl).",
+    )
+    p_sig.add_argument(
+        "--correction-scope",
+        default="table",
+        dest="correction_scope",
+        choices=["table", "group"],
+        help="Holm family: 'table' = every row (most conservative); "
+        "'group' = within each group (per N / per R_comm / per scenario), "
+        "appropriate when each group is a separate figure panel.",
+    )
     p_sig.add_argument(
         "--last-k",
         type=int,

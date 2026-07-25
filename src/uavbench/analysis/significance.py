@@ -161,28 +161,64 @@ def pairwise_significance_table(
     test: str = "wilcoxon",
     alpha: float = 0.05,
     correction: str = "holm",
+    reference: str | None = None,
+    correction_scope: str = "table",
 ) -> pd.DataFrame:
-    """All-pairs paired tests across ``methods``, multiplicity-corrected.
+    """Paired tests across ``methods``, multiplicity-corrected.
 
-    The Holm correction is applied over the whole family of (pair × group)
-    comparisons. ``significant`` reflects the corrected decision at
-    ``alpha``; raw p-values are kept alongside for transparency.
+    ``reference`` — when given, only ``reference`` vs each other method is
+    tested (M-1 comparisons) instead of all M(M-1)/2 pairs. This is both the
+    question a system paper actually asks ("does the proposed method beat each
+    baseline?") and a decisive power matter: a paired Wilcoxon on ``n`` seeds
+    cannot return a p below ``2/2**n`` (n=10 → 0.00195), so an all-pairs family
+    large enough to push the Holm threshold under that floor makes *every*
+    comparison structurally non-significant regardless of effect size. With 13
+    methods × 4 groups the all-pairs family is 312 and the threshold 1.6e-4 —
+    unreachable at 10 seeds. Reference-only within one group is 12 comparisons
+    (threshold 4.2e-3), which the floor clears.
+
+    ``correction_scope`` — ``"table"`` corrects over every row (most
+    conservative); ``"group"`` corrects within each ``group_cols`` combination,
+    appropriate when each group is a separate experiment/figure panel rather
+    than one joint family.
+
+    ``significant`` reflects the corrected decision at ``alpha``; raw p-values,
+    effect sizes and CIs are kept alongside for transparency.
     """
     if correction not in ("holm", "none"):
         raise ValueError(f"correction must be 'holm' or 'none'; got {correction!r}")
+    if correction_scope not in ("table", "group"):
+        raise ValueError(f"correction_scope must be 'table' or 'group'; got {correction_scope!r}")
+    if reference is not None and reference not in methods:
+        raise ValueError(f"reference {reference!r} not among methods {methods}")
+
+    if reference is not None:
+        pairs = [(reference, m) for m in methods if m != reference]
+    else:
+        pairs = list(itertools.combinations(methods, 2))
 
     parts = [
         paired_seed_test(df, metric, a, b, group_cols=group_cols, seed_col=seed_col, test=test)
-        for a, b in itertools.combinations(methods, 2)
+        for a, b in pairs
     ]
     table = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     if table.empty:
         return table
 
     if correction == "holm":
-        table["significant"] = holm_correction(table["p_value"].to_numpy(), alpha=alpha)
+        if correction_scope == "group" and list(group_cols):
+            table["significant"] = False
+            for _, idx in table.groupby(list(group_cols)).groups.items():
+                rows = list(idx)
+                table.loc[rows, "significant"] = holm_correction(
+                    table.loc[rows, "p_value"].to_numpy(), alpha=alpha
+                )
+        else:
+            table["significant"] = holm_correction(table["p_value"].to_numpy(), alpha=alpha)
     else:
         table["significant"] = table["p_value"] < alpha
+    table["correction_scope"] = correction_scope
+    table["reference"] = reference if reference is not None else ""
     table["metric"] = metric
     table["test"] = test
     table["correction"] = correction
