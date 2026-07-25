@@ -1,5 +1,5 @@
 name: tier1_core
-n_workers: 11
+n_workers: 8
 results_dir: results/tier1_core
 instance_seed: 1234
 optimizer_seed: 9876
@@ -12,6 +12,9 @@ scenarios:
   N: 250
   K: 10
 - distribution: epicenter_biased
+  N: 250
+  K: 10
+- distribution: real
   N: 250
   K: 10
 area:
