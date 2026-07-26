@@ -1,0 +1,35 @@
+# Selection-at-scale test — does the proposed selector still lose at large N once
+# it is tested at FULL strength?
+#
+# The original selection_isolation run never passed class_counts/class_scarcity to
+# selector.select(), so the proposed (ucb) rule silently fell back to plain
+# priority greedy in _class_coverage_assign — i.e. the class-coverage component
+# (Tier C) was DISABLED while every baseline ran fully featured. Under that bug
+# ucb lost significantly to oort/power_of_choice at N=350 (-0.036/-0.041) and
+# N=500 (-0.064/-0.061), while winning at N<=200. Fixed in selection_isolation.py.
+#
+# This config re-tests exactly the cells where it lost, at full strength, against
+# the two selectors that beat it (plus random as a floor). Small grid so the
+# answer arrives fast: 2 N x 4 modes x 10 seeds = 80 jobs.
+#
+# Hypothesis being tested: with class-coverage restored, the proposed selector
+# concentrates on rare-class-rich clients instead of spreading participation
+# uniformly (its Jain fairness was 0.881 at N=500, the HIGHEST of all selectors,
+# while its macro_f1 was the second WORST — uniform participation is harmful when
+# only ~24% of clients fit in a round), and the large-N deficit should shrink.
+extends: selection_isolation.yaml
+
+name: selection_scaling
+results_dir: results/selection_scaling
+
+n_seeds: 10
+
+N_values:
+  - 350
+  - 500
+
+modes:
+  - ucb              # proposed, now with class-coverage restored
+  - oort             # beat ucb by 0.036 (N=350) / 0.064 (N=500) under the bug
+  - power_of_choice  # beat ucb by 0.041 (N=350) / 0.061 (N=500) under the bug
+  - random           # floor reference
