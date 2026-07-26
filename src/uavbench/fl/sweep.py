@@ -478,11 +478,17 @@ def _coverage_job(r_comm: float, method: str, seed_idx: int, cfg: dict) -> pd.Da
     # Equal-radius calibration: the path-loss baselines derive their own coverage
     # radius from the link budget, so at a swept R_comm they must be re-calibrated
     # or they place for the wrong radius and lose on the mismatch, not the rule.
-    if job_cfg.get("calibrate_path_loss", True):
+    #
+    # Only the method this job actually runs is calibrated. run_full_hfl reads
+    # optimizer_params[method], so touching the other entries changes nothing it
+    # computes — but optimizer_params IS part of the resume signature, so editing
+    # them all would mark every previously-finished job stale and force a full
+    # recompute (measured: 300/300 existing jobs invalidated instead of 120).
+    if job_cfg.get("calibrate_path_loss", True) and method in ("mozaffari2016", "alzenad2017"):
         from ..problem.path_loss import ENV_PRESETS, path_loss_db_for_radius
 
         op = job_cfg.setdefault("optimizer_params", {})
-        for base in ("mozaffari2016", "alzenad2017"):
+        for base in (method,):
             if base not in op:
                 continue
             env = ENV_PRESETS[op[base].get("environment", "suburban")]
