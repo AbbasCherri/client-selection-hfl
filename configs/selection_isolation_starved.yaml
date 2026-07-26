@@ -1,0 +1,34 @@
+# Selection isolation under DATA STARVATION — preserved variant, not the headline.
+#
+# Identical to selection_isolation.yaml except data.subsample stays at 0.10, which
+# holds the sample pool fixed (~10.3k train rows) while N grows, so samples-per-
+# client collapses:
+#     N=30 -> 344   N=50 -> 206   N=100 -> 103   N=200 -> 52   N=350 -> 29   N=500 -> 21
+#
+# WHY KEEP IT: this is a real operating-envelope result, not just a bug. Under
+# extreme starvation the proposed selector's class-coverage signal degenerates —
+# with ~21 samples/client and an ~81% majority class most clients hold ZERO
+# rare-class samples, so the scarcity-weighted coverage term chases noise, and
+# ucb falls BELOW random (0.248 vs 0.265 at N=500) while loss-based selectors
+# (Oort/PoC) still work. The sign flips versus the matched-data variant:
+#
+#   N=500, ucb vs oort:  -0.063 (significant LOSS)  at 21 samples/client
+#                        +0.041 (significant WIN)   at 206 samples/client
+#
+# Selection pressure does NOT explain it: paper_full N=200 and this config's
+# N=500 have the same servable fraction (rho=0.60) and opposite outcomes.
+#
+# The headline selection_isolation.yaml now uses subsample 1.0 so samples-per-
+# client stays realistic as N grows (a deployment with more clients has more
+# total data, not thinner slices). This config is retained so the starvation
+# regime can be reported as a sensitivity/limitation analysis.
+#
+# See also configs/selection_scaling.yaml (starved, N=350/500 targeted) and
+# configs/selection_scaling_full.yaml (matched, N=350/500 targeted).
+extends: selection_isolation.yaml
+
+name: selection_isolation_starved
+results_dir: results/selection_isolation_starved
+
+data:
+  subsample: 0.10

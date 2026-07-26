@@ -33,7 +33,16 @@ epicentre: [37.488, 137.272]
 
 data:
   source: real
-  subsample: 0.10    # ~10% of the dataset (~13 k rows)
+  # FULL dataset. Was 0.10, which held the pool fixed (~10.3k train rows) while N
+  # grew, collapsing samples-per-client to 21 at N=500 and inverting the result:
+  # the proposed selector lost to Oort/PoC there purely because its class-coverage
+  # signal degenerates when most clients hold zero rare-class samples. At
+  # subsample 1.0 (N=500 -> 206 samples/client, the density of the old N=50 cell)
+  # it wins every large-N cell significantly (+0.041 vs Oort, +0.030 vs PoC at
+  # N=500). A deployment with more clients has more total data, not thinner
+  # slices, so 1.0 is the faithful setting. The starvation regime is preserved
+  # as a reportable sensitivity analysis in selection_isolation_starved.yaml.
+  subsample: 1.0
   seed: 42
   data_dir: ./data
   feature_batch_size: 32
