@@ -1,0 +1,44 @@
+# Matched-data control for the "selector doesn't scale" finding.
+#
+# WHY: selection_isolation holds data.subsample at 0.10 (~10.3k train rows) while
+# N grows, so samples-per-client collapses as N rises:
+#     N=30 -> 344   N=50 -> 206   N=100 -> 103   N=200 -> 52
+#     N=350 ->  29  N=500 ->  21
+# At N=500 each client trains on ~21 samples. That is not "more clients", it is
+# the same small pool sliced 500 ways — in a real deployment more clients means
+# more total data, not thinner slices.
+#
+# That confounds the scaling claim. The decisive evidence: paper_full N=200 and
+# selection_isolation N=500 have the SAME selection pressure (rho = servable
+# fraction per round = 0.60) but opposite outcomes — ucb wins by +0.053 at
+# paper_full N=200 (515 samples/client) and loses by -0.064 at isolation N=500
+# (21 samples/client). Selection pressure therefore does not explain the failure;
+# data-per-client is the variable that differs (25x).
+#
+# Mechanism for why the proposed rule suffers specifically: its class-coverage
+# utility is built on per-client 4-bin label histograms. With ~21 samples and an
+# ~81% majority class, most clients hold ZERO rare-class samples, so the
+# scarcity-weighted coverage signal degenerates to noise. Oort/PoC score by loss
+# magnitude, which still carries signal at 21 samples.
+#
+# THIS CONFIG: identical to selection_scaling.yaml except data.subsample = 1.0,
+# which puts N=500 at 206 samples/client — exactly the density of the N=50 cell
+# where the proposed selector wins. Same selection pressure as before, ~10x the
+# data per client. If the deficit disappears here, "the selector does not scale
+# with N" was a data-starvation artifact of the fixed subsample, not a property
+# of the selection rule.
+#
+# Grid: 2 N x 4 modes x 10 seeds = 80 jobs.
+#
+# Cost note: subsample 1.0 needs the full-dataset ResNet feature cache. It is
+# row-identical to paper_full's (features depend on the sampled rows, i.e. on
+# (subsample, seed), not on N), so copy an existing one into
+# results/selection_scaling_full/N{350,500}/img_features.npy to skip the
+# ~20-minute forward pass.
+extends: selection_scaling.yaml
+
+name: selection_scaling_full
+results_dir: results/selection_scaling_full
+
+data:
+  subsample: 1.0
