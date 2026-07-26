@@ -246,6 +246,31 @@ def run_selection_isolation(cfg: dict) -> dict:
     }
     client_by_id = {c.client_id: c for c in clients}
 
+    # Per-client 4-bin label histograms + inverse-prior class scarcity, exactly as
+    # run_full_hfl builds them. These MUST be passed to the selector: without them
+    # the proposed (ucb) rule silently falls back to plain priority greedy in
+    # _class_coverage_assign, i.e. the class-coverage component (Tier C) is
+    # disabled and the benchmark compares a crippled version of the proposed
+    # selector against fully-featured baselines.
+    _all_train_t = torch.as_tensor(
+        [i for c in clients for i in c.train_indices], dtype=torch.long
+    )
+    _train_label_counts = torch.bincount(
+        cached_dataset.labels[_all_train_t].to(torch.long), minlength=4
+    ).to(torch.float64)
+    _prior = _train_label_counts / _train_label_counts.sum().clamp_min(1.0)
+    class_scarcity = (1.0 / _prior.clamp_min(1e-8)).numpy()
+    class_scarcity = class_scarcity / class_scarcity.sum()
+    client_class_counts: dict[int, np.ndarray] = {
+        c.client_id: np.bincount(
+            cached_dataset.labels[torch.as_tensor(c.train_indices, dtype=torch.long)]
+            .numpy()
+            .astype(int),
+            minlength=4,
+        ).astype(np.float64)
+        for c in clients
+    }
+
     all_rows: list[dict] = []
     confusion_rows: list[dict] = []
 
@@ -300,6 +325,8 @@ def run_selection_isolation(cfg: dict) -> dict:
                     rng=rng,
                     R_comm=R_comm,
                     t_stale_cap=T_sel,
+                    class_counts=client_class_counts,  # proposed (ucb) class-coverage utility
+                    class_scarcity=class_scarcity,
                 )
                 # Roster changed → rebuild the UAV pooled-shard loaders.
                 uav_indices: dict[int, list[int]] = {}
