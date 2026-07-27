@@ -87,7 +87,7 @@ class GA(Optimizer):
         lo, hi = self._tile_bounds(instance)
 
         pop = self._uniform_population(rng, self.P, lo, hi)
-        fit = np.array([fitness(pop[i]) for i in range(self.P)])
+        fit = fitness.batch(pop)
 
         g = int(fit.argmax())
         best_pos, best_fit = pop[g].copy(), float(fit[g])
@@ -112,7 +112,7 @@ class GA(Optimizer):
                     new_pop.append(self._mutate(rng, c2, lo, hi))
 
             pop = np.array(new_pop[: self.P])
-            fit = np.array([fitness(pop[i]) for i in range(self.P)])
+            fit = fitness.batch(pop)
 
             g = int(fit.argmax())
             if fit[g] > best_fit:

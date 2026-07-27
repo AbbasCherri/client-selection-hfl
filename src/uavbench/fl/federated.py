@@ -70,6 +70,8 @@ from .device_state import DeviceStateManager
 from .features import compute_feature_cache
 from .model import (
     CachedFusionModel,
+    MomentumSGD,
+    clip_grad_norm_,
     clone_model,
     fedavg,
     make_loss_fn,
@@ -209,11 +211,40 @@ def _covered_clients(
     }
 
 
+def _reuse_or_clone(
+    model: CachedFusionModel,
+    scratch: CachedFusionModel | None,
+) -> CachedFusionModel:
+    """``clone_model(model)``, reusing ``scratch`` as the destination if given.
+
+    Constructing a fresh module re-runs every layer initializer and the whole
+    nn.Module registration dance only to overwrite it — measurably the dominant
+    cost of cloning (1377 us vs 168 us for the copy alone). Reusing a
+    caller-owned module is safe wherever the caller consumes the returned state
+    dict before the next call (it is cloned out by ``*_state_dict``) and builds
+    its own optimizer per call.
+
+    Copies per-parameter ``requires_grad`` as well as the values, which is
+    load-bearing: ``run_tier2`` never freezes img_proj while
+    ``run_selection_isolation`` does, and both reach here — the frozen/unfrozen
+    split must follow the source model, not a fixed block set.
+    """
+    if scratch is None:
+        return clone_model(model)
+    with torch.no_grad():
+        for src, dst in zip(model.parameters(), scratch.parameters()):
+            dst.copy_(src)
+            dst.requires_grad_(src.requires_grad)
+    scratch.zero_grad(set_to_none=True)
+    return scratch
+
+
 def _local_train(
     model: CachedFusionModel,
     loader: BalancedShardLoader,
     n_epochs: int,
     lr: float,
+    scratch: CachedFusionModel | None = None,
 ) -> tuple[dict, int, float]:
     """Train a client-local copy of the model; return
     (trainable_state_dict, n_samples, mean_loss).
@@ -223,8 +254,12 @@ def _local_train(
     are updated — the IoT-level payload per paper §IV-B. mean_loss is the
     sample-weighted mean training loss over all epochs; the oort /
     power_of_choice baselines consume it as their statistical utility.
+
+    ``scratch`` is an optional caller-owned reusable module (see
+    :func:`_reuse_or_clone`); it must be built before any per-method
+    ``torch.manual_seed`` so its construction draws cannot shift a seeded stream.
     """
-    local = clone_model(model)
+    local = _reuse_or_clone(model, scratch)
     local.train()
     trainable = [p for p in local.parameters() if p.requires_grad]
     opt = optim.Adam(trainable, lr=lr)
@@ -238,7 +273,7 @@ def _local_train(
             logits = local(img_feat, struct)
             loss = loss_fn(logits, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            clip_grad_norm_(trainable, 1.0)
             opt.step()
             n_seen += labels.shape[0]
             loss_sum += float(loss.detach()) * labels.shape[0]
@@ -252,6 +287,7 @@ def _uav_local_train(
     loader: BalancedShardLoader,
     n_epochs: int,
     lr: float,
+    scratch: CachedFusionModel | None = None,
 ) -> tuple[dict, int]:
     """Train a UAV-local copy with img_proj unfrozen (full model, paper §IV-A Step 3).
 
@@ -259,8 +295,10 @@ def _uav_local_train(
     loading or backbone forward pass required.  img_proj learns to map ImageNet
     features to damage-relevant representations; IoT devices cannot do this.
     Returns (full_trainable_state_dict, n_samples).
+
+    ``scratch`` — see :func:`_local_train`.
     """
-    local = clone_model(model)
+    local = _reuse_or_clone(model, scratch)
     local.unfreeze_img_proj()
     local.train()
     trainable = [p for p in local.parameters() if p.requires_grad]
@@ -273,7 +311,7 @@ def _uav_local_train(
             opt.zero_grad()
             logits = local(img_feat, struct)
             loss_fn(logits, labels).backward()
-            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            clip_grad_norm_(trainable, 1.0)
             opt.step()
             n_seen += labels.shape[0]
 
@@ -291,12 +329,19 @@ def _make_optimizer(params, opt_cfg: dict, lr: float):
     wd = float(opt_cfg.get("weight_decay", 0.0))
     if name == "adam":
         return optim.Adam(params, lr=lr, weight_decay=wd)
+    momentum = float(opt_cfg.get("momentum", 0.9))
+    nesterov = bool(opt_cfg.get("nesterov", False))
+    if wd == 0.0 and momentum != 0.0 and not nesterov:
+        # The configured default. MomentumSGD is bit-identical to torch's SGD
+        # here (see its docstring) and ~2x cheaper per step; anything outside
+        # that restriction falls through to torch.optim below.
+        return MomentumSGD(params, lr, momentum)
     return optim.SGD(
         params,
         lr=lr,
-        momentum=float(opt_cfg.get("momentum", 0.9)),
+        momentum=momentum,
         weight_decay=wd,
-        nesterov=bool(opt_cfg.get("nesterov", False)),
+        nesterov=nesterov,
     )
 
 
@@ -328,14 +373,7 @@ def _train_blocks(
     param copy consumes no RNG (clone_model already guaranteed that), stale
     grads are cleared, and training then follows the identical op sequence.
     """
-    if scratch is None:
-        local = clone_model(model)
-    else:
-        local = scratch
-        with torch.no_grad():
-            for src, dst in zip(model.parameters(), local.parameters()):
-                dst.copy_(src)
-        local.zero_grad(set_to_none=True)
+    local = _reuse_or_clone(model, scratch)
     local.set_trainable_blocks(blocks)
     local.train()
     trainable = [p for p in local.parameters() if p.requires_grad]
@@ -349,7 +387,7 @@ def _train_blocks(
             logits = local(img_feat, struct)
             loss = loss_fn(logits, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            clip_grad_norm_(trainable, 1.0)
             opt.step()
             n_seen += labels.shape[0]
             loss_sum += float(loss.detach()) * labels.shape[0]
@@ -480,6 +518,11 @@ def run_tier2(cfg: dict) -> dict:
     batch_size: int = cfg["fl"]["batch_size"]
     K: int = cfg["fl"]["K"]
     R_comm: float = cfg["fl"]["R_comm"]
+    # Gate every method's coverage at the scalar R_comm, ignoring any
+    # path-loss-derived per-UAV radius — same knob as run_full_hfl. Referenced
+    # below but never defined here from e79701f5 until 2026-07-26, so every
+    # placement method in this harness raised NameError on its first placement.
+    uniform_coverage_radius: bool = bool(cfg["fl"].get("uniform_coverage_radius", False))
     capacity: int = cfg["fl"]["capacity"]
     T_sel: int = cfg["fl"].get("T_sel", 5)
     P: int = cfg["budget"]["P"]
@@ -514,6 +557,11 @@ def run_tier2(cfg: dict) -> dict:
 
     all_rows: list[dict] = []
     confusion_rows: list[dict] = []
+
+    # Reusable per-client training module (see _reuse_or_clone). Built BEFORE
+    # the per-method torch.manual_seed so its construction-time RNG draws
+    # cannot shift any seeded stream.
+    scratch_model = CachedFusionModel()
 
     # ------------------------------------------------------------------
     # 2. Outer loop: one full FL run per placement method
@@ -597,7 +645,9 @@ def run_tier2(cfg: dict) -> dict:
                     if not client.train_indices:
                         continue
                     loader = make_client_loader(cached_dataset, client.train_indices, batch_size)
-                    sd, n, _loss = _local_train(global_model, loader, n_local_epochs, lr)
+                    sd, n, _loss = _local_train(
+                        global_model, loader, n_local_epochs, lr, scratch=scratch_model
+                    )
                     client_updates[uav_idx].append((sd, n))
 
             # ---- UAV-level FedAvg ----
@@ -889,7 +939,7 @@ def _run_centralized(
                 opt.zero_grad()
                 logits = global_model(img_feat, struct)
                 loss_fn(logits, labels).backward()
-                torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+                clip_grad_norm_(trainable, 1.0)
                 opt.step()
         metrics = _evaluate(global_model, cached_dataset, global_test_indices)
         rows.append(

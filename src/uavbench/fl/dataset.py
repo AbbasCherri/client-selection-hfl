@@ -61,7 +61,12 @@ class CachedDataset(Dataset):
                 "rebuild it."
             )
         self.base = base_dataset
-        self.img_features = torch.from_numpy(img_features.astype(np.float32))
+        # copy=False: compute_feature_cache already hands back float32, so the
+        # unconditional cast duplicated the whole (N, 512) array — 262 MB and
+        # 130 ms per job at the paper's N, times 12 concurrent sweep workers.
+        # Still copies when the caller supplies another dtype. Nothing mutates
+        # the array afterwards, so sharing its buffer is safe.
+        self.img_features = torch.from_numpy(img_features.astype(np.float32, copy=False))
         # In-memory views used for tensor-sliced batching (both the real
         # MultiModalDataset and the prebuilt test fixture store these as
         # torch tensors).
@@ -96,6 +101,13 @@ class BalancedShardLoader:
     the in-memory feature tensors rather than per-item ``__getitem__`` + collate.
     """
 
+    #: Batches gathered per advanced-indexing call in ``__iter__``. Gathering a
+    #: block and then slicing it amortizes the three per-batch gathers ~64x;
+    #: the block cap keeps the extra live memory at ~4 MB even when the shard is
+    #: the whole training set (``_run_centralized``), where hoisting the gather
+    #: over the full epoch would allocate hundreds of MB per worker.
+    _GATHER_BATCHES = 64
+
     def __init__(
         self,
         dataset: CachedDataset,
@@ -125,9 +137,18 @@ class BalancedShardLoader:
         else:
             order = torch.randperm(len(self.indices))
         sel = self.indices[order]
-        for start in range(0, len(sel), self.batch_size):
-            b = sel[start : start + self.batch_size]
-            yield self._img[b], self._struct[b], self._labels[b]
+        # Gather a block of batches at once, then hand out contiguous slices of
+        # it. Same rows in the same order as the per-batch gather this replaces
+        # (a contiguous slice of a gathered block holds exactly the values that
+        # block's rows were gathered from), so it is bit-identical.
+        bs = self.batch_size
+        block = bs * self._GATHER_BATCHES
+        for b0 in range(0, len(sel), block):
+            blk = sel[b0 : b0 + block]
+            img, struct, labels = self._img[blk], self._struct[blk], self._labels[blk]
+            for start in range(0, len(blk), bs):
+                stop = start + bs
+                yield img[start:stop], struct[start:stop], labels[start:stop]
 
 
 def make_client_loader(

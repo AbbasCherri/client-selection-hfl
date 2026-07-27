@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .assignment import AssignmentResult, greedy_assignment
+from .assignment import AssignmentResult, greedy_assignment, greedy_assignment_batch
 from .instance import ProblemInstance
 
 _EPS = 1e-9
@@ -108,6 +108,45 @@ class Fitness:
     def __call__(self, x: np.ndarray, radii: np.ndarray | None = None) -> float:
         """Return the scalar fitness of candidate ``x`` (counts one evaluation)."""
         return self.components(x, radii=radii).fitness
+
+    def batch(self, X: np.ndarray, radii: np.ndarray | None = None) -> np.ndarray:
+        """Score a whole ``(P, 3K)`` population; returns ``(P,)``, counts P evals.
+
+        Bit-identical to ``np.array([self(X[i]) for i in range(P)])`` and 5-7x
+        faster: the greedy sweep is shared across candidates (see
+        :func:`greedy_assignment_batch`) while the *scalarization* stays a
+        per-candidate loop over the identical expressions.
+
+        That last part is not incidental. Vectorizing the tail as well —
+        ``f_cover`` by accumulating value in descending-value order, ``d_move``
+        and ``l_imb`` by summing along an added axis — changes floating-point
+        summation order and shifts results by ~1 ULP. The reductions here are
+        short (K terms) and run once per candidate rather than once per device,
+        so keeping them scalar costs almost nothing and buys exactness.
+        """
+        inst = self.instance
+        K = inst.K
+        pos = np.asarray(X, dtype=np.float64).reshape(-1, K, 3)
+        P = pos.shape[0]
+        self.eval_count += P
+
+        assignment, loads = greedy_assignment_batch(inst, pos, radii=radii)
+
+        out = np.empty(P, dtype=np.float64)
+        for p in range(P):
+            assigned_mask = assignment[p] >= 0
+            f_cover = float(inst.value[assigned_mask].sum())
+            n_assigned = int(assigned_mask.sum())
+            d_move = float(
+                np.sum(np.sqrt(np.sum((pos[p] - inst.prev_positions) ** 2, axis=1)))
+            )
+            l_imb = float(np.sum((loads[p] - n_assigned / K) ** 2))
+            out[p] = (
+                self.w1 * (f_cover / self.f_max)
+                - self.w2 * (d_move / self.d_max)
+                - self.w3 * (l_imb / self.l_max)
+            )
+        return out
 
 
 def fitness_components(

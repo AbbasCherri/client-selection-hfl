@@ -138,7 +138,7 @@ class PSO(Optimizer):
         Vel = 0.5 * rng.uniform(-vmax, vmax, size=(self.P, dim))
 
         pbest = X.copy()
-        pbest_fit = np.array([fitness(X[i]) for i in range(self.P)])
+        pbest_fit = fitness.batch(X)
         g = int(pbest_fit.argmax())
         gbest_pos = pbest[g].copy()
         gbest_fit = float(pbest_fit[g])
@@ -180,7 +180,7 @@ class PSO(Optimizer):
             np.clip(X, lo, hi, out=X)
             Vel[out] = 0.0
 
-            fit = np.array([fitness(X[i]) for i in range(self.P)])
+            fit = fitness.batch(X)
             improved = fit > pbest_fit
             pbest[improved] = X[improved]
             pbest_fit[improved] = fit[improved]
@@ -202,7 +202,7 @@ class PSO(Optimizer):
                 worst = np.argsort(fit)[:n_worst]
                 X[worst] = self._uniform_population(rng, n_worst, lo, hi)
                 Vel[worst] = 0.5 * rng.uniform(-vmax, vmax, size=(n_worst, dim))
-                wf = np.array([fitness(X[i]) for i in worst])
+                wf = fitness.batch(X[worst])
                 pbest[worst] = X[worst]
                 pbest_fit[worst] = wf
                 stagnation = 0

@@ -274,6 +274,11 @@ def run_selection_isolation(cfg: dict) -> dict:
     all_rows: list[dict] = []
     confusion_rows: list[dict] = []
 
+    # Reusable per-client/per-UAV training module (see federated._reuse_or_clone).
+    # Built BEFORE the per-mode torch.manual_seed so its construction-time RNG
+    # draws cannot shift any seeded stream.
+    scratch_model = CachedFusionModel()
+
     # ── 4. Per-mode runs — identical seed, identical everything but the rule ─
     for mode in modes:
         logger.info("=== Selection mode: %s ===", mode)
@@ -344,7 +349,9 @@ def run_selection_isolation(cfg: dict) -> dict:
             # ── UAV image training (paper §IV-A Step 3) ──────────────────
             uav_img_updates: dict[int, tuple[dict, int]] = {}
             for uav_idx, loader in uav_loaders.items():
-                sd, n = _uav_local_train(global_model, loader, n_uav_epochs, uav_lr)
+                sd, n = _uav_local_train(
+                    global_model, loader, n_uav_epochs, uav_lr, scratch=scratch_model
+                )
                 uav_img_updates[uav_idx] = (sd, n)
 
             # ── IoT local training (paper §IV-A Step 5) ──────────────────
@@ -356,7 +363,9 @@ def run_selection_isolation(cfg: dict) -> dict:
                 loader = client_loaders.get(cid)
                 if loader is None:
                     continue
-                sd, n, mean_loss = _local_train(global_model, loader, n_local_epochs, lr)
+                sd, n, mean_loss = _local_train(
+                    global_model, loader, n_local_epochs, lr, scratch=scratch_model
+                )
                 rep = rep_scores.get(cid, 0.5)
                 client_updates[cid] = (sd, n, rep)
                 client_losses[cid] = mean_loss
