@@ -1,0 +1,74 @@
+fl:
+  lr: 0.01775
+  uav_lr: 0.01775
+  logit_adjust_tau: 0.601
+  server_momentum: 0.528
+  K: 20
+  R_comm: 12000.0
+  uniform_coverage_radius: true
+  capacity: 6
+  n_rounds: 100
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  batch_size: 32
+  T_sel: 5
+  reselect_every: 1
+  lambda_min: 0.5
+  R_min: 0.3
+  placement_method: pso
+  balanced_sampling: false
+  local_optimizer:
+    name: sgd
+    momentum: 0.9
+  server_lr: 1.0
+  lr_decay: cosine
+  ema_decay: 0.9
+  fusion_owner: uav
+  placement_class_aware: true
+  target_metric: macro_f1
+  target_value: 0.45
+  seed: 31914
+calibrate_path_loss: true
+name: paper_coverage
+results_dir: results/paper_coverage/R12000/seed2/random_place
+n_workers: 12
+n_seeds: 10
+optimizer_seed: 9876
+epicentre:
+- 37.488
+- 137.272
+N: 200
+R_comm_values:
+- 2000
+- 4000
+- 6000
+- 8000
+- 12000
+- 20000
+data:
+  source: real
+  subsample: 1.0
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  feature_num_workers: 8
+  N_clients: 200
+  partition_seed: 5311
+  feature_cache_path: results/paper_coverage/N200/img_features.npy
+budget:
+  P: 50
+  G_max: 30
+optimizer_params:
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+methods:
+- random_place
+_pipeline_version: 3
+_diagnostics:
+  black_chip_rate: 0.0

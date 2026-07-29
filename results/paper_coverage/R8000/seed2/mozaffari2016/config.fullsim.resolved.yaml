@@ -28,6 +28,7 @@ fl:
   target_metric: macro_f1
   target_value: 0.45
   seed: 31914
+calibrate_path_loss: true
 name: paper_coverage
 results_dir: results/paper_coverage/R8000/seed2/mozaffari2016
 n_workers: 12
@@ -61,7 +62,7 @@ optimizer_params:
   mozaffari2016:
     environment: suburban
     freq_ghz: 2.0
-    max_path_loss_db: 145.0
+    max_path_loss_db: 136.7974853515625
   alzenad2017:
     environment: suburban
     freq_ghz: 2.0

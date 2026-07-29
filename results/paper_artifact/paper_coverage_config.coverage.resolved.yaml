@@ -27,6 +27,7 @@ fl:
   placement_class_aware: true
   target_metric: macro_f1
   target_value: 0.45
+calibrate_path_loss: true
 name: paper_coverage
 results_dir: results/paper_coverage
 n_workers: 12
@@ -65,7 +66,9 @@ optimizer_params:
     max_path_loss_db: 145.0
 methods:
 - proposed_hfl
+- hfl_static
+- centroid_place
+- random_place
 - mozaffari2016
 - alzenad2017
-- hfl_static
 - flat_fl
