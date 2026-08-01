@@ -1113,7 +1113,11 @@ def run_full_hfl(cfg: dict) -> dict:
         client_indices={c.client_id: list(c.train_indices) for c in clients},
         global_prior=_prior.numpy() if class_source == "true" else None,
         epsilon=dp_epsilon,
-        rng=np.random.default_rng(seed),
+        # run_seed, not data.seed: the DP noise draw belongs to the run's RNG
+        # family so each seed repetition gets an independent release, and the
+        # noise enters the confidence intervals like every other stochastic
+        # component instead of being frozen across the sweep.
+        rng=np.random.default_rng(run_seed),
     )
     # Epicentre — use config override or default to Noto Peninsula 2024
     epicentre = tuple(cfg.get("epicentre", [37.488, 137.272]))  # type: ignore[assignment]
