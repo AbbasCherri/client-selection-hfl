@@ -7,10 +7,15 @@
 #   - Identical FL pipeline for all modes (reputation FedAvg, R_min gate,
 #     T_sel reselection cadence, UAV image training).
 #
-# Grid: 6 N-values × 7 modes × 10 seeds = 420 jobs on 12 parallel workers.
+# Grid: 3 N-values × 10 arms × 10 seeds = 300 jobs on 12 parallel workers.
 #
 # Modes:
 #   ucb      — proposed system (Algorithms 1-4: eligibility → priority → UCB → greedy)
+#   class_greedy — 2026-08 class-aware baseline: ucb's exact class histogram,
+#              consumed by a bare submodular coverage greedy (no UCB, no
+#              reputation, no utility, no Gumbel, no priority blend)
+#   ucb_pseudo   — ucb with pseudo-label histograms (zero label disclosure)
+#   ucb_noclass  — ucb with the histogram withheld (lower anchor)
 #   random   — eligibility gate + random draw (no-selection ablation)
 #   fedcs    — B1: FedCS greedy deadline selection (Nishio & Yonetani, ICC 2019)
 #   rep_cap  — B2: reputation-capability ranking (Zhao et al., CJA 2024)
@@ -44,6 +49,7 @@ data:
   # as a reportable sensitivity analysis in selection_isolation_starved.yaml.
   subsample: 1.0
   seed: 42
+  val_ratio: 0.1     # 80/10/10 train/val/test — see configs/paper_full.yaml
   data_dir: ./data
   feature_batch_size: 32
   # N_clients is overwritten per-job by run_selection_sweep (N_values below).
@@ -70,16 +76,32 @@ elbow:
   k_min: 2
   k_max: 30
 
+# N ∈ {100, 200, 500} — the regime where a selection effect exists at all.
+# The 2026-07 run covered {30, 50, 100, 200, 350, 500} and found the effect
+# null at N=30 (report that openly); {100, 200, 500} spans the binding regime
+# at 1/2 the cost, which is what makes room for the 3 new class-awareness arms.
 N_values:
-  - 30
-  - 50
   - 100
   - 200
-  - 350
   - 500
 
+# Arms = (selection rule, class-histogram source); see ARM_SPECS in
+# fl/selection_isolation.py. The 7 original selectors plus the 2026-08
+# class-awareness block:
+#   class_greedy — the SAME oracle histogram ucb gets, consumed by a plain
+#                  submodular class-coverage greedy and nothing else. If ucb
+#                  cannot beat this, the contribution is class-awareness
+#                  (prior art), not the UCB pipeline built on top of it.
+#   ucb_pseudo   — histogram from the global model's own predictions; zero
+#                  label disclosure. If the result survives this rung, the
+#                  "unrealistic oracle" objection dissolves entirely.
+#   ucb_noclass  — full pipeline, histogram withheld; the lower anchor.
+# The DP-epsilon rungs live in selection_dp_ladder.yaml (N=500 only).
 modes:
   - ucb
+  - class_greedy
+  - ucb_pseudo
+  - ucb_noclass
   - random
   - fedcs
   - rep_cap

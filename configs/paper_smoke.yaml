@@ -27,6 +27,7 @@ data:
   source: real
   subsample: 0.2          # ~25 k rows — fast but enough class signal
   seed: 42
+  val_ratio: 0.1          # 80/10/10 — smoke must exercise the same split path
   data_dir: ./data
   feature_batch_size: 32
   feature_num_workers: 8

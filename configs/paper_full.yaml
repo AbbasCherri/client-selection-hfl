@@ -45,6 +45,12 @@ data:
   source: real
   subsample: 1.0     # 100% of dataset (~128 k rows)
   seed: 42
+  # Three-way split: 80% train / 10% val / 10% test (train_ratio 0.8 default).
+  # Before 2026-08 there was no val split at all and scripts/tune_weights.py
+  # maximized macro-F1 on the *reported test set* — 22 hyperparameters chosen
+  # by looking at the answer. Every selection decision now reads val_*; only
+  # final reported numbers read the test columns.
+  val_ratio: 0.1
   data_dir: ./data
   feature_batch_size: 32
   # DataLoader workers for the one-time ResNet feature pass (TIF decode is the

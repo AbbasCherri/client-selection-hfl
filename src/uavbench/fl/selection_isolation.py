@@ -61,6 +61,7 @@ from uavbench.metrics.fl import (
 )
 
 from ..reporting.tables import read_table
+from .class_histograms import build_class_info
 from .client_selection import ClientSelector
 from .dataset import BalancedShardLoader, CachedDataset, ClientData, make_client_loader
 from .device_state import DeviceStateManager
@@ -90,6 +91,35 @@ DEFAULT_MODES: list[str] = [
     "oort",
     "power_of_choice",
 ]
+
+# An *arm* is (selection rule, class-histogram source). The two are separate
+# axes: `ucb_pseudo` and `ucb_dp_*` run the identical selection rule as `ucb`
+# and differ only in where the per-client class histogram comes from, which is
+# what makes the oracle-degradation ladder a controlled comparison. Arms not
+# listed here are plain selector modes with no class information.
+#
+# Recorded in the parquet under the *arm* name, so tables read directly.
+ARM_SPECS: dict[str, dict] = {
+    "ucb":           {"mode": "ucb",          "class_source": "true"},
+    "class_greedy":  {"mode": "class_greedy", "class_source": "true"},
+    "ucb_pseudo":    {"mode": "ucb",          "class_source": "pseudo"},
+    "ucb_noclass":   {"mode": "ucb_noclass",  "class_source": "none"},
+    "ucb_dp_eps0.5": {"mode": "ucb", "class_source": "dp", "dp_epsilon": 0.5},
+    "ucb_dp_eps1":   {"mode": "ucb", "class_source": "dp", "dp_epsilon": 1.0},
+    "ucb_dp_eps4":   {"mode": "ucb", "class_source": "dp", "dp_epsilon": 4.0},
+}
+
+
+def resolve_arm(arm: str) -> tuple[str, str, float]:
+    """``arm`` → ``(selector_mode, class_source, dp_epsilon)``.
+
+    Unknown names pass through as class-blind selector modes, which is correct
+    for every literature baseline (they ignore class information by design).
+    """
+    spec = ARM_SPECS.get(arm)
+    if spec is None:
+        return arm, "none", 1.0
+    return spec["mode"], spec["class_source"], float(spec.get("dp_epsilon", 1.0))
 
 _UAV_ALTITUDE_M = 70.0  # hover altitude used throughout the repo
 
@@ -200,9 +230,14 @@ def run_selection_isolation(cfg: dict) -> dict:
     epicentre = tuple(cfg.get("epicentre", [37.488, 137.272]))
 
     # ── 1. Data (shared across modes) ───────────────────────────────────────
-    full_dataset, client_train_indices, global_test_indices, client_coords, img_features = (
-        _load_data(cfg, results_dir)
-    )
+    (
+        full_dataset,
+        client_train_indices,
+        global_test_indices,
+        client_coords,
+        img_features,
+        global_val_indices,
+    ) = _load_data(cfg, results_dir)
     cached_dataset = CachedDataset(full_dataset, img_features)
 
     clients: list[ClientData] = [
@@ -259,17 +294,13 @@ def run_selection_isolation(cfg: dict) -> dict:
         cached_dataset.labels[_all_train_t].to(torch.long), minlength=4
     ).to(torch.float64)
     _prior = _train_label_counts / _train_label_counts.sum().clamp_min(1.0)
-    class_scarcity = (1.0 / _prior.clamp_min(1e-8)).numpy()
-    class_scarcity = class_scarcity / class_scarcity.sum()
-    client_class_counts: dict[int, np.ndarray] = {
-        c.client_id: np.bincount(
-            cached_dataset.labels[torch.as_tensor(c.train_indices, dtype=torch.long)]
-            .numpy()
-            .astype(int),
-            minlength=4,
-        ).astype(np.float64)
-        for c in clients
-    }
+
+    # Where the per-client class histogram comes from is an *experimental
+    # variable*, not a constant: "true" is the ground-truth oracle this project
+    # used through 2026-07, and the ladder degrades it toward something a real
+    # deployment could produce. Resolved per arm inside the mode loop below,
+    # since arms differ in source (see ARM_SPECS). Source: fl/class_histograms.py.
+    _client_train_idx = {c.client_id: list(c.train_indices) for c in clients}
 
     all_rows: list[dict] = []
     confusion_rows: list[dict] = []
@@ -280,8 +311,35 @@ def run_selection_isolation(cfg: dict) -> dict:
     scratch_model = CachedFusionModel()
 
     # ── 4. Per-mode runs — identical seed, identical everything but the rule ─
-    for mode in modes:
-        logger.info("=== Selection mode: %s ===", mode)
+    for arm in modes:
+        # An arm names (selection rule, histogram source); `mode` is the rule
+        # the selector actually runs. Rows are recorded under the arm name.
+        mode, class_source, dp_epsilon = resolve_arm(arm)
+        logger.info(
+            "=== Arm: %s (rule=%s, class_source=%s%s) ===",
+            arm,
+            mode,
+            class_source,
+            f", eps={dp_epsilon}" if class_source == "dp" else "",
+        )
+
+        if class_source == "pseudo":
+            # Needs a trained model, which does not exist yet — refreshed each
+            # reselection round below. Starting at None means a bug in that
+            # refresh degrades to the documented no-class fallback rather than
+            # silently reusing an oracle histogram.
+            client_class_counts, class_scarcity = None, None
+        else:
+            client_class_counts, class_scarcity = build_class_info(
+                class_source,
+                labels=cached_dataset.labels,
+                client_indices=_client_train_idx,
+                global_prior=_prior.numpy() if class_source == "true" else None,
+                epsilon=dp_epsilon,
+                # DP noise is drawn per arm from the run seed, so the ε rungs
+                # are independent draws rather than the same noise rescaled.
+                rng=np.random.default_rng(run_seed),
+            )
 
         rng = np.random.default_rng(run_seed)
         torch.manual_seed(run_seed)
@@ -318,6 +376,19 @@ def run_selection_isolation(cfg: dict) -> dict:
 
             # ── Client selection (the experimental variable) ─────────────
             if reselect:
+                if class_source == "pseudo":
+                    # Refresh from the *current* global model, every time the
+                    # roster is rebuilt. Early rounds therefore get a poor
+                    # histogram — that is the honest cost of removing the
+                    # oracle, and hiding it (e.g. by warm-starting from the
+                    # true counts) would defeat the purpose of this rung.
+                    client_class_counts, class_scarcity = build_class_info(
+                        "pseudo",
+                        labels=cached_dataset.labels,
+                        client_indices=_client_train_idx,
+                        model=global_model,
+                        cached_dataset=cached_dataset,
+                    )
                 selected = selector.select(
                     covered=covered_all,
                     device_states=device_states,
@@ -441,6 +512,13 @@ def run_selection_isolation(cfg: dict) -> dict:
             # evaluate_subset handles empty test indices (zero metrics) and
             # takes the tensor-sliced fast path on CachedDataset.
             metrics = _evaluate_subset(global_model, cached_dataset, global_test_indices)
+            # Val stream for hyperparameter search only; test stays the
+            # reported (and never selected-on) stream. See _load_data.
+            val_metrics = (
+                _evaluate_subset(global_model, cached_dataset, global_val_indices)
+                if global_val_indices
+                else {}
+            )
             elapsed = time.perf_counter() - t0
 
             if metrics["accuracy"] >= target_accuracy:
@@ -455,7 +533,7 @@ def run_selection_isolation(cfg: dict) -> dict:
 
             all_rows.append(
                 {
-                    "method": mode,
+                    "method": arm,  # arm name, not the underlying selector rule
                     "round": rnd,
                     "accuracy": metrics["accuracy"],
                     "macro_f1": metrics["macro_f1"],
@@ -470,13 +548,22 @@ def run_selection_isolation(cfg: dict) -> dict:
                     "comm_mb_round": comm_mb,
                     "round_time_s": elapsed,
                     **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
+                    # val_* mirrors the reported metrics on the validation
+                    # split (NaN when none is configured); selection-time
+                    # decisions read these, reported numbers read test.
+                    "val_accuracy": val_metrics.get("accuracy", float("nan")),
+                    "val_macro_f1": val_metrics.get("macro_f1", float("nan")),
+                    **{
+                        f"val_f1_{cls}": v
+                        for cls, v in val_metrics.get("f1_per_class", {}).items()
+                    },
                 }
             )
-            confusion_rows.extend(_confusion_rows(mode, rnd, metrics["confusion_matrix"]))
+            confusion_rows.extend(_confusion_rows(arm, rnd, metrics["confusion_matrix"]))
             if rnd % 10 == 0 or rnd == n_rounds:
                 logger.info(
                     "[%s] round %d/%d | acc=%.3f | F1=%.3f | sel=%d | jain=%.3f | %.1fs",
-                    mode,
+                    arm,
                     rnd,
                     n_rounds,
                     metrics["accuracy"],
@@ -491,7 +578,7 @@ def run_selection_isolation(cfg: dict) -> dict:
 
         logger.info(
             "%s done. Rounds to %.0f%%: %s",
-            mode,
+            arm,
             target_accuracy * 100,
             rounds_to_target if rounds_to_target else "not reached",
         )

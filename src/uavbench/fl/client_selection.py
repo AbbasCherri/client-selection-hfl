@@ -14,6 +14,16 @@ Pipeline
 Selection modes
 ---------------
 "ucb"      — full pipeline (proposed system)
+"class_greedy" — **the decisive 2026-08 baseline**: the identical per-client
+             class histogram the proposed selector receives, consumed by a
+             plain submodular class-coverage greedy and nothing else (no
+             utility, no reputation, no beta blend, no UCB bonus, no Gumbel
+             roster sampling, no static-priority blend). Implemented as
+             ``_class_coverage_assign`` with ``static_blend=gumbel_scale=0``,
+             so it cannot drift from the proposed roster builder. Separates
+             "class-awareness helps" (prior art) from "our pipeline helps".
+"ucb_noclass" — the full priority/UCB pipeline with the class histogram
+             withheld; the lower anchor of the oracle-degradation ladder.
 "random"   — eligibility filter only, then random draw per UAV (hfl_no_selection)
 "all"      — every ELIGIBLE covered client participates (flat_fl). Eligibility
              still applies: a device with a dead battery, no memory, or a
@@ -320,7 +330,34 @@ class ClientSelector:
             )
             return self._record_selection(selected, round_num)
 
-        if mode != "ucb":
+        if mode == "class_greedy":
+            # The decisive baseline (2026-08). Receives the *identical*
+            # class_counts the proposed selector gets, and nothing else: no
+            # utility, no reputation, no beta blend, no UCB bonus, no Gumbel
+            # roster sampling, no static-priority blend. If `ucb` cannot beat
+            # this, the contribution is class-awareness — which is prior art —
+            # and not the UCB pipeline built on top of it.
+            if class_counts is None or class_scarcity is None:
+                raise ValueError(
+                    "mode='class_greedy' requires class_counts and class_scarcity; "
+                    "without them it is not a class-aware baseline at all"
+                )
+            selected = self._class_coverage_assign(
+                eligible_ids,
+                eligible,
+                np.zeros(len(eligible_ids)),  # no priority signal whatsoever
+                class_counts,
+                class_scarcity,
+                uav_capacity,
+                client_coords,
+                uav_coords_latlon,
+                R_comm,
+                static_blend=0.0,
+                gumbel_scale=0.0,
+            )
+            return self._record_selection(selected, round_num)
+
+        if mode not in ("ucb", "ucb_noclass"):
             raise ValueError(f"unknown selection mode: {mode!r}")
 
         # ── UCB pipeline ────────────────────────────────────────────────
@@ -354,8 +391,11 @@ class ClientSelector:
             eligible_ids,
             eligible,
             static,
-            class_counts,
-            class_scarcity,
+            # ucb_noclass: the full priority/UCB pipeline with the class
+            # histogram withheld — the lower anchor of the oracle-degradation
+            # ladder. Falls through to the plain priority greedy.
+            None if mode == "ucb_noclass" else class_counts,
+            None if mode == "ucb_noclass" else class_scarcity,
             uav_capacity,
             client_coords,
             uav_coords_latlon,
@@ -538,6 +578,8 @@ class ClientSelector:
         client_coords: dict[int, tuple[float, float]],
         uav_coords_latlon: list[tuple[float, float]],
         R_comm: float,
+        static_blend: float | None = None,
+        gumbel_scale: float | None = None,
     ) -> dict[int, int]:
         """Proposed roster construction: per-UAV submodular class-coverage greedy.
 
@@ -552,12 +594,22 @@ class ClientSelector:
         min-max-normalized learning/utility/UCB priority, and the per-client
         Gumbel term makes the roster a sample rather than a fixed argsort. Falls
         back to the plain priority greedy when class information is absent.
+
+        ``static_blend`` / ``gumbel_scale`` default to the module constants
+        (the proposed system). Setting **both to 0.0** strips the priority and
+        stochastic terms, leaving a pure submodular class-coverage greedy —
+        that is exactly the ``class_greedy`` baseline, so the ablation differs
+        from the proposed selector only in these two coefficients rather than
+        being a separate implementation that could drift.
         """
         if class_counts is None or class_scarcity is None:
             return self._greedy_assign(
                 eligible_ids, eligible, static, uav_capacity,
                 client_coords, uav_coords_latlon, R_comm,
             )
+
+        blend = SEL_STATIC_BLEND if static_blend is None else float(static_blend)
+        g_scale = SEL_GUMBEL_SCALE if gumbel_scale is None else float(gumbel_scale)
 
         _rng = self._sel_rng  # decoupled from the shared placement/device RNG
         n = len(eligible_ids)
@@ -568,8 +620,11 @@ class ClientSelector:
         )
 
         static_n = _minmax(static)
+        # The Gumbel draw is taken even when g_scale == 0 so that every mode
+        # consumes the selection RNG identically — otherwise class_greedy would
+        # desynchronise the stream and stop being seed-comparable to ucb.
         gumbel = -np.log(-np.log(_rng.uniform(1e-12, 1.0, size=n)))
-        perturbed_static = SEL_STATIC_BLEND * static_n + SEL_GUMBEL_SCALE * gumbel
+        perturbed_static = blend * static_n + g_scale * gumbel
 
         dist: np.ndarray | None = None
         if uav_coords_latlon:

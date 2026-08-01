@@ -1,0 +1,36 @@
+# Differential-privacy rung of the oracle-degradation ladder (2026-08).
+#
+# The proposed selector ranks clients partly by a 4-bin histogram of their local
+# labels. Through 2026-07 that histogram was the ground truth, straight out of
+# the simulator — a statistic no participant discloses. This config measures
+# what the method is worth when the histogram is released under differential
+# privacy instead.
+#
+# Release model (state this in the paper): the client partition is static, so
+# each client releases its histogram **once**, not per round. Sensitivity is 1
+# (one row moves one bin), noise is Laplace(1/eps), counts are clamped at zero
+# and NOT renormalised — rescaling to a known total would leak the exact row
+# count and undo part of the noise. The privacy budget is therefore eps, not
+# eps x n_rounds.
+#
+# Run at N=500 ONLY. The epsilon sweep is a sensitivity curve whose job is to
+# show the *shape* of the degradation; it is reported at the single operating
+# point where the effect is largest and cleanest. Running it at every N would
+# triple its cost without supporting an additional claim.
+#
+# Read alongside results/selection_isolation/ — same seeds, same static UAV
+# layout, same pipeline, so the arms are directly comparable to `ucb`
+# (eps -> infinity) and `ucb_noclass` (no histogram at all).
+
+extends: selection_isolation.yaml
+
+name: selection_dp_ladder
+results_dir: results/selection_dp_ladder
+
+modes:
+  - ucb_dp_eps0.5    # strong privacy
+  - ucb_dp_eps1      # moderate
+  - ucb_dp_eps4      # weak — should approach plain `ucb`
+
+N_values:
+  - 500

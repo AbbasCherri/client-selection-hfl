@@ -64,6 +64,7 @@ from uavbench.problem.fitness import Fitness
 from uavbench.problem.instance import ProblemInstance
 from uavbench.reporting.tables import write_table as _write_table
 
+from .class_histograms import build_class_info
 from .client_selection import ClientSelector
 from .dataset import BalancedShardLoader, CachedDataset, ClientData, make_client_loader
 from .device_state import DeviceStateManager
@@ -537,9 +538,14 @@ def run_tier2(cfg: dict) -> dict:
     # ------------------------------------------------------------------
     # 1. Load data (shared loader; real-data only, prebuilt = test seam)
     # ------------------------------------------------------------------
-    full_dataset, client_train_indices, global_test_indices, client_coords, img_features = (
-        _load_data(cfg, results_dir)
-    )
+    (
+        full_dataset,
+        client_train_indices,
+        global_test_indices,
+        client_coords,
+        img_features,
+        global_val_indices,
+    ) = _load_data(cfg, results_dir)
 
     cached_dataset = CachedDataset(full_dataset, img_features)
 
@@ -854,6 +860,10 @@ def _load_data(cfg: dict, results_dir: Path) -> tuple:
             raw["global_test_indices"],
             raw["client_coords"],
             _apply_black_chips(raw["img_features"], black_chip_rate, seed),
+            # Test fixtures predate the val split; an absent key means "no
+            # validation set", which callers must treat as "cannot select on
+            # val" rather than silently falling back to test.
+            raw.get("global_val_indices", []),
         )
     if data_source != "real":
         raise ValueError(
@@ -868,16 +878,23 @@ def _load_data(cfg: dict, results_dir: Path) -> tuple:
 
     logger.info("Loading real HFL dataset (N=%d clients)…", data_cfg["N_clients"])
     hf_token = os.environ.get("HF_TOKEN", data_cfg.get("hf_token"))
-    full_dataset, client_train_indices, _, global_test_indices, client_coords = (
-        get_hfl_data_partitions(
-            csv_path=data_cfg.get("csv_path"),
-            data_dir=data_cfg.get("data_dir", "./data"),
-            N=data_cfg["N_clients"],
-            subsample=data_cfg.get("subsample", 0.05),
-            random_seed=seed,
-            hf_token=hf_token,
-            partition_seed=data_cfg.get("partition_seed"),
-        )
+    (
+        full_dataset,
+        client_train_indices,
+        _,
+        global_test_indices,
+        client_coords,
+        _client_val_indices,
+        global_val_indices,
+    ) = get_hfl_data_partitions(
+        csv_path=data_cfg.get("csv_path"),
+        data_dir=data_cfg.get("data_dir", "./data"),
+        N=data_cfg["N_clients"],
+        subsample=data_cfg.get("subsample", 0.05),
+        random_seed=seed,
+        hf_token=hf_token,
+        partition_seed=data_cfg.get("partition_seed"),
+        val_ratio=data_cfg.get("val_ratio", 0.0),
     )
     # Allow the sweep to provide a shared N-level cache (avoids recomputing per seed).
     cache_path = data_cfg.get("feature_cache_path") or str(results_dir / "img_features.npy")
@@ -897,6 +914,7 @@ def _load_data(cfg: dict, results_dir: Path) -> tuple:
         global_test_indices,
         client_coords,
         _apply_black_chips(img_features, black_chip_rate, seed),
+        global_val_indices,
     )
 
 
@@ -1030,6 +1048,12 @@ def run_full_hfl(cfg: dict) -> dict:
     fusion_owner = str(fl.get("fusion_owner", "uav")).lower()  # "uav" | "client"
     reselect_every = int(fl.get("reselect_every", 1))  # selection cadence (≠ placement T_sel)
     placement_class_aware = bool(fl.get("placement_class_aware", True))
+    # Histogram source for BOTH selection and class-aware placement. Applied
+    # globally (every HFL method shares it), so it is not a fairness asymmetry
+    # between methods — but it is the same oracle-realism question, and the
+    # degradation ladder has to cover placement too, not just selection.
+    class_source = str(fl.get("class_source", "true")).lower()
+    dp_epsilon = float(fl.get("dp_epsilon", 1.0))
     # Rounds-to-target now tracks the reported primary metric (macro-F1) against
     # a meaningful floor, not raw accuracy against an 0.82 majority-class ceiling.
     target_metric = str(fl.get("target_metric", "macro_f1"))
@@ -1040,9 +1064,14 @@ def run_full_hfl(cfg: dict) -> dict:
     optimizer_params: dict = cfg.get("optimizer_params", {})
 
     # ── 1. Load data ────────────────────────────────────────────────────────
-    full_dataset, client_train_indices, global_test_indices, client_coords, img_features = (
-        _load_data(cfg, results_dir)
-    )
+    (
+        full_dataset,
+        client_train_indices,
+        global_test_indices,
+        client_coords,
+        img_features,
+        global_val_indices,
+    ) = _load_data(cfg, results_dir)
     cached_dataset = CachedDataset(full_dataset, img_features)
 
     clients: list[ClientData] = [
@@ -1062,8 +1091,15 @@ def run_full_hfl(cfg: dict) -> dict:
     # ── Class statistics (shared by logit adjustment, selection, placement) ──
     # Global training-label prior → logit-adjustment shift (A1). Per-client
     # class histograms → class-coverage selection utility and class-scarcity
-    # placement value (Tier C). A client discloses only its 4-bin label counts,
-    # a minimal statistic (differential-privacy noise is a drop-in future step).
+    # placement value (Tier C).
+    #
+    # The histogram SOURCE is an experimental variable, not a constant
+    # (fl.class_source, see fl/class_histograms.py): through 2026-07 it was the
+    # ground-truth bincount — a statistic no participant discloses. "pseudo"
+    # (global-model predictions, zero disclosure) and "dp" (Laplace-noised,
+    # one-shot release) are the realistic rungs. Note this histogram is built
+    # ONCE, outside the round loop, from fixed train_indices: it is a one-time
+    # release, not a per-round leak.
     _all_train_t = torch.as_tensor(all_train_indices, dtype=torch.long)
     _train_label_counts = torch.bincount(
         cached_dataset.labels[_all_train_t].to(torch.long), minlength=4
@@ -1071,20 +1107,14 @@ def run_full_hfl(cfg: dict) -> dict:
     _prior = _train_label_counts / _train_label_counts.sum().clamp_min(1.0)
     log_prior = torch.log(_prior.clamp_min(1e-8)).to(torch.float32) if logit_tau > 0 else None
     loss_fn = make_loss_fn(log_prior, tau=logit_tau)
-    # Inverse-prior class scarcity weights (rarer class → higher weight), used to
-    # value clients/positions by the minority information they contribute.
-    class_scarcity = (1.0 / _prior.clamp_min(1e-8)).numpy()
-    class_scarcity = class_scarcity / class_scarcity.sum()
-    client_class_counts: dict[int, np.ndarray] = {
-        c.client_id: np.bincount(
-            cached_dataset.labels[torch.as_tensor(c.train_indices, dtype=torch.long)]
-            .numpy()
-            .astype(int),
-            minlength=4,
-        ).astype(np.float64)
-        for c in clients
-    }
-
+    client_class_counts, class_scarcity = build_class_info(
+        class_source,
+        labels=cached_dataset.labels,
+        client_indices={c.client_id: list(c.train_indices) for c in clients},
+        global_prior=_prior.numpy() if class_source == "true" else None,
+        epsilon=dp_epsilon,
+        rng=np.random.default_rng(seed),
+    )
     # Epicentre — use config override or default to Noto Peninsula 2024
     epicentre = tuple(cfg.get("epicentre", [37.488, 137.272]))  # type: ignore[assignment]
 
@@ -1202,13 +1232,19 @@ def run_full_hfl(cfg: dict) -> dict:
         # Per-client minority-information weight (Σ_c scarcity_c · count_c),
         # normalized to mean 1 so it re-weights placement value without changing
         # its overall scale. Positions UAV capacity toward rare-class-rich zones.
-        _client_class_value = np.array(
-            [float(np.dot(class_scarcity, client_class_counts[c.client_id])) for c in clients]
-        )
-        _cv_mean = float(_client_class_value.mean())
-        _client_class_value = (
-            _client_class_value / _cv_mean if _cv_mean > 0 else np.ones(len(clients))
-        )
+        # class_source="none" removes the histogram entirely, which also
+        # disables class-aware placement — the two must degrade together, or a
+        # "no class information" run would still be steering UAVs with it.
+        if client_class_counts is None or class_scarcity is None:
+            _client_class_value = np.ones(len(clients))
+        else:
+            _client_class_value = np.array(
+                [float(np.dot(class_scarcity, client_class_counts[c.client_id])) for c in clients]
+            )
+            _cv_mean = float(_client_class_value.mean())
+            _client_class_value = (
+                _client_class_value / _cv_mean if _cv_mean > 0 else np.ones(len(clients))
+            )
 
         for rnd in range(1, n_rounds + 1):
             t0 = time.perf_counter()
@@ -1504,7 +1540,18 @@ def run_full_hfl(cfg: dict) -> dict:
             device_mgr.update_round(set(selected.keys()))
 
             # ── Evaluate ─────────────────────────────────────────────────
+            # Test is the *reported* stream and is never used to select
+            # anything (significance consumes the final round, not a best
+            # round). Val is logged alongside it purely so hyperparameter
+            # search has a legitimate stream to optimize against — before
+            # 2026-08 there was no val split and scripts/tune_weights.py
+            # maximized test macro-F1 directly.
             metrics = _evaluate(eval_model, cached_dataset, global_test_indices)
+            val_metrics = (
+                _evaluate(eval_model, cached_dataset, global_val_indices)
+                if global_val_indices
+                else {}
+            )
             elapsed = time.perf_counter() - t0
 
             if metrics.get(target_metric, 0.0) >= target_value:
@@ -1541,6 +1588,16 @@ def run_full_hfl(cfg: dict) -> dict:
                     "jain_fairness": jain_index(counts_arr),
                     "n_unique_selected": int((counts_arr > 0).sum()),
                     **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
+                    # val_* mirrors the reported metrics on the validation
+                    # split (NaN when no val split is configured). Anything
+                    # that *selects* — hyperparameter search, early stopping —
+                    # must read these, never the unprefixed test columns.
+                    "val_accuracy": val_metrics.get("accuracy", float("nan")),
+                    "val_macro_f1": val_metrics.get("macro_f1", float("nan")),
+                    **{
+                        f"val_f1_{cls}": v
+                        for cls, v in val_metrics.get("f1_per_class", {}).items()
+                    },
                 }
             )
             confusion_rows.extend(_confusion_rows(method, rnd, metrics["confusion_matrix"]))
