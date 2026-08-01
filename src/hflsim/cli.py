@@ -215,7 +215,15 @@ def main():
     hf_token = args.hf_token or os.getenv("HF_TOKEN")
 
     print("[hflsim] Loading data partitions …")
-    full_dataset, client_train_indices, client_test_indices, global_test_indices, client_coords = (
+    (
+        full_dataset,
+        client_train_indices,
+        client_test_indices,
+        global_test_indices,
+        client_coords,
+        _client_val_indices,
+        _global_val_indices,
+    ) = (
         get_hfl_data_partitions(
             csv_path=args.csv_path,
             data_dir=args.data_dir,

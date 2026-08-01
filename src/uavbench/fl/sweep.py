@@ -121,7 +121,7 @@ def _prefetch_all_N(cfg: dict) -> None:
             "[prefetch] N=%d — loading dataset (first call streams HF, subsequent calls hit disk cache) …",
             N,
         )
-        full_dataset, _, _, _, _ = get_hfl_data_partitions(
+        full_dataset, *_ = get_hfl_data_partitions(
             csv_path=data_cfg.get("csv_path"),
             data_dir=data_cfg.get("data_dir", "./data"),
             N=N,

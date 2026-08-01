@@ -173,7 +173,7 @@ def _prefetch(cfg: dict) -> None:
     data_cfg = cfg["data"]
     cache_path = Path(cfg["results_dir"]) / "img_features.npy"
     logger.info("[prefetch] N=%d — caching dataset + features …", data_cfg["N_clients"])
-    full_dataset, _, _, _, _ = get_hfl_data_partitions(
+    full_dataset, *_ = get_hfl_data_partitions(
         csv_path=data_cfg.get("csv_path"),
         data_dir=data_cfg.get("data_dir", "./data"),
         N=data_cfg["N_clients"],

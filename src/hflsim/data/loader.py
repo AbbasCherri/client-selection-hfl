@@ -414,6 +414,28 @@ def _save_partition_cache(path: str, payload: dict):
 # Public API
 # ---------------------------------------------------------------------------
 
+def split_client_indices(
+    idx_arr: list[int], train_ratio: float, val_ratio: float = 0.0
+) -> tuple[list[int], list[int], list[int]]:
+    """Split one client's (already shuffled) row indices into train/val/test.
+
+    The validation set is carved out of the **held-out** portion, never out of
+    train: a ``val_ratio > 0`` run therefore trains on byte-identical data to
+    the two-way split it supersedes, and differs only in which rows are scored.
+    That is what makes the 2026-08 three-way results comparable to the two-way
+    ones on everything except the reported metric's support.
+
+    ``val_ratio=0.0`` reproduces the historical two-way behaviour exactly.
+
+    Both ratios are fractions of the client's full row count, so the test share
+    is the remainder ``1 − train_ratio − val_ratio``.
+    """
+    n_s = len(idx_arr)
+    split = int(n_s * train_ratio)
+    val_split = split + int(n_s * val_ratio)
+    return idx_arr[:split], idx_arr[split:val_split], idx_arr[val_split:]
+
+
 def get_hfl_data_partitions(
     csv_path: str | None = None,
     data_dir: str = "./data",
@@ -423,9 +445,14 @@ def get_hfl_data_partitions(
     subsample: float = 0.05,
     hf_token: str | None = None,
     partition_seed: int | None = None,
+    val_ratio: float = 0.0,
 ):
     """
     Build the full MultiModalDataset and per-client index partitions.
+
+    Returns ``(full_dataset, client_train_indices, client_test_indices,
+    global_test_indices, client_coords, client_val_indices,
+    global_val_indices)``.
 
     ``random_seed`` controls the subsample row draw (and therefore which
     feature caches apply); ``partition_seed`` (default: random_seed) controls
@@ -433,7 +460,25 @@ def get_hfl_data_partitions(
     vary partition_seed per seed repetition so the partition/test-split
     variance enters the confidence intervals without invalidating the shared
     per-N feature caches (which depend only on the sampled rows).
+
+    ``val_ratio`` (fraction of each client's rows, on the same scale as
+    ``train_ratio``) carves a **validation** split out of the held-out portion,
+    leaving ``1 − train_ratio − val_ratio`` as test. It exists to fix a real
+    leak: before 2026-08 there was no validation set at all, so
+    ``scripts/tune_weights.py`` selected hyperparameters by maximising
+    performance on the same rows the paper reports. Every model- and
+    hyperparameter-selection decision must read the val split; only final
+    reported numbers may read test.
+
+    ``val_ratio=0.0`` (the default) is the exact historical two-way behaviour,
+    down to the partition-cache key — so existing caches and results remain
+    reproducible.
     """
+    if not 0.0 <= val_ratio < 1.0 - train_ratio:
+        raise ValueError(
+            f"val_ratio={val_ratio} must lie in [0, 1 - train_ratio) = "
+            f"[0, {1.0 - train_ratio}); otherwise the test split is empty"
+        )
     pseed = random_seed if partition_seed is None else int(partition_seed)
     # ------------------------------------------------------------------ #
     # 1. Load raw metadata                                                #
@@ -490,13 +535,21 @@ def get_hfl_data_partitions(
     # ------------------------------------------------------------------ #
     # 3. Partition cache                                                   #
     # ------------------------------------------------------------------ #
-    cache_key_str = "|".join([
+    cache_key_parts = [
         str(len(df)),
         str(N),
         f"{train_ratio:.6f}",
         str(random_seed),
         str(pseed),
-    ])
+    ]
+    # Only extend the key when a validation split is actually requested, so
+    # val_ratio=0.0 reproduces the pre-2026-08 key exactly and existing
+    # partition caches stay valid. Any val_ratio > 0 produces a distinct key —
+    # reusing a two-way cache for a three-way split would silently return a
+    # test set that still contains the validation rows.
+    if val_ratio > 0.0:
+        cache_key_parts.append(f"val{val_ratio:.6f}")
+    cache_key_str = "|".join(cache_key_parts)
     cache_path = _partition_cache_path(cache_root_dir, cache_key_str)
     cached = _load_partition_cache(cache_path)
 
@@ -506,6 +559,11 @@ def get_hfl_data_partitions(
         client_test_indices  = cached["client_test_indices"]
         global_test_indices  = cached["global_test_indices"]
         client_coords        = cached["client_coords"]
+        # Pre-2026-08 caches predate the validation split. They can only be hit
+        # when val_ratio == 0.0 (the key includes val_ratio otherwise), so an
+        # empty val set here is correct, not a silently-dropped split.
+        client_val_indices   = cached.get("client_val_indices", {cid: [] for cid in range(N)})
+        global_val_indices   = cached.get("global_val_indices", [])
     else:
         # ---------------------------------------------------------------- #
         # 4. K-Means geographic partitioning                               #
@@ -516,7 +574,9 @@ def get_hfl_data_partitions(
         cluster_ids = km.fit_predict(coords_for_km)
 
         client_train_indices: dict[int, list[int]] = {}
+        client_val_indices:   dict[int, list[int]] = {}
         client_test_indices:  dict[int, list[int]] = {}
+        global_val_indices:   list[int]            = []
         global_test_indices:  list[int]            = []
         client_coords:        dict[int, tuple]     = {}
 
@@ -527,12 +587,14 @@ def get_hfl_data_partitions(
             rng = np.random.default_rng(pseed + cid)
             rng.shuffle(idx_arr)
 
-            split         = int(n_s * train_ratio)
-            train_idx     = idx_arr[:split]
-            test_idx      = idx_arr[split:]
+            train_idx, val_idx, test_idx = split_client_indices(
+                idx_arr, train_ratio, val_ratio
+            )
 
             client_train_indices[cid] = train_idx
+            client_val_indices[cid]   = val_idx
             client_test_indices[cid]  = test_idx
+            global_val_indices.extend(val_idx)
             global_test_indices.extend(test_idx)
 
             if idx_arr:
@@ -545,7 +607,9 @@ def get_hfl_data_partitions(
 
         _save_partition_cache(cache_path, {
             "client_train_indices": client_train_indices,
+            "client_val_indices":   client_val_indices,
             "client_test_indices":  client_test_indices,
+            "global_val_indices":   global_val_indices,
             "global_test_indices":  global_test_indices,
             "client_coords":        client_coords,
         })
@@ -571,4 +635,6 @@ def get_hfl_data_partitions(
         client_test_indices,
         global_test_indices,
         client_coords,
+        client_val_indices,
+        global_val_indices,
     )

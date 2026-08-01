@@ -12,8 +12,8 @@ dist/
 .pytest_cache/
 
 # Data caches
-data/tile_cache/
-data/.partition_cache/
+/data/tile_cache/
+/data/.partition_cache/
 
 # IDE
 .vscode/
@@ -26,7 +26,10 @@ nohup.out
 
 # Data is re-fetched from the pinned HF dataset / GSI tiles — never tracked
 # (see REPORTS/data_availability.md for licensing: tiles are not redistributed)
-data/
+# Leading slash anchors this to the repo root: unanchored "data/" also matched
+# src/hflsim/data/, so editing the loader tripped "paths are ignored" on every
+# `git add` even though the file was tracked.
+/data/
 
 # ResNet feature caches: rebuilt automatically (and validated against the
 # dataset) by compute_feature_cache; at subsample 1.0 they exceed GitHub's
