@@ -35,6 +35,7 @@ from uavbench.fl.class_histograms import (  # noqa: E402
     true_histograms,
 )
 from uavbench.fl.client_selection import ClientSelector  # noqa: E402
+from uavbench.fl.device_state import DeviceState  # noqa: E402
 from uavbench.fl.selection_isolation import ARM_SPECS, resolve_arm  # noqa: E402
 
 LABELS = torch.tensor([0, 0, 0, 1, 1, 2, 3, 3, 3, 3], dtype=torch.long)
@@ -106,42 +107,54 @@ def scarcity_favours_rare_classes_and_is_normalised():
     assert s[2] > s[3], f"rarer class should carry more weight: {s}"
 
 
+def _eligible_states(ids):
+    """Device states that pass the four-condition gate.
+
+    Non-negotiable for these two checks: `select` returns {} on an empty
+    eligible pool *before* reaching the mode dispatch, so passing
+    device_states={} would make both assertions vacuously pass.
+    """
+    return {
+        cid: DeviceState(battery=0.9, snr_db=20.0, memory_ok=True, compute_time_s=60.0)
+        for cid in ids
+    }
+
+
+def _select(sel, ids, **kw):
+    return sel.select(
+        covered=dict.fromkeys(ids, 0),
+        device_states=_eligible_states(ids),
+        reputation_scores=dict.fromkeys(ids, 0.5),
+        client_coords={cid: (37.5, 137.3) for cid in ids},
+        uav_coords_latlon=[(37.5, 137.3)],
+        round_num=1,
+        uav_capacity=len(ids),
+        **kw,
+    )
+
+
+def gate_lets_these_clients_through():
+    """Guard the guard: if this stops selecting anyone, the two checks below
+    go vacuous and would pass no matter what the dispatch does."""
+    sel = ClientSelector([0, 1], seed=0)
+    got = _select(sel, [0, 1], mode="random", rng=np.random.default_rng(0))
+    assert got, "fixture device states are not eligible — later checks would be vacuous"
+
+
 def class_greedy_refuses_to_run_blind():
     """Without a histogram it is not a class-aware baseline — must fail loudly."""
     sel = ClientSelector([0, 1], seed=0)
     try:
-        sel.select(
-            covered={0: 0, 1: 0},
-            device_states={},
-            reputation_scores={},
-            client_coords={0: (37.5, 137.3), 1: (37.5, 137.3)},
-            uav_coords_latlon=[(37.5, 137.3)],
-            round_num=1,
-            uav_capacity=2,
-            mode="class_greedy",
-            class_counts=None,
-            class_scarcity=None,
-        )
+        _select(sel, [0, 1], mode="class_greedy", class_counts=None, class_scarcity=None)
     except ValueError:
         return
-    # An empty eligible pool short-circuits before the guard; that is fine, but
-    # it must not have silently produced a roster from no class information.
     raise AssertionError("class_greedy accepted a call with no class information")
 
 
 def unknown_mode_still_raises():
-    sel = ClientSelector([0], seed=0)
+    sel = ClientSelector([0, 1], seed=0)
     try:
-        sel.select(
-            covered={0: 0},
-            device_states={},
-            reputation_scores={},
-            client_coords={0: (37.5, 137.3)},
-            uav_coords_latlon=[(37.5, 137.3)],
-            round_num=1,
-            uav_capacity=1,
-            mode="not_a_mode",
-        )
+        _select(sel, [0, 1], mode="not_a_mode")
     except ValueError:
         return
     raise AssertionError("unknown selection mode was silently accepted")
@@ -155,6 +168,7 @@ if __name__ == "__main__":
     check("dp noise is seed-reproducible", dp_is_reproducible_under_a_fixed_seed)
     check("none source yields no class info", none_source_yields_no_class_information)
     check("scarcity favours rare classes", scarcity_favours_rare_classes_and_is_normalised)
+    check("fixture states pass the eligibility gate", gate_lets_these_clients_through)
     check("class_greedy refuses to run blind", class_greedy_refuses_to_run_blind)
     check("unknown mode still raises", unknown_mode_still_raises)
     finish()
