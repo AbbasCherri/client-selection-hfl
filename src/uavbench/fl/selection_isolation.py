@@ -77,6 +77,7 @@ from .federated import (
 from .model import CachedFusionModel, fedavg, reputation_fedavg
 from .reputation import ReputationManager, trimmed_mean
 from .seeds import partition_seed_for, sweep_job_seed
+from .sweep import PIPELINE_VERSION, _stale_checkpoint_reason
 
 logger = logging.getLogger("uavbench.fl.selection_isolation")
 
@@ -615,17 +616,32 @@ def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # so the selection rule is the only cross-mode difference. (Contrast with
     # sweep._paper_job, where run_full_hfl folds in a method hash.)
     job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
+    job_cfg["_pipeline_version"] = PIPELINE_VERSION
     job_results_dir = Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / mode
     job_cfg["results_dir"] = str(job_results_dir)
 
-    if (job_results_dir / "config.selection.resolved.yaml").exists():
+    # Resume gate. This harness checked only that the resolved-config file
+    # EXISTED, with no comparison of what it contained — so the 2026-08-01
+    # Phase 1 launch silently reloaded 2026-07-28 checkpoints for the seven
+    # original arms (computed under the two-way split, before the val split
+    # existed) and would have compared them against freshly-run three-way-split
+    # arms. Caught only because the new arms' files had new mtimes.
+    ckpt = job_results_dir / "config.selection.resolved.yaml"
+    if ckpt.exists():
+        stale = _stale_checkpoint_reason(ckpt, job_cfg)
+        if stale is None:
+            logger.info(
+                "[N=%d  mode=%-9s seed=%d] checkpoint found — skipping (resume)",
+                N, mode, seed_idx,
+            )
+            df = read_table(job_results_dir / "selection_rounds.parquet")
+            df.insert(0, "seed", seed_idx)
+            df.insert(0, "N", N)
+            return df
         logger.info(
-            "[N=%d  mode=%-9s seed=%d] checkpoint found — skipping (resume)", N, mode, seed_idx
+            "[N=%d  mode=%-9s seed=%d] stale checkpoint — rerunning: %s",
+            N, mode, seed_idx, stale,
         )
-        df = read_table(job_results_dir / "selection_rounds.parquet")
-        df.insert(0, "seed", seed_idx)
-        df.insert(0, "N", N)
-        return df
 
     import torch as _torch
 
