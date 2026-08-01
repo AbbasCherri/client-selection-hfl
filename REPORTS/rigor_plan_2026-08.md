@@ -554,6 +554,25 @@ was already excluded from the 176 h total and is now deleted outright.)
 significance over the existing 2026-07-29 parquets), the Tier-1 Pareto tables,
 and the entire non-optimizer half of the Phase-3 weight sweep.
 
+## VM budget split (added 2026-08-01)
+
+VM #1 (`instance-20260715-110613`) has **~60 h of credits left**; the plan needs
+~122 h. A second VM on another account takes over afterwards — **tell the user
+when VM #1 runs out**, the switchover is manual.
+
+Everything that can *change a paper claim* goes on VM #1:
+
+| VM | blocks | h |
+|---|---|---|
+| **#1 (~49 h + 11 h buffer)** | Phase 1 (30) · Phase 3 (2) · Phase 4 (5) · Phase 6 (6) · 0.3 (6) | 49 |
+| **#2 (~73 h)** | 0.3b per-method HPO (25) · Phase 2 paper_full (36) · Phase 5 e2e (12) | 73 |
+
+This split is safe because Phase 1's decisive comparison (`ucb` vs
+`class_greedy` vs `ucb_pseudo` vs `ucb_noclass`) is between arms that all share
+one training recipe — it does **not** depend on the per-method HPO in 0.3b. The
+literature baselines inside Phase 1 do inherit untuned constants, so their rows
+must be re-read after VM #2's HPO lands.
+
 ## Sequencing
 
 1. Phase 0 code + sanity checks, smoke-validated (`reproduce_paper.sh --smoke`).
