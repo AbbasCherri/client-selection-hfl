@@ -1,0 +1,35 @@
+# Smoke check for the 2026-08 class-awareness arms on the REAL data path.
+#
+# The sanity_checks scripts cover the units (histogram sources, DP noise,
+# class_greedy's guard) but never touch the loader, the val split, or the
+# selection harness end-to-end. This config runs every new arm plus one
+# literature baseline for a handful of rounds on a small real subsample, purely
+# to prove the plumbing works before committing ~30 h of VM time to Phase 1.
+#
+# NOT a result: 2 seeds and 6 rounds cannot support any claim.
+
+extends: selection_isolation.yaml
+
+name: class_ladder_smoke
+results_dir: results/class_ladder_smoke
+
+n_workers: 4
+n_seeds: 2
+
+data:
+  subsample: 0.05
+  val_ratio: 0.1
+
+fl:
+  n_rounds: 6
+
+modes:
+  - ucb              # true histogram (the oracle)
+  - class_greedy     # same histogram, bare greedy
+  - ucb_pseudo       # pseudo-label histogram, refreshed per reselection
+  - ucb_noclass      # no histogram (lower anchor)
+  - ucb_dp_eps1      # DP-noised histogram
+  - oort             # a class-blind literature baseline, for contrast
+
+N_values:
+  - 50
