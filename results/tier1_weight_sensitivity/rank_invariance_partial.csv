@@ -1,0 +1,17 @@
+scenario,method,rank_min,rank_max,rank_nunique,rank_stable
+clustered_N250_K10,alzenad2017,3.0,3.0,1,True
+clustered_N250_K10,centroid,1.0,1.0,1,True
+clustered_N250_K10,mozaffari2016,2.0,2.0,1,True
+clustered_N250_K10,static,4.0,4.0,1,True
+epicenter_biased_N250_K10,alzenad2017,2.0,2.0,1,True
+epicenter_biased_N250_K10,centroid,1.0,1.0,1,True
+epicenter_biased_N250_K10,mozaffari2016,3.0,3.0,1,True
+epicenter_biased_N250_K10,static,4.0,4.0,1,True
+real_N250_K10,alzenad2017,3.0,3.0,1,True
+real_N250_K10,centroid,2.0,2.0,1,True
+real_N250_K10,mozaffari2016,1.0,1.0,1,True
+real_N250_K10,static,4.0,4.0,1,True
+uniform_N250_K10,alzenad2017,3.0,4.0,2,False
+uniform_N250_K10,centroid,2.0,3.0,2,False
+uniform_N250_K10,mozaffari2016,1.0,1.0,1,True
+uniform_N250_K10,static,2.0,4.0,2,False
