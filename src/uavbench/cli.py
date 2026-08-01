@@ -143,19 +143,38 @@ def cmd_mclp(args: argparse.Namespace) -> None:
                 capacity_cv=prob.get("capacity_cv", 0.0), battery_cv=prob.get("battery_cv", 0.0),
                 data_dir=cfg.get("data", {}).get("data_dir", "./data"),
             )
-            ref = mclp_reference(inst)
             pso_cov = float(pso[(pso["scenario"] == scen) & (pso["seed"] == seed_i)]["f_cover_norm"].mean())
-            rows.append({
-                "scenario": scen, "seed": seed_i,
-                "mclp_cover_norm": ref.covered_value_norm, "pso_cover_norm": pso_cov,
-                "pct_of_optimal": 100.0 * pso_cov / ref.covered_value_norm if ref.covered_value_norm else float("nan"),
-                "mclp_optimal": ref.optimal, "n_sites": ref.n_sites,
-            })
+            # Grid resolution is swept, not fixed: the MCLP optimum is only a
+            # bound on the *grid*, so a single resolution makes "PSO reaches X%
+            # of optimum" depend on an arbitrary choice. The convergence curve
+            # across resolutions is the actual deliverable. Seeds buy the CI,
+            # resolution buys convergence — they answer different questions, so
+            # --grid-seeds runs the finer (expensive) grids on fewer seeds.
+            for grid_res in args.grid_res:
+                if seed_i >= args.grid_seeds and grid_res != args.grid_res[0]:
+                    continue  # finer grids only on the first --grid-seeds seeds
+                ref = mclp_reference(inst, grid_res=grid_res, time_limit=args.time_limit)
+                rows.append({
+                    "scenario": scen, "seed": seed_i, "grid_res": grid_res,
+                    "mclp_cover_norm": ref.covered_value_norm, "pso_cover_norm": pso_cov,
+                    "pct_of_optimal": 100.0 * pso_cov / ref.covered_value_norm
+                    if ref.covered_value_norm else float("nan"),
+                    "mclp_optimal": ref.optimal, "mip_gap": ref.mip_gap,
+                    "n_sites": ref.n_sites,
+                })
     out = pd.DataFrame(rows)
     path = results_dir / "mclp_reference.csv"
     out.to_csv(path, index=False)
-    logger.info("Wrote %s (PSO reaches %.0f%% of MILP-optimal coverage on average)",
-                path, out["pct_of_optimal"].mean())
+    base = out[out["grid_res"] == args.grid_res[0]]
+    logger.info(
+        "Wrote %s — at grid_res=%d PSO reaches %.1f%% of MILP-optimal coverage "
+        "(%d/%d proven optimal; max MIP gap %.2e)",
+        path, args.grid_res[0], base["pct_of_optimal"].mean(),
+        int(base["mclp_optimal"].sum()), len(base), out["mip_gap"].max(),
+    )
+    if len(args.grid_res) > 1:
+        curve = out.groupby("grid_res")["pct_of_optimal"].mean().round(1).to_dict()
+        logger.info("Grid-convergence curve (PSO %% of optimum vs grid_res): %s", curve)
 
 
 def cmd_significance(args: argparse.Namespace) -> None:
@@ -571,8 +590,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_mc = sub.add_parser("mclp", help="MILP-optimal coverage reference vs PSO (near-optimality)")
     p_mc.add_argument("--config", required=True, help="Tier-1 config YAML")
-    p_mc.add_argument("--n-seeds", type=int, default=3, dest="n_seeds",
-                      help="seeds per scenario to solve the MILP for (default 3; it's a reference)")
+    p_mc.add_argument("--n-seeds", type=int, default=30, dest="n_seeds",
+                      help="seeds per scenario at the base grid resolution (default 30, "
+                           "for a CI on PSO%% of optimum; was 3 through 2026-07, which "
+                           "gave 12 instances and no interval at all)")
+    p_mc.add_argument("--grid-res", type=int, nargs="+", default=[20, 30, 45],
+                      dest="grid_res",
+                      help="candidate-site grid resolutions to sweep (default 20 30 45). "
+                           "The first is the base resolution reported with a CI; the rest "
+                           "form the convergence curve that shows the grid bound tightening")
+    p_mc.add_argument("--grid-seeds", type=int, default=10, dest="grid_seeds",
+                      help="seeds for the non-base resolutions (default 10). Grid "
+                           "convergence is a geometric property and does not need the "
+                           "full seed count that the reported CI does")
+    p_mc.add_argument("--time-limit", type=float, default=600.0, dest="time_limit",
+                      help="HiGHS time limit per solve in seconds (default 600)")
     p_mc.set_defaults(func=cmd_mclp)
 
     p_cl = sub.add_parser("clean", help="remove results (of a config, or all)")

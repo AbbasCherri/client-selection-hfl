@@ -5,9 +5,19 @@ against: over a candidate grid of UAV sites, choose K sites and assign covered
 clients (each site serving at most ``capacity``) to maximize covered value. The
 scalarized fitness is coverage-dominated (w1=0.81), so covered value is the term
 that matters. Solved exactly with SciPy's bundled HiGHS MILP — no extra
-dependency. Because sites are a finite grid, the MCLP optimum is a *lower bound*
-on the continuous optimum; with a dense grid it closely approximates it, so
-"PSO reaches X% of the MCLP coverage" is a rigorous near-optimality statement.
+dependency.
+
+**What this does and does not bound.** It bounds the ``F_cover`` term only — the
+movement and imbalance terms of the scalarized objective are ignored entirely.
+With w1=0.811 that is a defensible proxy, but the paper must say "PSO reaches X%
+of the optimal *coverage*", never "of the objective".
+
+**Grid restriction.** Sites are a finite grid, so the MCLP optimum is a lower
+bound on the continuous optimum. PSO places off-grid and can therefore exceed
+100% of it — those cells are not errors, they are the grid bound being loose.
+Sweep ``grid_res`` and report the convergence curve, so "X% of optimum" stops
+depending on an arbitrary resolution: at grid_res=20 over a 5 km box the
+spacing is 263 m against R_comm=500 m, which is coarse.
 """
 
 from __future__ import annotations
@@ -27,6 +37,7 @@ class MCLPResult:
     n_covered: int
     optimal: bool                 # True if HiGHS proved optimality within the time limit
     n_sites: int
+    mip_gap: float = float("nan")  # residual optimality gap; NaN if HiGHS reported none
 
 
 def _candidate_sites(instance: ProblemInstance, grid_res: int) -> np.ndarray:
@@ -66,10 +77,20 @@ def mclp_reference(
     sites = _candidate_sites(instance, grid_res)
     m = sites.shape[0]
     r = float(np.max(radii)) if radii is not None else float(instance.R_comm)
+    # max(), not min() or mean(), and deliberately so: candidate sites are grid
+    # points, not specific UAVs, so there is no per-site capacity to use. Taking
+    # the largest makes the MILP *stronger* than any real deployment, which
+    # pushes the reported "PSO reaches X% of optimum" DOWN. The bound stays
+    # honest; it just gets slightly harder for PSO to reach. Only matters when
+    # capacities are heterogeneous, which no current config does.
     cap = float(np.max(instance.capacity))
 
-    # coverage matrix C[i, j] = 1 if client i within r of site j (2D ground range)
-    d = np.sqrt(((coords[:, None, :2] - sites[None, :, :2]) ** 2).sum(axis=2))
+    # Coverage matrix C[i, j] = 1 if client i is within r of site j, using the
+    # 3-D slant distance so this matches ProblemInstance.distances exactly.
+    # This was 2-D ground range through 2026-07, which at z~70 m / R=500 m gave
+    # the MILP a ~1% larger effective footprint than the heuristics it bounds —
+    # small, and conservative for PSO%, but not a like-for-like comparison.
+    d = np.sqrt(((coords[:, None, :] - sites[None, :, :]) ** 2).sum(axis=2))
     cover = (d <= r).astype(np.float64)
 
     # variables: [y_0..y_{m-1}, x flattened (n*m)]; all binary
@@ -110,15 +131,23 @@ def mclp_reference(
         options={"time_limit": time_limit, "mip_rel_gap": 1e-4},
     )
     if not res.success or res.x is None:
-        return MCLPResult(float("nan"), float("nan"), 0, False, m)
+        return MCLPResult(float("nan"), float("nan"), 0, False, m, float("nan"))
     x = res.x[m:].reshape(n, m)
     assigned = x.sum(axis=1) > 0.5
     covered_value = float(value[assigned].sum())
-    total = float(np.asarray(instance.value).sum())
+    # Normalise against the SOLVED set, not instance.value: when max_clients
+    # subsamples, dividing a subset's covered value by the full-instance total
+    # silently understates coverage. (No current config trips this — N=250 vs a
+    # 100k cap — but the ratio would be wrong the first time one did.)
+    total = float(value.sum())
+    # HiGHS reports the residual optimality gap; a bare `optimal` boolean hides
+    # whether the 600 s limit bound before the gap closed.
+    gap = float(getattr(res, "mip_gap", float("nan")))
     return MCLPResult(
         covered_value=covered_value,
         covered_value_norm=covered_value / total if total > 0 else 0.0,
         n_covered=int(assigned.sum()),
         optimal=bool(res.status == 0),
         n_sites=m,
+        mip_gap=gap,
     )

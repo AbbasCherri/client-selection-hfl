@@ -1,0 +1,37 @@
+# Tier-1 fitness-weight sensitivity — the weight-dependent methods only.
+#
+# WHY THIS EXISTS. The Tier-1 weights w=(0.811, 0.03, 0.159) came from an Optuna
+# study whose objective was downstream proposed_hfl macro-F1, and PSO is then
+# declared the winner *on that objective*. That is circular unless the ranking
+# is shown to be invariant to the weights. This sweep produces that evidence.
+#
+# WHAT RUNS HERE, AND WHAT DOES NOT. `final_fitness` reconstructs exactly from
+# the stored components (`f_cover_norm`, `d_move_m`, `l_imb`) — verified at
+# max|error| = 0.0 across all 840 runs of results/tier1_core. So the four
+# methods whose placement is weight-INDEPENDENT (centroid, static,
+# mozaffari2016, alzenad2017 — each builds a placement geometrically and calls
+# fitness() exactly once, to report) are re-scored offline at zero compute by
+# uavbench.analysis.weight_sensitivity.
+#
+# Only the three weight-DEPENDENT methods need to actually re-run:
+#   pso, ga     — search against the weighted objective
+#   random      — RandomPlacement(n_draws=20) keeps the best draw BY FITNESS,
+#                 so its output moves with w too. (An earlier draft of the plan
+#                 had this wrong and would have re-scored it offline, reporting
+#                 the fitness of a placement `random` would never have chosen.)
+#
+# Cost: 3 methods x 4 scenarios x 30 seeds x 4 new weight settings = 1440 runs,
+# but `random` averages 0.1 s against pso/ga's 83 s, so ~22 core-h ~= 2 h wall.
+#
+# Run one instance of this per weight setting via scripts/run_tier1_weights.sh,
+# which overrides fitness.w1/w2/w3 and results_dir per setting.
+
+extends: tier1_core.yaml
+
+name: tier1_weight_sweep
+results_dir: results/tier1_weight_sweep
+
+methods:
+  - pso
+  - ga
+  - random
