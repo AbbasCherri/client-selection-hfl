@@ -22,18 +22,28 @@ cd "$(dirname "$0")/.."
 
 STOP_VM="${STOP_VM:-0}"
 LOG=results/phase1.log
+DONE_MARKER=results/phase1.done
 mkdir -p results
 exec > >(tee -a "$LOG") 2>&1
 
-stop_vm_if_asked() {
+# Stop the VM only on SUCCESS. The previous version trapped EXIT unconditionally,
+# so a crash at hour 2 of a 30 h run would have shut the instance down and left
+# nothing running overnight — the opposite of what credit protection is for.
+# A non-zero exit now leaves the VM up so the supervisor can resume the run.
+stop_vm_on_success() {
     local rc=$?
     echo "[$(date -Is)] exiting with status $rc"
+    if [[ $rc -ne 0 ]]; then
+        echo "[$(date -Is)] FAILED — leaving the instance up for resume"
+        exit "$rc"
+    fi
+    touch "$DONE_MARKER"
     if [[ "$STOP_VM" == "1" ]]; then
         echo "[$(date -Is)] stopping instance to conserve credits"
         sudo shutdown -h now || true
     fi
 }
-trap stop_vm_if_asked EXIT
+trap stop_vm_on_success EXIT
 
 if [[ -z "${HF_TOKEN:-}" ]]; then
     echo "HF_TOKEN missing — the real-data pipeline cannot run"; exit 1
