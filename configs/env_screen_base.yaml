@@ -1,0 +1,33 @@
+# Base config for the Phase 6 environment-constant screening.
+#
+# scripts/run_env_screen.sh extends this once per (constant, value) cell and
+# injects fl.const_overrides. Never run directly — on its own it is just a
+# 3-arm selection sweep at the default constants.
+#
+# Three arms, chosen so the screening question is answerable:
+#   ucb      — the proposed selector
+#   fair_mab — the baseline that actually beats it on accuracy at N=500
+#   random   — the floor, so a constant that flattens everything is visible
+#
+# 5 seeds rather than 10: the question is whether the SIGN of the gap survives,
+# not a precise interval on its size. Cells whose sign flips get a dedicated
+# full-seed sweep and go in the limitations section.
+
+extends: selection_isolation.yaml
+
+name: env_screen_base
+results_dir: results/env_screen/_base
+
+n_seeds: 5
+
+fl:
+  n_rounds: 120   # shorter than the 200-round main sweep; still past the point
+                  # where the arms have separated, and this is 12 cells
+
+modes:
+  - ucb
+  - fair_mab
+  - random
+
+N_values:
+  - 500

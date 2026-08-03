@@ -108,7 +108,86 @@ ARM_SPECS: dict[str, dict] = {
     "ucb_dp_eps0.5": {"mode": "ucb", "class_source": "dp", "dp_epsilon": 0.5},
     "ucb_dp_eps1":   {"mode": "ucb", "class_source": "dp", "dp_epsilon": 1.0},
     "ucb_dp_eps4":   {"mode": "ucb", "class_source": "dp", "dp_epsilon": 4.0},
+
+    # ── 0.3: literature-baseline constants at settings other than the ones we
+    # hand-picked. The proposed selector's constants got 120 Optuna trials;
+    # these got none, which is half of the tuning-asymmetry problem (F2). Each
+    # baseline is reported at its BEST setting, so the comparison is against a
+    # fairly-configured opponent rather than an arbitrary one.
+    #
+    # Provenance rule (REPORTS/rigor_plan_2026-08.md §0.3): where the source
+    # paper fixes a value we keep it and cite it; where the source SWEEPS the
+    # value we sweep it as they did; where the constant exists only because of
+    # our adaptation we give it a search budget.
+    "rep_cap_g0.25":  {"mode": "rep_cap", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.REPCAP_GAMMA": 0.25}},
+    "rep_cap_g0.75":  {"mode": "rep_cap", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.REPCAP_GAMMA": 0.75}},
+    # Zhu et al.'s reward weights (our 0.5/0.5 is unattributed) ...
+    "fair_mab_e0.25": {"mode": "fair_mab", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.FAIRMAB_W_ENERGY": 0.25,
+                                  "uavbench.fl.client_selection.FAIRMAB_W_STALE": 0.75}},
+    "fair_mab_e0.75": {"mode": "fair_mab", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.FAIRMAB_W_ENERGY": 0.75,
+                                  "uavbench.fl.client_selection.FAIRMAB_W_STALE": 0.25}},
+    # ... and T_stale_cap, which Appendix C already admits WE introduced.
+    "fair_mab_cap2":  {"mode": "fair_mab", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.DEFAULT_T_STALE_CAP": 2}},
+    "fair_mab_cap10": {"mode": "fair_mab", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.DEFAULT_T_STALE_CAP": 10}},
+    # Cho et al. sweep the candidate-set multiplier d rather than fixing it, so
+    # sweeping it here is the faithful reproduction, not a favour.
+    "poc_d1":         {"mode": "power_of_choice", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.POC_D_MULT": 1}},
+    "poc_d5":         {"mode": "power_of_choice", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.POC_D_MULT": 5}},
+    # Oort's alpha=2 IS the source's default and stays; T_pref is "left open by
+    # the source" (Appendix C.4 note 1), so the quantile rule is ours to search.
+    "oort_tpref_p25": {"mode": "oort", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.OORT_TPREF_Q": 0.25}},
+    "oort_tpref_p75": {"mode": "oort", "class_source": "none",
+                       "consts": {"uavbench.fl.client_selection.OORT_TPREF_Q": 0.75}},
 }
+
+
+def apply_const_overrides(overrides: dict[str, float]) -> list[tuple]:
+    """Patch module-level constants by dotted path; return restore records.
+
+    Used by two blocks of the August 2026 rigor plan, which are the same
+    operation on different constants:
+
+    * **0.3** — the literature baselines' own knobs (``REPCAP_GAMMA``,
+      ``FAIRMAB_W_ENERGY``, ``DEFAULT_T_STALE_CAP``, PoC's ``d``, Oort's
+      ``T_pref`` rule). These sat at hand-picked values with zero search budget
+      while the proposed method's constants got 120 Optuna trials.
+    * **Phase 6** — the simulator's environment constants (``T_MAX_S``,
+      ``B_MIN``, ``SNR_MIN_DB``), which are screened for sign-invariance and
+      never tuned.
+
+    Keys are fully-qualified, e.g. ``"uavbench.fl.device_state.T_MAX_S"``.
+    Pass the result to :func:`restore_const_overrides` in a ``finally``.
+    """
+    import importlib
+
+    restores: list[tuple] = []
+    for path, value in (overrides or {}).items():
+        mod_path, _, attr = path.rpartition(".")
+        mod = importlib.import_module(mod_path)
+        if not hasattr(mod, attr):
+            raise AttributeError(
+                f"const override {path!r} does not exist — a typo here would "
+                "silently screen nothing at all"
+            )
+        restores.append((mod, attr, getattr(mod, attr)))
+        setattr(mod, attr, value)
+        logger.info("const override: %s = %r", path, value)
+    return restores
+
+
+def restore_const_overrides(restores: list[tuple]) -> None:
+    """Undo :func:`apply_const_overrides` (workers are reused across jobs)."""
+    for mod, attr, old in restores:
+        setattr(mod, attr, old)
 
 
 def resolve_arm(arm: str) -> tuple[str, str, float]:
@@ -121,6 +200,11 @@ def resolve_arm(arm: str) -> tuple[str, str, float]:
     if spec is None:
         return arm, "none", 1.0
     return spec["mode"], spec["class_source"], float(spec.get("dp_epsilon", 1.0))
+
+
+def arm_consts(arm: str) -> dict[str, float]:
+    """Per-arm module-constant overrides (0.3 baseline-provenance variants)."""
+    return dict(ARM_SPECS.get(arm, {}).get("consts", {}))
 
 _UAV_ALTITUDE_M = 70.0  # hover altitude used throughout the repo
 
@@ -322,6 +406,15 @@ def run_selection_isolation(cfg: dict) -> dict:
             mode,
             class_source,
             f", eps={dp_epsilon}" if class_source == "dp" else "",
+        )
+
+        # Constant overrides: run-wide (fl.const_overrides — Phase 6 environment
+        # screening) plus this arm's own (0.3 baseline-provenance variants).
+        # Applied per arm and restored in the finally below, because joblib
+        # reuses worker processes: a leaked patch would silently contaminate
+        # every subsequent arm in the same worker.
+        _const_restores = apply_const_overrides(
+            {**fl.get("const_overrides", {}), **arm_consts(arm)}
         )
 
         if class_source == "pseudo":
@@ -583,6 +676,7 @@ def run_selection_isolation(cfg: dict) -> dict:
             target_accuracy * 100,
             rounds_to_target if rounds_to_target else "not reached",
         )
+        restore_const_overrides(_const_restores)
 
     # ── 5. Persist ───────────────────────────────────────────────────────────
     rounds_df = pd.DataFrame(all_rows)
@@ -653,7 +747,16 @@ def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
         )
 
     logger.info("[N=%d  mode=%-9s seed=%d] starting", N, mode, seed_idx)
-    out = run_selection_isolation(job_cfg)
+    # Snapshot/restore around the whole job as well as per arm: loky reuses
+    # worker processes, so an exception thrown mid-arm would otherwise leave a
+    # patched constant in place for every later job on that worker — a
+    # contamination that would not show up in any log.
+    _job_restores = apply_const_overrides({**job_cfg.get("fl", {}).get("const_overrides", {}),
+                                           **arm_consts(mode)})
+    try:
+        out = run_selection_isolation(job_cfg)
+    finally:
+        restore_const_overrides(_job_restores)
     df = out["rounds"].copy()
     df.insert(0, "seed", seed_idx)
     df.insert(0, "N", N)

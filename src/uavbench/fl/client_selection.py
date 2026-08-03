@@ -132,6 +132,15 @@ DEFAULT_T_STALE_CAP = 5
 # would never fire — eligibility already caps T̂_n ≤ T_max − ε). α = 2 is the
 # paper's default.
 OORT_ALPHA = 2.0
+# T_pref quantile of the eligible pool's compute times. Oort leaves T_pref to
+# the developer (Appendix C.4 note 1), so unlike alpha this is OUR choice and
+# is swept in the 0.3 provenance block rather than asserted.
+OORT_TPREF_Q = 0.5  # median
+
+# Power-of-Choice candidate-set multiplier: d = POC_D_MULT x (total slots).
+# Cho et al. sweep d rather than fixing it, so sweeping it is the faithful
+# reproduction; 2 was previously hard-coded and described as "standard".
+POC_D_MULT = 2
 
 # Noto Peninsula 2024 epicentre (default; override via cfg)
 DEFAULT_EPICENTRE = (37.488, 137.272)  # (lat °N, lon °E)
@@ -295,7 +304,7 @@ class ClientSelector:
             # covering UAV, bounded by the pool size.
             _rng = rng if rng is not None else np.random.default_rng(round_num * 6271)
             n_uavs = len(set(eligible.values()))
-            d = min(len(eligible_ids), max(1, 2 * uav_capacity * max(n_uavs, 1)))
+            d = min(len(eligible_ids), max(1, POC_D_MULT * uav_capacity * max(n_uavs, 1)))
             candidate_ids = [
                 eligible_ids[i]
                 for i in _rng.choice(len(eligible_ids), size=d, replace=False)
@@ -506,7 +515,7 @@ class ClientSelector:
         """
         stat = self._loss_scores(eligible_ids)
         compute_s = np.array([device_states[cid].compute_time_s for cid in eligible_ids])
-        t_pref = float(np.median(compute_s))
+        t_pref = float(np.quantile(compute_s, OORT_TPREF_Q))
         penalty = np.where(
             compute_s > t_pref,
             (t_pref / np.maximum(compute_s, 1e-9)) ** OORT_ALPHA,

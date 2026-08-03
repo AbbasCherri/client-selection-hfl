@@ -1,0 +1,60 @@
+# 0.3 — Literature-baseline constants at settings other than the ones we picked.
+#
+# HALF THE TUNING ASYMMETRY. The proposed selector's 22 constants came from a
+# 120-trial Optuna study. The baselines' own constants sat at hand-picked values
+# with ZERO search budget, and several were described in code comments as
+# "the source's default" when the repo contains only our own restatement of
+# those papers. A reviewer comparing a tuned method against untuned opponents is
+# entitled to discount the result entirely.
+#
+# The rule is by provenance, not blanket tuning (REPORTS/rigor_plan_2026-08.md
+# §0.3):
+#   source fixes it      -> keep and cite      (Oort alpha = 2)
+#   source sweeps it     -> sweep as they did  (PoC d; FedCS deadline -> Phase 6)
+#   our adaptation       -> give it a budget   (Oort T_pref, T_stale_cap,
+#                                               and gamma / w_energy if the
+#                                               source turns out not to state them)
+#
+# Each baseline is then reported AT ITS BEST SETTING, so the headline comparison
+# is against a fairly-configured opponent. Expect the margins to shrink — that
+# is the point, not a failure.
+#
+# STILL OUTSTANDING and not resolvable from this repo: open Zhao et al. and
+# Zhu et al. and check whether gamma=0.5 and w_energy/w_stale=0.5/0.5 actually
+# appear in them. If yes, cite the page and drop those arms. If no, the code
+# comments claiming a "source default" must be corrected.
+#
+# N=500 only: that is where the selection effect is decisive (it is null at
+# N=30 and weak at N=100), so it is the setting where a mis-tuned baseline
+# would most distort the conclusion.
+
+extends: selection_isolation.yaml
+
+name: baseline_constants
+results_dir: results/baseline_constants
+
+modes:
+  # Reference arms, re-run here so every comparison is within one harness.
+  - ucb
+  - rep_cap
+  - fair_mab
+  - oort
+  - power_of_choice
+  # rep_cap: gamma trust/capability split (ours, unattributed)
+  - rep_cap_g0.25
+  - rep_cap_g0.75
+  # fair_mab: reward weights (ours, unattributed)
+  - fair_mab_e0.25
+  - fair_mab_e0.75
+  # fair_mab: staleness cap — Appendix C.3 already admits we introduced it
+  - fair_mab_cap2
+  - fair_mab_cap10
+  # power_of_choice: candidate multiplier d — Cho et al. sweep this
+  - poc_d1
+  - poc_d5
+  # oort: T_pref quantile — "left open by the source" (Appendix C.4 note 1)
+  - oort_tpref_p25
+  - oort_tpref_p75
+
+N_values:
+  - 500
