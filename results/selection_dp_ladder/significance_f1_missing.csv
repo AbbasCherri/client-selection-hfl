@@ -1,0 +1,3 @@
+N,method_a,method_b,n_pairs,statistic,p_value,mean_diff,effect_size,ci_low,ci_high,significant,correction_scope,reference,metric,test,correction
+500,ucb_dp_eps1,ucb_dp_eps0.5,10,19.0,0.431640625,0.00381402411188089,0.3090909090909091,-0.004409156675630119,0.01193362118495637,False,group,ucb_dp_eps1,f1_missing,wilcoxon,holm
+500,ucb_dp_eps1,ucb_dp_eps4,10,26.0,0.921875,-0.0002652837637405342,-0.05454545454545454,-0.007532348543081287,0.007354172899810977,False,group,ucb_dp_eps1,f1_missing,wilcoxon,holm

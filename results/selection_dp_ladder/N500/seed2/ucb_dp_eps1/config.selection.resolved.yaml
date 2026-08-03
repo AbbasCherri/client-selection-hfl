@@ -1,0 +1,42 @@
+name: selection_dp_ladder
+results_dir: results/selection_dp_ladder/N500/seed2/ucb_dp_eps1
+n_workers: 12
+n_seeds: 10
+optimizer_seed: 9876
+epicentre:
+- 37.488
+- 137.272
+data:
+  source: real
+  subsample: 1.0
+  seed: 42
+  val_ratio: 0.1
+  data_dir: ./data
+  feature_batch_size: 32
+  N_clients: 500
+  partition_seed: 5311
+  feature_cache_path: results/selection_dp_ladder/N500/img_features.npy
+fl:
+  R_comm: 20000.0
+  capacity: 10
+  n_rounds: 200
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  lr: 0.0005
+  uav_lr: 0.0005
+  batch_size: 32
+  target_accuracy: 0.6
+  T_sel: 5
+  lambda_min: 0.5
+  R_min: 0.3
+  seed: 41214
+elbow:
+  k_min: 2
+  k_max: 30
+N_values:
+- 500
+modes:
+- ucb_dp_eps1
+_pipeline_version: 3
+_diagnostics:
+  black_chip_rate: 0.0
