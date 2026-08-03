@@ -142,7 +142,12 @@ def _prefetch_all_N(cfg: dict) -> None:
                 hf_token=hf_token,
                 partition_seed=partition_seed_for(seed_idx),
             )
-        cache_path = str(results_dir / f"N{N}" / "img_features.npy")
+        # data.feature_cache_dir lets sweep variants share one cache. The cache
+        # keys only on (N, data.seed, subsample), so every variant of a config
+        # would otherwise recompute a byte-identical 132 MB file — 12 of them
+        # for the Phase 6 environment screen alone.
+        cache_root = Path(data_cfg.get("feature_cache_dir") or results_dir)
+        cache_path = str(cache_root / f"N{N}" / "img_features.npy")
         Path(cache_path).parent.mkdir(parents=True, exist_ok=True)
         compute_feature_cache(
             full_dataset,

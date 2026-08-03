@@ -742,9 +742,14 @@ def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     _torch.set_num_threads(1)  # 1 thread × n_workers = full CPU budget, no BLAS thrash
 
     if job_cfg["data"].get("source", "real") == "real":
-        job_cfg["data"]["feature_cache_path"] = str(
-            Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy"
-        )
+        # The ResNet feature cache keys only on (N, data.seed, subsample) — not
+        # on partition_seed, val_ratio, or anything else a variant config
+        # changes. Defaulting it to results_dir therefore makes every sweep
+        # variant recompute an identical 132 MB cache: the Phase 6 screen alone
+        # has 12 results_dirs, i.e. ~4 h of pure duplicate TIF decoding.
+        # data.feature_cache_dir points them all at one shared location.
+        cache_root = Path(job_cfg["data"].get("feature_cache_dir") or cfg["results_dir"])
+        job_cfg["data"]["feature_cache_path"] = str(cache_root / f"N{N}" / "img_features.npy")
 
     logger.info("[N=%d  mode=%-9s seed=%d] starting", N, mode, seed_idx)
     # Snapshot/restore around the whole job as well as per arm: loky reuses

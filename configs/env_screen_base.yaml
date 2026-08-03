@@ -20,6 +20,12 @@ results_dir: results/env_screen/_base
 
 n_seeds: 5
 
+data:
+  # All 12 screening cells share Phase 1's feature cache. Without this each
+  # cell rebuilds a byte-identical 132 MB cache — ~4 h of duplicate work, since
+  # the cache does not depend on any constant being screened.
+  feature_cache_dir: results/selection_isolation
+
 fl:
   n_rounds: 120   # shorter than the 200-round main sweep; still past the point
                   # where the arms have separated, and this is 12 cells
