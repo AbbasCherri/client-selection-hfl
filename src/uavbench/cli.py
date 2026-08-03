@@ -119,52 +119,113 @@ _SIG_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def cmd_mclp(args: argparse.Namespace) -> None:
-    """MILP-optimal coverage reference vs PSO, for the first N seeds per scenario."""
+def _mclp_cell(cfg: dict, s_idx: int, scenario: dict, seed_i: int, grid_res: int,
+               time_limit: float, pso_cov: float) -> dict:
+    """Solve one (scenario, seed, grid_res) MILP. Runs inside a joblib worker.
+
+    The instance is regenerated from its deterministic seed rather than pickled
+    across the process boundary, so a worker reproduces exactly the instance the
+    serial version scored.
+    """
     from .problem.exact import mclp_reference
     from .problem.instance import generate_instance
     from .runner import _instance_seed
+
+    prob = cfg["problem"]
+    inst = generate_instance(
+        distribution=scenario["distribution"], N=scenario["N"], K=scenario["K"],
+        area=cfg["area"], seed=_instance_seed(cfg["instance_seed"], s_idx, seed_i),
+        capacity=prob["capacity"], uav_battery=prob["uav_battery"], R_comm=prob["R_comm"],
+        B_min_uav=prob["B_min_uav"], beta_mode=cfg["value"]["beta_mode"], t=cfg["value"]["t"],
+        T_decay=cfg["value"]["T_decay"], prev_mode=prob.get("prev_mode", "stale"),
+        capacity_cv=prob.get("capacity_cv", 0.0), battery_cv=prob.get("battery_cv", 0.0),
+        data_dir=cfg.get("data", {}).get("data_dir", "./data"),
+    )
+    ref = mclp_reference(inst, grid_res=grid_res, time_limit=time_limit)
+    scen = f"{scenario['distribution']}_N{scenario['N']}_K{scenario['K']}"
+    return {
+        "scenario": scen, "seed": seed_i, "grid_res": grid_res,
+        "mclp_cover_norm": ref.covered_value_norm, "pso_cover_norm": pso_cov,
+        "pct_of_optimal": 100.0 * pso_cov / ref.covered_value_norm
+        if ref.covered_value_norm else float("nan"),
+        "mclp_optimal": ref.optimal, "mip_gap": ref.mip_gap,
+        "n_sites": ref.n_sites,
+    }
+
+
+def cmd_mclp(args: argparse.Namespace) -> None:
+    """MILP-optimal coverage reference vs PSO, for the first N seeds per scenario.
+
+    Parallel and incrementally durable. The serial version pinned one core of
+    twelve and wrote its CSV only on completion, so killing it after 3.7 h left
+    nothing recoverable (2026-08-03). Each solved cell is now appended to the
+    CSV as it finishes, and an existing CSV is treated as a resume log: already
+    solved (scenario, seed, grid_res) cells are skipped.
+    """
+    from joblib import Parallel, delayed
 
     cfg = load_config(_find_config(args.config))
     results_dir = Path(cfg["results_dir"])
     runs = pd.read_parquet(results_dir / "runs.parquet")
     pso = runs[runs["method"] == "pso"]
-    prob = cfg["problem"]
-    rows = []
+    path = results_dir / "mclp_reference.csv"
+
+    # Resume log. Keyed on the cell identity, so a partial run picks up where
+    # it stopped instead of re-solving hours of MILPs.
+    done: set[tuple] = set()
+    prior = pd.DataFrame()
+    if path.exists() and not args.fresh:
+        prior = pd.read_csv(path)
+        if {"scenario", "seed", "grid_res"}.issubset(prior.columns):
+            done = {(r.scenario, int(r.seed), int(r.grid_res)) for r in prior.itertuples()}
+            logger.info("Resuming: %d cells already solved in %s", len(done), path)
+        else:
+            prior = pd.DataFrame()  # pre-2026-08 schema, no grid_res column
+
+    # Grid resolution is swept, not fixed: the MCLP optimum is only a bound on
+    # the *grid*, so a single resolution makes "PSO reaches X% of optimum"
+    # depend on an arbitrary choice. Seeds buy the CI, resolution buys
+    # convergence — different questions, hence --grid-seeds runs the finer
+    # (much more expensive) grids on fewer seeds.
+    jobs = []
     for s_idx, scenario in enumerate(cfg["scenarios"]):
         scen = f"{scenario['distribution']}_N{scenario['N']}_K{scenario['K']}"
         for seed_i in range(min(args.n_seeds, cfg["n_seeds"])):
-            inst = generate_instance(
-                distribution=scenario["distribution"], N=scenario["N"], K=scenario["K"],
-                area=cfg["area"], seed=_instance_seed(cfg["instance_seed"], s_idx, seed_i),
-                capacity=prob["capacity"], uav_battery=prob["uav_battery"], R_comm=prob["R_comm"],
-                B_min_uav=prob["B_min_uav"], beta_mode=cfg["value"]["beta_mode"], t=cfg["value"]["t"],
-                T_decay=cfg["value"]["T_decay"], prev_mode=prob.get("prev_mode", "stale"),
-                capacity_cv=prob.get("capacity_cv", 0.0), battery_cv=prob.get("battery_cv", 0.0),
-                data_dir=cfg.get("data", {}).get("data_dir", "./data"),
+            pso_cov = float(
+                pso[(pso["scenario"] == scen) & (pso["seed"] == seed_i)]["f_cover_norm"].mean()
             )
-            pso_cov = float(pso[(pso["scenario"] == scen) & (pso["seed"] == seed_i)]["f_cover_norm"].mean())
-            # Grid resolution is swept, not fixed: the MCLP optimum is only a
-            # bound on the *grid*, so a single resolution makes "PSO reaches X%
-            # of optimum" depend on an arbitrary choice. The convergence curve
-            # across resolutions is the actual deliverable. Seeds buy the CI,
-            # resolution buys convergence — they answer different questions, so
-            # --grid-seeds runs the finer (expensive) grids on fewer seeds.
             for grid_res in args.grid_res:
                 if seed_i >= args.grid_seeds and grid_res != args.grid_res[0]:
-                    continue  # finer grids only on the first --grid-seeds seeds
-                ref = mclp_reference(inst, grid_res=grid_res, time_limit=args.time_limit)
-                rows.append({
-                    "scenario": scen, "seed": seed_i, "grid_res": grid_res,
-                    "mclp_cover_norm": ref.covered_value_norm, "pso_cover_norm": pso_cov,
-                    "pct_of_optimal": 100.0 * pso_cov / ref.covered_value_norm
-                    if ref.covered_value_norm else float("nan"),
-                    "mclp_optimal": ref.optimal, "mip_gap": ref.mip_gap,
-                    "n_sites": ref.n_sites,
-                })
+                    continue
+                if (scen, seed_i, grid_res) in done:
+                    continue
+                jobs.append((s_idx, scenario, seed_i, grid_res, pso_cov))
+
+    # Ascending grid_res: the cheap cells land first, so an interrupted run
+    # still leaves a complete base-resolution table rather than a ragged one.
+    jobs.sort(key=lambda j: j[3])
+    logger.info(
+        "MCLP: %d cells to solve on %d workers (%d already done)",
+        len(jobs), args.n_workers, len(done),
+    )
+
+    rows: list[dict] = prior.to_dict("records") if len(prior) else []
+    chunk = max(args.n_workers, 1)
+    for start in range(0, len(jobs), chunk):
+        batch = jobs[start : start + chunk]
+        got = Parallel(n_jobs=args.n_workers)(
+            delayed(_mclp_cell)(cfg, s_idx, scen_d, seed_i, g, args.time_limit, pc)
+            for (s_idx, scen_d, seed_i, g, pc) in batch
+        )
+        rows.extend(got)
+        # Write after every batch, not at the end: a killed run keeps its work.
+        pd.DataFrame(rows).to_csv(path, index=False)
+        logger.info("MCLP: %d/%d cells done → %s", len(rows) - len(prior), len(jobs), path)
+
     out = pd.DataFrame(rows)
-    path = results_dir / "mclp_reference.csv"
-    out.to_csv(path, index=False)
+    if out.empty:
+        logger.warning("MCLP: nothing solved and no prior results at %s", path)
+        return
     base = out[out["grid_res"] == args.grid_res[0]]
     logger.info(
         "Wrote %s — at grid_res=%d PSO reaches %.1f%% of MILP-optimal coverage "
@@ -605,6 +666,11 @@ def build_parser() -> argparse.ArgumentParser:
                            "full seed count that the reported CI does")
     p_mc.add_argument("--time-limit", type=float, default=600.0, dest="time_limit",
                       help="HiGHS time limit per solve in seconds (default 600)")
+    p_mc.add_argument("--n-workers", type=int, default=12, dest="n_workers",
+                      help="parallel MILP solves (default 12). Each HiGHS solve is "
+                           "single-threaded, so this is the only parallelism available")
+    p_mc.add_argument("--fresh", action="store_true",
+                      help="ignore an existing mclp_reference.csv instead of resuming from it")
     p_mc.set_defaults(func=cmd_mclp)
 
     p_cl = sub.add_parser("clean", help="remove results (of a config, or all)")
