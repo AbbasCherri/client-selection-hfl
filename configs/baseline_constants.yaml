@@ -33,13 +33,14 @@ extends: selection_isolation.yaml
 name: baseline_constants
 results_dir: results/baseline_constants
 
+# The at-default reference arms (rep_cap, fair_mab, oort, power_of_choice) are
+# NOT re-run here: results/selection_isolation already has them at N=500, 10
+# seeds, under a config this one only overrides `modes` and `N_values` from —
+# same static UAV layout, same seeds, same pipeline — so they are directly
+# comparable. `ucb` is kept as an in-harness anchor to verify the two
+# directories agree before any cross-directory comparison is trusted.
 modes:
-  # Reference arms, re-run here so every comparison is within one harness.
   - ucb
-  - rep_cap
-  - fair_mab
-  - oort
-  - power_of_choice
   # rep_cap: gamma trust/capability split (ours, unattributed)
   - rep_cap_g0.25
   - rep_cap_g0.75
