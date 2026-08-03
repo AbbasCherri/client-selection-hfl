@@ -1,0 +1,83 @@
+name: tier1_w_w1_0.7
+n_workers: 8
+results_dir: results/tier1_weight_sweep/w1_0.7
+instance_seed: 1234
+optimizer_seed: 9876
+n_seeds: 30
+scenarios:
+- distribution: uniform
+  N: 250
+  K: 10
+- distribution: clustered
+  N: 250
+  K: 10
+- distribution: epicenter_biased
+  N: 250
+  K: 10
+- distribution: real
+  N: 250
+  K: 10
+area:
+  x:
+  - 0.0
+  - 5000.0
+  y:
+  - 0.0
+  - 5000.0
+  z:
+  - 20.0
+  - 120.0
+value:
+  beta_mode: pinned
+  t: 0
+  T_decay: 20
+problem:
+  R_comm: 500.0
+  B_min_uav: 0.2
+  capacity: 15
+  uav_battery: 1.0
+  prev_mode: stale
+fitness:
+  w1: 0.7
+  w2: 0.0476
+  w3: 0.2524
+budget:
+  P: 100
+  G_max: 200
+optimizer_params:
+  pso:
+    c1: 2.05
+    c2: 2.05
+    vmax_frac: 0.2
+    ring_k: 2
+    delta_stag: 0.0001
+    G_stag: 20
+    rho: 0.2
+    p_turb: 0.1
+    early_stop_frac: 0.95
+    jitter_m: 10.0
+    use_constriction: true
+    topology: ring
+    use_clamp: true
+    use_stagnation: true
+    use_turbulence: true
+    seeding: value_kmeans
+  ga:
+    crossover_prob: 0.9
+    eta_c: 15.0
+    eta_m: 20.0
+    tournament_size: 3
+    n_elite: 2
+    early_stop_frac: 0.95
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 95.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 95.0
+methods:
+- pso
+- ga
+- random
