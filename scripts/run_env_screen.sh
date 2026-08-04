@@ -21,6 +21,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Self-activate the venv. The other phase scripts assume the caller already did,
+# which holds for an interactive shell but NOT under `sudo` — and the results
+# tree on the VM is root-owned, so sudo is how this has to run. Without this,
+# `python` resolves to nothing and the whole screen dies on cell 1.
+if [[ -z "${VIRTUAL_ENV:-}" && -f .venv/bin/activate ]]; then
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+fi
+
 LOG=results/env_screen.log
 mkdir -p results
 exec > >(tee -a "$LOG") 2>&1
