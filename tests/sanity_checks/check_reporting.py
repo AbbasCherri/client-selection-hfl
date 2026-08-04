@@ -109,7 +109,48 @@ def tier1_runner_end_to_end():
         assert (Path(d) / "convergence.parquet").exists() or (Path(d) / "convergence.csv").exists()
 
 
+def headline_table_keeps_N_and_the_final_round():
+    """§0.6: accuracy + per-class F1 beside macro-F1, per (method, N).
+
+    Two ways this table can lie, both guarded here:
+      * pooling over N — the selection effect is null at N=30 and decisive at
+        N=500, so a pooled row is an average of two different findings;
+      * reading a non-final round — round order on disk is not guaranteed, so
+        the summary must pick max(round), not the last row.
+    """
+    from uavbench.plotting import headline_metrics
+
+    rows = []
+    for method in ("ucb", "class_greedy"):
+        for N in (30, 500):
+            for seed in (0, 1):
+                for rnd, f1 in ((0, 0.10), (5, 0.50), (2, 0.20)):  # out of order on purpose
+                    rows.append({
+                        "method": method, "N": N, "seed": seed, "round": rnd,
+                        "accuracy": f1 + 0.05, "macro_f1": f1,
+                        "f1_survived": f1, "f1_obstructed": f1 / 2,
+                    })
+    df = pd.DataFrame(rows)
+
+    with tempfile.TemporaryDirectory() as d:
+        paths = headline_metrics(df, Path(d))
+        assert paths, "headline_metrics wrote nothing"
+        out = pd.read_csv(paths[0])
+
+    assert len(out) == 4, f"expected one row per (method, N), got {len(out)}"
+    assert {"accuracy_mean", "macro_f1_mean", "f1_survived_mean",
+            "f1_obstructed_mean", "n_seeds"}.issubset(out.columns), (
+        f"missing headline columns: {sorted(out.columns)}"
+    )
+    assert (out["n_seeds"] == 2).all(), f"seed count wrong: {out['n_seeds'].tolist()}"
+    # round 5 is the final round; picking the last ROW would give 0.20
+    assert (out["macro_f1_mean"] == 0.50).all(), (
+        f"summary did not use the final round: {out['macro_f1_mean'].tolist()}"
+    )
+
+
 check("shared writer: parquet, loud CSV fallback, stale files removed", writer_parquet_and_fallback)
+check("headline table keeps N and uses the final round", headline_table_keeps_N_and_the_final_round)
 check("seed manifests reproduce the live seed derivations exactly", manifest_matches_live_seeds)
 check("Tier-1 runner end-to-end on a miniature grid", tier1_runner_end_to_end)
 finish()

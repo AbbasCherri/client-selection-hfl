@@ -388,7 +388,11 @@ def analyze_fl_reporting(results_dir: Path) -> list[Path]:
         placement/selection *cost* even where accuracy saturates (the honest
         reframing of the placement contribution).
       * ``per_class_f1.csv`` — F1 for each of the 4 damage classes (the imbalance
-        story behind the macro-F1 headline).
+        story behind the macro-F1 headline). Pooled over N; cite
+        ``headline_metrics.csv`` instead for anything per-N.
+      * ``headline_metrics.csv`` — accuracy + macro-F1 + per-class F1 per
+        (method, N) with seed spread. This is the table the paper quotes; see
+        :func:`headline_metrics`.
     """
     results_dir = Path(results_dir)
     consolidated = results_dir / "paper_sweep_rounds.parquet"
@@ -415,7 +419,46 @@ def analyze_fl_reporting(results_dir: Path) -> list[Path]:
         pc = final.groupby("method")[pc_cols].mean().round(4).reset_index()
         pc.to_csv(results_dir / "per_class_f1.csv", index=False)
         paths.append(results_dir / "per_class_f1.csv")
+    paths.extend(headline_metrics(df, results_dir))
     return paths
+
+
+def headline_metrics(df: pd.DataFrame, results_dir: Path) -> list[Path]:
+    """Accuracy, macro-F1 and every per-class F1 in ONE table, per (method, N).
+
+    Rationale (rigor plan §0.6). Macro-F1 alone hides which way a method is
+    trading: on this dataset the 'obstructed' class is scarce, so a selector
+    that over-weights scarcity can lift macro-F1 while LOSING accuracy — that
+    is exactly what `class_greedy` does against `ucb` at N=500 (accuracy
+    -0.095, f1_obstructed +0.063). A reader who only sees macro-F1 cannot tell
+    the difference between a genuinely better method and a different operating
+    point on the same trade-off.
+
+    Every column is mean +/- std over seeds with the seed count, because a
+    difference of 0.01 between two methods means nothing without the spread.
+
+    Reports the TEST columns. ``val_*`` exists for selection (hyperparameters,
+    early stopping) and is deliberately excluded here — mixing the two in one
+    table is how a val number ends up quoted as a result.
+    """
+    group = [c for c in ("method", "N") if c in df.columns]
+    if not group:
+        return []
+    seed_group = group + [c for c in ("seed",) if c in df.columns]
+    final = _last_round(df, seed_group)
+
+    cols = [c for c in ("accuracy", "macro_f1") if c in final.columns]
+    cols += [c for c in final.columns if c.startswith("f1_")]
+    if not cols:
+        return []
+
+    agg = final.groupby(group)[cols].agg(["mean", "std"])
+    agg.columns = [f"{metric}_{stat}" for metric, stat in agg.columns]
+    agg["n_seeds"] = final.groupby(group)[cols[0]].count()
+
+    out = results_dir / "headline_metrics.csv"
+    agg.round(4).reset_index().to_csv(out, index=False)
+    return [out]
 
 
 def plot_tier1_pareto(results_dir: Path) -> list[Path]:

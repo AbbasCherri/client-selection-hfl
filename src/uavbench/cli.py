@@ -461,10 +461,14 @@ def cmd_run_selection_sim(args: argparse.Namespace) -> None:
         print(summary.round(4).to_string(index=False))
 
     try:
-        from .plotting import plot_selection_sim
+        from .plotting import headline_metrics, plot_selection_sim
 
         figs = plot_selection_sim(out["results_dir"])
         logger.info("%d selection-isolation figures written", len(figs))
+        # Accuracy + per-class F1 next to macro-F1: the selection arms trade
+        # rare-class recall against accuracy, which a macro-F1-only table hides.
+        for p in headline_metrics(df, Path(out["results_dir"])):
+            logger.info("Wrote %s", p)
     except Exception as exc:
         logger.warning("Selection-isolation plotting skipped: %s", exc)
 
