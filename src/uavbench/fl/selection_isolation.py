@@ -178,7 +178,17 @@ def apply_const_overrides(overrides: dict[str, float]) -> list[tuple]:
                 f"const override {path!r} does not exist — a typo here would "
                 "silently screen nothing at all"
             )
-        restores.append((mod, attr, getattr(mod, attr)))
+        old = getattr(mod, attr)
+        if isinstance(old, (int, float)) and not isinstance(value, (int, float)):
+            # A shell wrapper that mis-splits its settings table hands over the
+            # constant's own path as the value. Caught here it is one line; left
+            # to propagate it surfaces as a TypeError deep in the energy model,
+            # after the run has already written a garbage cell directory.
+            raise TypeError(
+                f"const override {path!r} is numeric ({old!r}) but was given "
+                f"{value!r} of type {type(value).__name__}"
+            )
+        restores.append((mod, attr, old))
         setattr(mod, attr, value)
         logger.info("const override: %s = %r", path, value)
     return restores

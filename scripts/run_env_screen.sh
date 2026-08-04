@@ -25,18 +25,23 @@ LOG=results/env_screen.log
 mkdir -p results
 exec > >(tee -a "$LOG") 2>&1
 
-# param : dotted constant path : values (baseline value included so every cell
-# is scored under the identical harness rather than against a remembered number)
+# tag | dotted constant path | values (baseline value included so every cell is
+# scored under the identical harness rather than against a remembered number)
+#
+# Pipe-delimited on purpose. The first version of this loop aligned the columns
+# with runs of spaces and split them back apart with awk/cut, which put the
+# CONSTANT PATH into the value list — the run died on `T_MAX_S = "uavbench.fl.
+# device_state.T_MAX_S"` after producing one garbage cell directory. Three
+# unambiguous fields beat pretty alignment.
 SETTINGS=(
-  "tmax   uavbench.fl.device_state.T_MAX_S     150 225 300"
-  "bmin   uavbench.fl.device_state.B_MIN       0.10 0.20 0.30"
-  "snrmin uavbench.fl.device_state.SNR_MIN_DB  1.5 3.0 6.0"
-  "ucbc   uavbench.fl.client_selection.UCB_C   0.707 1.414 2.828"
+  "tmax|uavbench.fl.device_state.T_MAX_S|150 225 300"
+  "bmin|uavbench.fl.device_state.B_MIN|0.10 0.20 0.30"
+  "snrmin|uavbench.fl.device_state.SNR_MIN_DB|1.5 3.0 6.0"
+  "ucbc|uavbench.fl.client_selection.UCB_C|0.707 1.414 2.828"
 )
 
 for s in "${SETTINGS[@]}"; do
-    read -r tag path values <<< "$(echo "$s" | awk '{print $1, $2, ""; for(i=3;i<=NF;i++) printf "%s ", $i}')"
-    values=$(echo "$s" | cut -d' ' -f3- | tr -s ' ')
+    IFS='|' read -r tag path values <<< "$s"
     for v in $values; do
         out="results/env_screen/${tag}_${v}"
         if [[ -f "$out/config.selection_sweep.resolved.yaml" ]]; then
