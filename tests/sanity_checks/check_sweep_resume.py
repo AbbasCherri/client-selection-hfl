@@ -118,6 +118,26 @@ def selection_isolation_gates_on_config_not_existence():
             "adding val_ratio must invalidate a two-way-split checkpoint"
         )
 
+    # An arm's module-constant overrides are applied at runtime rather than
+    # through the config, so they were invisible to the resume signature:
+    # changing what an arm perturbs left a checkpoint that compared equal and
+    # got reused. _selection_job now nests them under `fl`, which IS in the
+    # signature.
+    assert "_arm_consts" in src, (
+        "_selection_job does not fold the arm's constant overrides into the "
+        "resume signature — editing an arm's constants would silently resume "
+        "results computed under the old ones"
+    )
+    with tempfile.TemporaryDirectory() as d:
+        old = _cfg()
+        old["fl"] = {**old["fl"], "_arm_consts": {"pkg.mod.W": 0.25}}
+        new = _cfg()
+        new["fl"] = {**new["fl"], "_arm_consts": {"pkg.mod.W": 0.75}}
+        reason = _stale_checkpoint_reason(_write_ckpt(d, old), new)
+        assert reason is not None and "fl" in reason, (
+            "changing an arm's constant overrides must invalidate its checkpoint"
+        )
+
 
 def _ok_job(tag_df_value: int) -> pd.DataFrame:
     return pd.DataFrame({"x": [tag_df_value]})

@@ -745,6 +745,20 @@ def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     job_results_dir = Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / mode
     job_cfg["results_dir"] = str(job_results_dir)
 
+    # The arm's module-constant overrides are applied at runtime, NOT through
+    # the config, so the resume signature could not see them: editing an arm's
+    # constants left a checkpoint that looked identical and was silently
+    # reused. Discovered when the fair_mab arms' overrides turned out to reach
+    # nothing — had that been fixed without this, the re-run would have
+    # resumed the void results instead of recomputing them.
+    #
+    # Nested under `fl` because that key is already in the resume signature,
+    # and set ONLY when non-empty so arms without constants keep byte-identical
+    # signatures and their existing checkpoints stay valid.
+    _consts = arm_consts(mode)
+    if _consts:
+        job_cfg["fl"]["_arm_consts"] = _consts
+
     # Resume gate. This harness checked only that the resolved-config file
     # EXISTED, with no comparison of what it contained — so the 2026-08-01
     # Phase 1 launch silently reloaded 2026-07-28 checkpoints for the seven
