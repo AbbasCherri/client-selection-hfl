@@ -1,0 +1,4 @@
+method,N,accuracy_mean,accuracy_std,macro_f1_mean,macro_f1_std,f1_survived_mean,f1_survived_std,f1_collapsed_mean,f1_collapsed_std,f1_obstructed_mean,f1_obstructed_std,f1_missing_mean,f1_missing_std,n_seeds
+fair_mab,500,0.6565,0.0257,0.3612,0.0148,0.7914,0.0203,0.1942,0.0149,0.22,0.0795,0.2394,0.0114,5
+random,500,0.6302,0.0174,0.3474,0.0273,0.7718,0.0121,0.2089,0.0222,0.1724,0.0709,0.2365,0.0224,5
+ucb,500,0.6374,0.0492,0.3592,0.0141,0.7744,0.0403,0.1926,0.0377,0.2236,0.0655,0.2461,0.0128,5
