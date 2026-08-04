@@ -49,12 +49,17 @@ modes:
   # rep_cap: gamma trust/capability split (ours, unattributed)
   - rep_cap_g0.25
   - rep_cap_g0.75
-  # fair_mab: reward weights (ours, unattributed)
+  # fair_mab: staleness cap — Appendix C.3 already admits we introduced it.
+  # The 2026-08-04 run of these arms is VOID: all four returned bit-identical
+  # means and stds because the overrides reached nothing (see ARM_SPECS). The
+  # cap is now a multiplier on T_sel, read at the call site.
+  - fair_mab_cap2x
+  - fair_mab_cap4x
+  - fair_mab_cap10x
+  # fair_mab: reward weights (ours, unattributed), run at the 4x cap because at
+  # 1x the staleness term is constant and the weights cannot change anything
   - fair_mab_e0.25
   - fair_mab_e0.75
-  # fair_mab: staleness cap — Appendix C.3 already admits we introduced it
-  - fair_mab_cap2
-  - fair_mab_cap10
   # power_of_choice: candidate multiplier d — Cho et al. sweep this
   - poc_d1
   - poc_d5

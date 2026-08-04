@@ -1,6 +1,6 @@
 """Client-selection rules: proposed UCB + literature baselines B1-B3 formulas."""
 
-import sys
+import sys  # noqa: I001
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -81,6 +81,97 @@ def fair_mab_reward_and_fairness_pressure():
         )
         winners.append(next(iter(result.keys())))
     assert 0 in winners and 1 in winners
+
+
+def fair_mab_arms_actually_vary_something():
+    """Every fair_mab arm of the 0.3 sweep must change the selected set.
+
+    The 110-job 0.3 run returned BIT-IDENTICAL means and stds for all four
+    fair_mab arms — the constants reached nothing. That is the worst possible
+    failure: it looks like the honest finding "this baseline is insensitive to
+    its own hyperparameters" while actually measuring the same run four times.
+
+    The two causes are both invisible in a results table:
+      * ``DEFAULT_T_STALE_CAP`` is only a function default, shadowed at both
+        call sites by an explicit ``t_stale_cap=`` argument;
+      * at the 1x cap, staleness is identically 1.0 for every client at every
+        selection event, so the reward ranking is battery order whatever the
+        weights are.
+
+    So this drives the REAL cadence (selection every T_sel rounds, cap derived
+    from FAIRMAB_STALE_CAP_MULT as the call sites do) and demands that each
+    arm's picks differ from the stock arm's.
+    """
+    import uavbench.fl.client_selection as cs
+    from uavbench.fl.selection_isolation import (
+        ARM_SPECS,
+        apply_const_overrides,
+        arm_consts,
+        restore_const_overrides,
+    )
+
+    n, n_uav, cap_per_uav, t_sel = 40, 2, 5, 5
+    # 10 slots for 40 eligible clients, so score ORDER decides who trains —
+    # with more slots than clients every arm would trivially agree.
+    covered = {i: i % n_uav for i in range(n)}
+    states = {i: _state(battery=0.30 + 0.7 * (i % 17) / 16.0) for i in range(n)}
+    reps = {i: 0.5 for i in range(n)}
+
+    def cadence():
+        sel = ClientSelector(list(range(n)))
+        picks = []
+        for event in range(6):
+            chosen = sel.select(
+                covered, states, reps, _coords(n), [], event * t_sel, cap_per_uav,
+                mode="fair_mab", rng=np.random.default_rng(0),
+                t_stale_cap=t_sel * cs.FAIRMAB_STALE_CAP_MULT,
+            )
+            picks.append(frozenset(chosen))
+        return picks
+
+    stock = cadence()
+    assert all(len(p) < n for p in stock), (
+        "every eligible client was selected — the score never binds, so this "
+        "check could not detect an inert constant"
+    )
+
+    for arm, spec in ARM_SPECS.items():
+        if spec.get("mode") != "fair_mab" or not arm_consts(arm):
+            continue
+        restores = apply_const_overrides(arm_consts(arm))
+        try:
+            assert cadence() != stock, (
+                f"arm {arm!r} produced exactly the stock fair_mab selection — "
+                f"its constants {sorted(arm_consts(arm))} changed nothing, so "
+                "any result reported for it is a duplicate of the default arm"
+            )
+        finally:
+            restore_const_overrides(restores)
+
+
+def staleness_is_flat_at_the_1x_cap():
+    """Pin the known degeneracy so it stays documented rather than surprising.
+
+    FAIRMAB_STALE_CAP_MULT stays at 1 so pre-2026-08-04 results remain
+    reproducible; this records WHY that default cannot be read as a working
+    fairness mechanism.
+    """
+    sel = ClientSelector([0, 1])
+    sel._last_selected = {0: 5, 1: 0}  # 0 just picked, 1 never picked
+    fresh = sel._fair_mab_scores([0], {0: _state(battery=0.5)}, round_num=10, t_stale_cap=5)
+    starved = sel._fair_mab_scores([1], {1: _state(battery=0.5)}, round_num=10, t_stale_cap=5)
+    assert abs(fresh[0] - starved[0]) < 1e-12, (
+        "at cap == T_sel a just-selected and a never-selected client are "
+        "expected to score identically; if they no longer do, the 1x default "
+        "changed and every historical fair_mab result needs re-running"
+    )
+    # ... and that a wider cap restores the distinction.
+    fresh_w = sel._fair_mab_scores([0], {0: _state(battery=0.5)}, round_num=10, t_stale_cap=20)
+    starved_w = sel._fair_mab_scores([1], {1: _state(battery=0.5)}, round_num=10, t_stale_cap=20)
+    assert starved_w[0] > fresh_w[0], (
+        "a wider cap must let the starved client outscore the fresh one, "
+        "otherwise the staleness term is inert at every cap"
+    )
 
 
 def capacity_respected_by_all_modes():
@@ -164,6 +255,8 @@ def eligibility_gate_thresholds():
 check("FedCS: greedy fastest-first under deadline, eligibility respected", fedcs_fastest_first_and_deadline)
 check("rep_cap: exact score formula (gamma=0.5), static no-exploration ranking", rep_cap_formula_and_static_ranking)
 check("fair_mab: exact reward formula, staleness cap, fairness pressure", fair_mab_reward_and_fairness_pressure)
+check("fair_mab arms actually vary the selection", fair_mab_arms_actually_vary_something)
+check("staleness is flat at the 1x cap (documented degeneracy)", staleness_is_flat_at_the_1x_cap)
 check("all modes respect per-UAV capacity", capacity_respected_by_all_modes)
 check("mode 'all' is eligibility-gated; unknown mode raises", mode_all_and_unknown_mode)
 check("oort/power_of_choice: loss ranking, straggler penalty, prior", oort_and_power_of_choice_loss_ranking)

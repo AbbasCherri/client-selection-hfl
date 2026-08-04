@@ -125,6 +125,24 @@ FAIRMAB_W_STALE = 0.5
 # proposed system reconsiders devices. Callers pass fl.T_sel via select().
 DEFAULT_T_STALE_CAP = 5
 
+# Multiplier on T_sel for that cap. **1 makes the staleness term inert**, and 1
+# is what every result before 2026-08-04 used.
+#
+# Selection happens every T_sel rounds, so by the next selection event a client
+# picked at the previous one already has staleness (T_sel)/(T_sel) = 1, and the
+# min(1, ·) clamp pins a never-picked client to 1 as well. Every client scores
+# exactly 1.0, the term becomes a constant offset, and since argsort ignores a
+# positive rescaling the reward collapses to battery order — B3 degenerates to
+# "highest battery first" and is invariant to w_energy/w_stale. Measured: the
+# four fair_mab_* arms of the 0.3 sweep returned bit-identical means AND stds
+# across 10 seeds.
+#
+# Left at 1 so historical results stay reproducible; the 0.3 sweep varies it and
+# reports the baseline at its best setting (REPORTS/rigor_plan_2026-08.md §0.3).
+# A cap spanning several reselection intervals is what makes the fairness half
+# of the reward discriminate at all.
+FAIRMAB_STALE_CAP_MULT = 1
+
 # Baseline B4 (Oort, Lai et al. OSDI 2021): system-utility penalty exponent.
 # util_n = stat_n · (T_pref/T̂_n)^α for stragglers (T̂_n > T_pref), stat_n
 # otherwise. Oort leaves the developer-preferred round duration T_pref open;

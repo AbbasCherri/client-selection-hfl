@@ -62,6 +62,7 @@ from uavbench.metrics.fl import (
 
 from ..reporting.tables import read_table
 from .class_histograms import build_class_info
+from . import client_selection
 from .client_selection import ClientSelector
 from .dataset import BalancedShardLoader, CachedDataset, ClientData, make_client_loader
 from .device_state import DeviceStateManager
@@ -123,18 +124,35 @@ ARM_SPECS: dict[str, dict] = {
                        "consts": {"uavbench.fl.client_selection.REPCAP_GAMMA": 0.25}},
     "rep_cap_g0.75":  {"mode": "rep_cap", "class_source": "none",
                        "consts": {"uavbench.fl.client_selection.REPCAP_GAMMA": 0.75}},
-    # Zhu et al.'s reward weights (our 0.5/0.5 is unattributed) ...
+    # ... and T_stale_cap, which Appendix C already admits WE introduced.
+    #
+    # The first version of these four arms produced BIT-IDENTICAL results —
+    # equal means and equal stds across 10 seeds. Two independent reasons, both
+    # since fixed:
+    #   * the cap arms patched DEFAULT_T_STALE_CAP, which is only a function
+    #     DEFAULT and is shadowed at both call sites by an explicit
+    #     t_stale_cap= argument, so the patch reached nothing;
+    #   * at the 1x cap the staleness term is identically 1.0 for every client
+    #     (see FAIRMAB_STALE_CAP_MULT), so the reward ranking is battery order
+    #     regardless of the weights.
+    # The weight arms therefore have to be run at a cap where staleness varies,
+    # or they measure nothing — hence the 4x pairing below.
+    "fair_mab_cap2x":  {"mode": "fair_mab", "class_source": "none",
+                        "consts": {"uavbench.fl.client_selection.FAIRMAB_STALE_CAP_MULT": 2}},
+    "fair_mab_cap4x":  {"mode": "fair_mab", "class_source": "none",
+                        "consts": {"uavbench.fl.client_selection.FAIRMAB_STALE_CAP_MULT": 4}},
+    "fair_mab_cap10x": {"mode": "fair_mab", "class_source": "none",
+                        "consts": {"uavbench.fl.client_selection.FAIRMAB_STALE_CAP_MULT": 10}},
+    # Zhu et al.'s reward weights (our 0.5/0.5 is unattributed), at a cap where
+    # the staleness half of the reward actually discriminates.
     "fair_mab_e0.25": {"mode": "fair_mab", "class_source": "none",
                        "consts": {"uavbench.fl.client_selection.FAIRMAB_W_ENERGY": 0.25,
-                                  "uavbench.fl.client_selection.FAIRMAB_W_STALE": 0.75}},
+                                  "uavbench.fl.client_selection.FAIRMAB_W_STALE": 0.75,
+                                  "uavbench.fl.client_selection.FAIRMAB_STALE_CAP_MULT": 4}},
     "fair_mab_e0.75": {"mode": "fair_mab", "class_source": "none",
                        "consts": {"uavbench.fl.client_selection.FAIRMAB_W_ENERGY": 0.75,
-                                  "uavbench.fl.client_selection.FAIRMAB_W_STALE": 0.25}},
-    # ... and T_stale_cap, which Appendix C already admits WE introduced.
-    "fair_mab_cap2":  {"mode": "fair_mab", "class_source": "none",
-                       "consts": {"uavbench.fl.client_selection.DEFAULT_T_STALE_CAP": 2}},
-    "fair_mab_cap10": {"mode": "fair_mab", "class_source": "none",
-                       "consts": {"uavbench.fl.client_selection.DEFAULT_T_STALE_CAP": 10}},
+                                  "uavbench.fl.client_selection.FAIRMAB_W_STALE": 0.25,
+                                  "uavbench.fl.client_selection.FAIRMAB_STALE_CAP_MULT": 4}},
     # Cho et al. sweep the candidate-set multiplier d rather than fixing it, so
     # sweeping it here is the faithful reproduction, not a favour.
     "poc_d1":         {"mode": "power_of_choice", "class_source": "none",
@@ -504,7 +522,10 @@ def run_selection_isolation(cfg: dict) -> dict:
                     mode=mode,
                     rng=rng,
                     R_comm=R_comm,
-                    t_stale_cap=T_sel,
+                    # Module attribute read at call time, not imported by name,
+                    # so the 0.3 arms can vary it (see FAIRMAB_STALE_CAP_MULT:
+                    # at the 1x default the staleness term is provably inert).
+                    t_stale_cap=T_sel * client_selection.FAIRMAB_STALE_CAP_MULT,
                     class_counts=client_class_counts,  # proposed (ucb) class-coverage utility
                     class_scarcity=class_scarcity,
                 )
