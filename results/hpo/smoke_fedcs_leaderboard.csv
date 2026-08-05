@@ -1,0 +1,2 @@
+number,value,datetime_start,datetime_complete,duration,params_ema_decay,params_logit_adjust_tau,params_lr,params_lr_decay,params_server_momentum,state
+0,-inf,2026-08-05 11:28:03.081400,2026-08-05 11:28:09.971222,0 days 00:00:06.889822,0.4296563655233387,1.8435222284203345,0.016453500675439978,sqrt,0.00037371379514597567,COMPLETE
