@@ -37,10 +37,11 @@ modes:
 - ucb
 - rep_cap_g0.25
 - rep_cap_g0.75
+- fair_mab_cap2x
+- fair_mab_cap4x
+- fair_mab_cap10x
 - fair_mab_e0.25
 - fair_mab_e0.75
-- fair_mab_cap2
-- fair_mab_cap10
 - poc_d1
 - poc_d5
 - oort_tpref_p25

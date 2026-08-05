@@ -31,6 +31,8 @@ fl:
   lambda_min: 0.5
   R_min: 0.3
   seed: 41214
+  _arm_consts:
+    uavbench.fl.client_selection.OORT_TPREF_Q: 0.25
 elbow:
   k_min: 2
   k_max: 30

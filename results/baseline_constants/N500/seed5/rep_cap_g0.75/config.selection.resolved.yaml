@@ -31,6 +31,8 @@ fl:
   lambda_min: 0.5
   R_min: 0.3
   seed: 64971
+  _arm_consts:
+    uavbench.fl.client_selection.REPCAP_GAMMA: 0.75
 elbow:
   k_min: 2
   k_max: 30

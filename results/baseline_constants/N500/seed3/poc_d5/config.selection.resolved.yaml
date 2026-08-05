@@ -31,6 +31,8 @@ fl:
   lambda_min: 0.5
   R_min: 0.3
   seed: 49133
+  _arm_consts:
+    uavbench.fl.client_selection.POC_D_MULT: 5
 elbow:
   k_min: 2
   k_max: 30
