@@ -107,7 +107,9 @@ def pack_circles(m: int, r_c: float, r_u: float, n_iter: int = 400) -> np.ndarra
         if not active.any():
             break
         # Push each overlapping pair apart by half the overlap, each way.
-        scale = np.where(active, 0.5 * overlap / np.maximum(dist, 1e-12), 0.0)
+        with np.errstate(invalid="ignore"):
+            scale = np.where(active, 0.5 * overlap / np.maximum(dist, 1e-12), 0.0)
+        scale = np.nan_to_num(scale)
         pts = pts + np.sum(scale[:, :, None] * delta, axis=1)
         norm = np.linalg.norm(pts, axis=1)
         too_far = norm > limit
