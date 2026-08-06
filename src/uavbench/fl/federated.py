@@ -1426,8 +1426,6 @@ def run_full_hfl(cfg: dict) -> dict:
                     # At the 1x default this saturates on the reselection
                     # cadence, which makes fair_mab's staleness term a constant
                     # and the baseline invariant to its own weights — see
-                    # FAIRMAB_STALE_CAP_MULT. Read at call time so 0.3 can vary it.
-                    t_stale_cap=T_sel * client_selection.FAIRMAB_STALE_CAP_MULT,
                     class_counts=client_class_counts,  # proposed (ucb) class-coverage utility
                     class_scarcity=class_scarcity,
                 )

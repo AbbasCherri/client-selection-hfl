@@ -38,8 +38,9 @@ Literature baselines (Algorithms B1-B5, REPORTS/master_implementation_reference.
              (Nishio & Yonetani, ICC 2019)
 "rep_cap"  — B2: γ·R_n + (1−γ)·ℓ̃_n reputation-capability ranking, no
              exploration, no utility (Zhao et al., Chin. J. Aeronaut. 2024)
-"fair_mab" — B3: w_e·b_n + w_s·staleness_n fairness/energy MAB reward,
-             no reputation, no utility (Zhu et al., Sensors 2024)
+"fair_mab" — B3: fairness-enhanced UCB bandit over normalized transmission
+             energy and participation freshness (Zhu et al., Sensors 24(5):1599,
+             2024), verified against the source. No reputation, no utility.
 "oort"     — B4: Oort guided participant selection (Lai et al., OSDI 2021):
              statistical utility (last-observed local training loss) ×
              system-speed penalty (T_max/T̂_n)^α for stragglers. Losses are
@@ -116,32 +117,19 @@ UCB_C = math.sqrt(2)  # exploration constant from paper
 # γ = 0.5 is the symmetric default documented in the adaptation note.
 REPCAP_GAMMA = 0.5
 
-# Baseline B3 (Zhu et al. 2024): reward = w_energy·b_n + w_stale·staleness_n,
-# weights sum to 1 (0.5/0.5 default per the source's balanced setting).
-FAIRMAB_W_ENERGY = 0.5
-FAIRMAB_W_STALE = 0.5
-# Staleness normalization cap in rounds; T_sel (the reselection interval) is
-# the documented default so staleness saturates on the same cadence the
-# proposed system reconsiders devices. Callers pass fl.T_sel via select().
-DEFAULT_T_STALE_CAP = 5
-
-# Multiplier on T_sel for that cap. **1 makes the staleness term inert**, and 1
-# is what every result before 2026-08-04 used.
+# Baseline B3 — Zhu, Shi, Zhao, Chen, Zhang & Bao, "A Fairness-Enhanced
+# Federated Learning Scheduling Mechanism for UAV-Assisted Emergency
+# Communication", Sensors 24(5):1599, 2024.
 #
-# Selection happens every T_sel rounds, so by the next selection event a client
-# picked at the previous one already has staleness (T_sel)/(T_sel) = 1, and the
-# min(1, ·) clamp pins a never-picked client to 1 as well. Every client scores
-# exactly 1.0, the term becomes a constant offset, and since argsort ignores a
-# positive rescaling the reward collapses to battery order — B3 degenerates to
-# "highest battery first" and is invariant to w_energy/w_stale. Measured: the
-# four fair_mab_* arms of the 0.3 sweep returned bit-identical means AND stds
-# across 10 seeds.
-#
-# Left at 1 so historical results stay reproducible; the 0.3 sweep varies it and
-# reports the baseline at its best setting (REPORTS/rigor_plan_2026-08.md §0.3).
-# A cap spanning several reselection intervals is what makes the fairness half
-# of the reward discriminate at all.
-FAIRMAB_STALE_CAP_MULT = 1
+# VERIFIED against the source 2026-08-06. The previous implementation was not
+# this paper's algorithm: it used 0.5/0.5 weights, a *capped* staleness term
+# min(1, staleness/T_sel), instantaneous battery as the energy proxy, and no
+# exploration bonus at all — while Zhu et al.'s scheduler IS a UCB bandit. Under
+# that formulation the fairness half was provably inert (every client scored
+# exactly 1.0) and B3 collapsed to "highest battery first". Every fair_mab
+# number produced before this date is for that degenerate rule, not for B3.
+FAIRMAB_ALPHA = 0.6  # Eq. 15 weight on the energy term (source Table 1)
+FAIRMAB_FRESHNESS_A = 1.0  # Eq. 14 constant a
 
 # Baseline B4 (Oort, Lai et al. OSDI 2021): system-utility penalty exponent.
 # util_n = stat_n · (T_pref/T̂_n)^α for stragglers (T̂_n > T_pref), stat_n
@@ -261,6 +249,10 @@ class ClientSelector:
         # each training round; None = never trained (gets the exploration
         # prior: current max observed loss).
         self._last_loss: dict[int, float] = {}
+        # fair_mab (B3): running mean of normalized energy per client, Ē_{m,t},
+        # and the current round's Ê staged by the scorer for _record_selection.
+        self._fairmab_e_bar: dict[int, float] = {}
+        self._fairmab_pending_e_hat: dict[int, float] = {}
         self._epicentre = epicentre or DEFAULT_EPICENTRE
 
     def update_losses(self, losses: dict[int, float]) -> None:
@@ -281,7 +273,6 @@ class ClientSelector:
         mode: str = "ucb",  # "ucb" | "random" | "all" | "fedcs" | "rep_cap" | "fair_mab"
         rng: np.random.Generator | None = None,
         R_comm: float = DEFAULT_R_COMM_M,
-        t_stale_cap: int = DEFAULT_T_STALE_CAP,
         class_counts: dict[int, np.ndarray] | None = None,
         class_scarcity: np.ndarray | None = None,
     ) -> dict[int, int]:
@@ -345,7 +336,7 @@ class ClientSelector:
             elif mode == "oort":
                 scores = self._oort_scores(eligible_ids, device_states)
             else:
-                scores = self._fair_mab_scores(eligible_ids, device_states, round_num, t_stale_cap)
+                scores = self._fair_mab_scores(eligible_ids, device_states, round_num)
             selected = self._greedy_assign(
                 eligible_ids,
                 eligible,
@@ -435,9 +426,25 @@ class ClientSelector:
     # ------------------------------------------------------------------
 
     def _record_selection(self, selected: dict[int, int], round_num: int) -> dict[int, int]:
-        """Update last-selected bookkeeping (fair_mab staleness) and pass through."""
+        """Advance per-client selection bookkeeping and pass the roster through."""
         for cid in selected:
             self._last_selected[cid] = round_num
+
+        # fair_mab's Ē_{m,t+1} is a running mean over *participations*, so it
+        # advances only for devices that were actually selected, and it must use
+        # the Ê computed from this round's channel — which is why the scorer
+        # stashes it rather than the update recomputing from a later state.
+        # _counts has already been incremented by the assignment, so C_m here is
+        # the post-selection count and the previous count is C_m - 1.
+        if self._fairmab_pending_e_hat:
+            for cid in selected:
+                e_hat = self._fairmab_pending_e_hat.get(cid)
+                if e_hat is None:
+                    continue
+                c_prev = max(self._counts.get(cid, 1) - 1, 0)
+                prev = self._fairmab_e_bar.get(cid, 0.0)
+                self._fairmab_e_bar[cid] = (c_prev * prev + e_hat) / (c_prev + 1.0)
+            self._fairmab_pending_e_hat = {}
         return selected
 
     def _fedcs_select(
@@ -498,20 +505,69 @@ class ClientSelector:
         eligible_ids: list[int],
         device_states: dict[int, DeviceState],
         round_num: int,
-        t_stale_cap: int,
     ) -> np.ndarray:
-        """Baseline B3 — fairness/energy MAB reward (Zhu et al. 2024).
+        """Baseline B3 — fairness-enhanced MAB (Zhu et al., Sensors 24(5):1599, 2024).
 
-        reward_n = w_energy·b_n + w_stale·min(1, staleness_n/T_stale_cap) with
-        staleness_n = rounds since last selection. No reputation, no utility —
-        the bandit explores over fairness/energy rather than data value.
+        The published formulation, verified against the source:
+
+            Ê_{m,t}   = 1 − E_{m,t} / E_t^max                      (Eq. 13)
+            Ē_{m,t+1} = (C_m·Ē_{m,t} + Ê_{m,t}) / (C_m + 1)        (running mean)
+            FM_m^t    = t − a·C_m,   a = 1                         (Eq. 14)
+            μ̄_{m,t}   = α·Ē_{m,t+1} + (1−α)·FM_m^t,   α = 0.6      (Eq. 15)
+            UCB_{m,t} = μ̄_{m,t} + 2·log(1/ξ)/√C_m,   ξ = 1/(t−1)   (Eq. 16)
+
+        with ``C_m`` the number of times the device has participated in
+        aggregation — this selector's own ``_counts``.
+
+        Adaptations, where this system takes precedence over the source:
+
+        * ``E_{m,t}`` is *transmission* energy ``E^up + E^down`` for a fixed
+          model payload (Eq. 9); computation energy is excluded, and that
+          exclusion is kept. This simulator carries no transmission-energy
+          model, but it carries the per-round channel each device would pay that
+          energy over. For a fixed payload, time-on-air — and so energy — scales
+          as ``1/log2(1 + SNR)``, so the device's own SNR is mapped through
+          Shannon rather than some unrelated quantity being substituted. The
+          previous code used *battery*, which is a stored state rather than a
+          per-round flow, and in this simulator drains by a constant 0.02 for
+          every selected device, so it carries no per-device information at all.
+        * The source ranks by UCB and takes the top N. Here the ranked list
+          feeds the shared greedy UAV assignment (Algorithm 4), exactly as every
+          other selection baseline does, so the selection *rule* stays the only
+          experimental variable.
+
+        Two unbounded quantities are deliberately left unbounded, because
+        bounding them is precisely what broke the previous version: ``FM`` grows
+        with ``t`` while ``Ē`` stays in [0, 1], and the exploration bonus
+        diverges at ``C_m = 0``. Both are the paper's fairness mechanism. The
+        consequence — that B3 behaves close to participation round-robin once
+        ``t`` is large — is the intended contrast against selection driven by
+        data value, not a defect to normalize away.
         """
-        batteries = np.array([device_states[cid].battery for cid in eligible_ids])
-        cap = max(t_stale_cap, 1)
-        staleness = np.array(
-            [min(1.0, (round_num - self._last_selected.get(cid, 0)) / cap) for cid in eligible_ids]
-        )
-        return FAIRMAB_W_ENERGY * batteries + FAIRMAB_W_STALE * staleness
+        # Eq. 13, with E_t^max the per-round maximum over the eligible pool.
+        snr_linear = np.power(10.0, np.array([device_states[c].snr_db for c in eligible_ids]) / 10.0)
+        energy = 1.0 / np.maximum(np.log2(1.0 + snr_linear), 1e-9)
+        e_hat = 1.0 - energy / max(float(energy.max()), 1e-12)
+
+        counts = np.array([self._counts.get(cid, 0) for cid in eligible_ids], dtype=float)
+        e_bar_prev = np.array([self._fairmab_e_bar.get(cid, 0.0) for cid in eligible_ids])
+        e_bar = (counts * e_bar_prev + e_hat) / (counts + 1.0)
+
+        freshness = round_num - FAIRMAB_FRESHNESS_A * counts  # Eq. 14
+        mu = FAIRMAB_ALPHA * e_bar + (1.0 - FAIRMAB_ALPHA) * freshness  # Eq. 15
+
+        # Eq. 16. ξ = 1/(t−1) leaves log(1/ξ) undefined at t=1 and non-positive
+        # at t=2, so the argument is floored at 2 — the exploration term may not
+        # turn into a penalty. C_m = 0 gets an infinite bonus, which is the
+        # standard bandit initialisation (pull every arm once) and what the
+        # source's 1/√C_m implies.
+        log_term = math.log(max(round_num - 1, 2))
+        bonus = np.where(counts > 0, 2.0 * log_term / np.sqrt(np.maximum(counts, 1.0)), np.inf)
+
+        # Ē is a running mean over participations, so it advances only for the
+        # devices actually selected — stashed here, applied in _record_selection.
+        self._fairmab_pending_e_hat = dict(zip(eligible_ids, e_hat, strict=True))
+        return mu + bonus
 
     def _loss_scores(self, ids: list[int]) -> np.ndarray:
         """Last-observed local losses; never-trained clients get the current
