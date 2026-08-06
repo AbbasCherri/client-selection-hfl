@@ -151,13 +151,15 @@ def coverage_matrix(
 def prune_dominated(cover: np.ndarray, *, chunk: int = 256) -> np.ndarray:
     """Indices of candidates whose covered device set is not contained in another's.
 
-    Exact reduction, not an approximation: if candidate ``i`` covers a subset of
-    what candidate ``j`` covers, any solution using ``i`` is no worse using ``j``
-    instead (capacities here are per-UAV, not per-site, so a superset never costs
-    anything). Dropping dominated candidates therefore preserves the optimum
-    while cutting the MILP down to a size HiGHS can actually close — which is
-    what makes the exact reference an honest *bound* rather than a grid
-    approximation that a finer method can beat.
+    Exact reduction, but **only for a formulation that allows several UAVs at one
+    site**. If candidate ``i`` covers a subset of what ``j`` covers, a solution
+    stationing UAVs at ``i`` can move them to ``j`` and serve the same devices —
+    provided ``j`` can hold them. Under a one-UAV-per-site model this is false
+    and the pruning is destructive: a capacitated instance needing two UAVs on
+    one dense cluster loses that option, and the resulting "optimum" can fall
+    *below* the heuristics it is meant to bound (measured: 70% of optimum
+    reported against heuristics reaching 100%). See the multiplicity note in
+    :func:`uavbench.problem.exact.mclp_reference`.
 
     Ties (identical covered sets) keep the lowest index.
     """

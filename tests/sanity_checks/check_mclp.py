@@ -59,6 +59,54 @@ def optimum_dominates_a_heuristic():
     )
 
 
+def cip_optimum_dominates_the_actual_optimizers():
+    """The bound must beat the methods it bounds — random placements are too weak.
+
+    ``optimum_dominates_a_heuristic`` compares against 40 uniform random layouts
+    on a K=3 instance, which any formulation clears. It passed while the
+    capacitated reference was reporting **70% of optimum against methods reaching
+    100%**: dominance-pruned sites plus a binary "site used" variable forbade
+    stationing two UAVs on one over-capacity cluster. This checks the bound where
+    it actually failed — against mclp_ls and pso, at a K and capacity that bind.
+    """
+    from uavbench.optimizers import build_optimizer
+
+    for seed in (0, 1, 2):
+        inst = _toy(seed=seed, N=60, K=6, R=1000.0)
+        ref = mclp_reference(inst, sites="cip", time_limit=180.0)
+        assert ref.optimal, f"[seed {seed}] reference did not solve to optimality"
+        fit_pure = Fitness(inst, w1=1.0, w2=0.0, w3=0.0)
+        for name in ("mclp_ls", "pso"):
+            got = build_optimizer(name, {}, {"P": 60, "G_max": 40}).optimize(
+                inst, Fitness(inst, w1=1.0, w2=0.0, w3=0.0), np.random.default_rng(5)
+            )
+            cov = fit_pure.components(got.best_position).f_cover_norm
+            assert ref.covered_value_norm >= cov - 1e-6, (
+                f"[seed {seed}] MCLP 'optimum' {ref.covered_value_norm:.4f} is below "
+                f"{name}'s {cov:.4f} ({100 * cov / max(ref.covered_value_norm, 1e-9):.1f}% "
+                "of 'optimum') — the reference is not an upper bound"
+            )
+
+
+def cip_reference_is_at_least_the_grid_reference():
+    """Church's set contains a planar optimum, so it cannot lose to a grid.
+
+    The circle-intersection candidates provably contain an optimal placement over
+    the *whole plane*, which includes every grid point. A CIP reference scoring
+    below the grid one therefore means the candidate construction or the pruning
+    dropped something it should not have.
+    """
+    for seed in (0, 1):
+        inst = _toy(seed=seed, N=50, K=4, R=600.0)
+        cip = mclp_reference(inst, sites="cip", time_limit=180.0)
+        grid = mclp_reference(inst, grid_res=24, time_limit=180.0)
+        assert cip.covered_value_norm >= grid.covered_value_norm - 1e-6, (
+            f"[seed {seed}] CIP reference {cip.covered_value_norm:.4f} < grid reference "
+            f"{grid.covered_value_norm:.4f}; the exact candidate set lost coverage a "
+            "24x24 grid found"
+        )
+
+
 def finer_grid_never_hurts():
     """More candidate sites can only relax the grid restriction."""
     inst = _toy()
@@ -111,6 +159,8 @@ def gap_is_reported():
 
 if __name__ == "__main__":
     check("optimum dominates a random heuristic", optimum_dominates_a_heuristic)
+    check("CIP optimum dominates the real optimizers", cip_optimum_dominates_the_actual_optimizers)
+    check("CIP reference is at least the grid reference", cip_reference_is_at_least_the_grid_reference)
     check("finer grid never scores lower", finer_grid_never_hurts)
     check("coverage uses 3-D slant distance", coverage_uses_3d_distance)
     check("normalisation uses the solved set", normalisation_uses_the_solved_set)
