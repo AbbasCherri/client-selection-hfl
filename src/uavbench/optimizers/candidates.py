@@ -148,6 +148,38 @@ def coverage_matrix(
     return out
 
 
+def prune_dominated(cover: np.ndarray, *, chunk: int = 256) -> np.ndarray:
+    """Indices of candidates whose covered device set is not contained in another's.
+
+    Exact reduction, not an approximation: if candidate ``i`` covers a subset of
+    what candidate ``j`` covers, any solution using ``i`` is no worse using ``j``
+    instead (capacities here are per-UAV, not per-site, so a superset never costs
+    anything). Dropping dominated candidates therefore preserves the optimum
+    while cutting the MILP down to a size HiGHS can actually close — which is
+    what makes the exact reference an honest *bound* rather than a grid
+    approximation that a finer method can beat.
+
+    Ties (identical covered sets) keep the lowest index.
+    """
+    cover = np.asarray(cover)
+    M = cover.shape[0]
+    sizes = cover.sum(axis=1).astype(np.int64)
+    cf = cover.astype(np.float32)
+    keep = np.ones(M, dtype=bool)
+    for s in range(0, M, chunk):
+        e = min(s + chunk, M)
+        inter = (cf[s:e] @ cf.T).astype(np.int64)  # (chunk, M) intersection sizes
+        contained = inter == sizes[s:e, None]  # i's set is inside j's
+        # Strictly larger dominates; equal sets are broken by index so exactly
+        # one survivor remains rather than both eliminating each other.
+        strictly = sizes[None, :] > sizes[s:e, None]
+        equal_later = (sizes[None, :] == sizes[s:e, None]) & (
+            np.arange(M)[None, :] < np.arange(s, e)[:, None]
+        )
+        keep[s:e] = ~(contained & (strictly | equal_later)).any(axis=1)
+    return np.flatnonzero(keep)
+
+
 def capped_covered_value(
     cover_sorted: np.ndarray,
     value_sorted: np.ndarray,
