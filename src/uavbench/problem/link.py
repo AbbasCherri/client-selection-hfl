@@ -122,6 +122,19 @@ class LinkModel:
         r = self.radius(zz)
         return np.sqrt(r * r + zz * zz)
 
+    def min_altitude_for_radius(self, required_r_m: float) -> float:
+        """Lowest in-band altitude whose ground radius reaches ``required_r_m``.
+
+        Alzenad et al.'s rule, expressed against the shared model. Falls back to
+        ``z_star_m`` when no altitude in the band reaches the requirement, which
+        is the best available rather than an infeasibility — the shortfall then
+        shows up honestly as uncovered devices.
+        """
+        ok = self._r_grid >= required_r_m
+        if not ok.any():
+            return self.z_star_m
+        return float(self._z_grid[int(np.argmax(ok))])
+
     @property
     def r_max_m(self) -> float:
         """Best achievable radius over the band — equals ``r_comm_m`` by construction."""

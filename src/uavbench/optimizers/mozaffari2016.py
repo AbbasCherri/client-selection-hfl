@@ -71,15 +71,25 @@ class Mozaffari2016(Optimizer):
         return lo, hi
 
     def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
-        env = ENV_PRESETS[self.environment]
-        h_lo, h_hi = self._altitude_bounds(instance)
-        h_star, r_star = optimal_altitude_mozaffari(
-            self.max_path_loss_db,
-            self.freq_ghz * 1e9,
-            **env,
-            h_min_m=h_lo,
-            h_max_m=h_hi,
-        )
+        # When the objective carries a shared air-to-ground link model, this
+        # method's own (h*, r*) derivation is *the same derivation* run against
+        # the shared budget, so it defers to it and publishes no radii override.
+        # That is what finally removes the 618-vs-500 m handicap: the radius is
+        # no longer this method's private property, it is a function of the
+        # altitude it chose, exactly as it is for every other method.
+        link = getattr(fitness, "link", None)
+        if link is not None:
+            h_star, r_star = float(link.z_star_m), float(link.radius(link.z_star_m))
+        else:
+            env = ENV_PRESETS[self.environment]
+            h_lo, h_hi = self._altitude_bounds(instance)
+            h_star, r_star = optimal_altitude_mozaffari(
+                self.max_path_loss_db,
+                self.freq_ghz * 1e9,
+                **env,
+                h_min_m=h_lo,
+                h_max_m=h_hi,
+            )
 
         device_xy = instance.device_coords[:, :2]
         # Greedy maximal covering: candidate disc centers are the device
@@ -107,13 +117,18 @@ class Mozaffari2016(Optimizer):
 
         positions = np.column_stack([np.array(centers), np.full(instance.K, h_star)])
         x = positions.reshape(instance.dim)
-        radii = np.full(instance.K, r_star)
-        f = fitness(x, radii=radii)
+        if link is not None:
+            f = fitness(x)  # radius derived from altitude by the shared model
+            meta = {"altitude_m": h_star, "coverage_radius_m": r_star}
+        else:
+            radii = np.full(instance.K, r_star)
+            f = fitness(x, radii=radii)
+            meta = {"radii": radii, "altitude_m": h_star, "coverage_radius_m": r_star}
         return Result(
             method=self.name,
             best_position=x,
             best_fitness=f,
             convergence=[f],
             n_iterations=1,
-            meta={"radii": radii, "altitude_m": h_star, "coverage_radius_m": r_star},
+            meta=meta,
         )

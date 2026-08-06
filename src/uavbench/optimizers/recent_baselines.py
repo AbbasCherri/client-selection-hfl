@@ -92,8 +92,6 @@ class PSOClusterPlacement(Optimizer):
         inertia: float = 0.7298,
         c1: float = 1.4962,
         c2: float = 1.4962,
-        altitude_frac: float = 0.0,
-        optimize_z: bool = True,
         **kw,
     ) -> None:
         super().__init__(**kw)
@@ -102,11 +100,6 @@ class PSOClusterPlacement(Optimizer):
             raise ValueError(f"objective must be 'distance' or 'shared'; got {objective!r}")
         self.objective = objective
         self.inertia, self.c1, self.c2 = inertia, c1, c2
-        self.altitude_frac = altitude_frac
-        # The source optimizes altitude against a transmit-power model this
-        # benchmark does not carry, so altitude is re-derived here against the
-        # shared objective rather than pinned. See :mod:`.altitude`.
-        self.optimize_z = optimize_z
 
     def _cluster_cost(self, centers: np.ndarray, device_xy: np.ndarray) -> np.ndarray:
         """``(P,)`` sum of each user's distance to its nearest centre.
@@ -122,12 +115,39 @@ class PSOClusterPlacement(Optimizer):
     def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         K = instance.K
         device_xy = instance.device_coords[:, :2]
-        z = instance.lower[2] + self.altitude_frac * (instance.upper[2] - instance.lower[2])
+        link = getattr(fitness, "link", None)
         lo = np.tile(instance.lower[:2], K)
         hi = np.tile(instance.upper[:2], K)
 
+        def cluster_altitudes(centers_xy: np.ndarray) -> np.ndarray:
+            """Per-cluster altitude minimizing the transmit power it needs.
+
+            The paper's altitude stage minimizes required transmit power subject
+            to serving the cluster. This benchmark has no power model, so the
+            equivalent under the shared channel is the lowest altitude whose
+            coverage radius reaches the cluster's farthest member — least link
+            margin spent, same rule. That keeps the published two-stage
+            structure (cluster, then place) intact rather than substituting a
+            sweep of this benchmark's objective, which the paper does not do.
+            """
+            z_lo, z_hi = float(instance.lower[2]), float(instance.upper[2])
+            if link is None:
+                return np.full(K, z_lo)
+            d = np.sqrt(
+                (device_xy[:, None, 0] - centers_xy[None, :, 0]) ** 2
+                + (device_xy[:, None, 1] - centers_xy[None, :, 1]) ** 2
+            )
+            owner = d.argmin(axis=1)
+            out = np.empty(K)
+            for k in range(K):
+                members = d[owner == k, k]
+                req = float(members.max()) if members.size else 1.0
+                out[k] = link.min_altitude_for_radius(max(req, 1.0))
+            return np.clip(out, z_lo, z_hi)
+
         def to_positions(flat: np.ndarray) -> np.ndarray:
-            return np.column_stack([flat.reshape(K, 2), np.full(K, z)]).reshape(3 * K)
+            c = flat.reshape(K, 2)
+            return np.column_stack([c, cluster_altitudes(c)]).reshape(3 * K)
 
         def score(X: np.ndarray) -> np.ndarray:
             if self.objective == "distance":
@@ -168,8 +188,6 @@ class PSOClusterPlacement(Optimizer):
         # reported must be the shared one — otherwise this method's column would
         # be a distance sum sitting in a fitness table.
         positions = np.asarray(to_positions(gbest)).reshape(K, 3)
-        if self.optimize_z:
-            positions = optimize_altitudes(instance, fitness, positions)
         x = positions.reshape(instance.dim)
         f = float(fitness(x))
         convergence[-1] = f
