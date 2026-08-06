@@ -6,10 +6,12 @@ from .ga import GA
 from .heuristics import Centroid, RandomPlacement, Static
 from .mozaffari2016 import Mozaffari2016
 from .pso import PSO
+from .pso_plus import PSOPlus
 
 # Registry keyed by the names used in configs.
 REGISTRY: dict[str, type[Optimizer]] = {
     "pso": PSO,
+    "pso_plus": PSOPlus,
     "ga": GA,
     "centroid": Centroid,
     "random": RandomPlacement,
@@ -20,7 +22,9 @@ REGISTRY: dict[str, type[Optimizer]] = {
 
 # Methods that consume the shared P/G_max evaluation budget. Heuristic and
 # one-shot literature baselines take no budget, exactly like centroid/static.
-_BUDGETED_METHODS = ("pso", "ga")
+# pso_plus is budgeted too: comparing it against pso at a different budget
+# would confound "the new features help" with "it got more evaluations".
+_BUDGETED_METHODS = ("pso", "pso_plus", "ga")
 
 
 def build_optimizer(
@@ -56,6 +60,7 @@ __all__ = [
     "Optimizer",
     "Result",
     "PSO",
+    "PSOPlus",
     "GA",
     "Centroid",
     "RandomPlacement",
