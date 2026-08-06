@@ -60,7 +60,9 @@ _C = 299_792_458.0  # speed of light, m/s
 ENV_PRESETS: dict[str, dict[str, float]] = {
     "suburban": {"a": 4.88, "b": 0.43, "eta_los_db": 0.1, "eta_nlos_db": 21.0},
     "urban": {"a": 9.61, "b": 0.16, "eta_los_db": 1.0, "eta_nlos_db": 20.0},
-    "dense_urban": {"a": 12.08, "b": 0.11, "eta_los_db": 1.6, "eta_nlos_db": 23.0},
+    # b = 0.114, not 0.11: confirmed against Alzenad 2017 and Moon et al. 2022
+    # (Electronics 11(7):1036, Table 3), both of which tabulate (12.08, 0.114).
+    "dense_urban": {"a": 12.08, "b": 0.114, "eta_los_db": 1.6, "eta_nlos_db": 23.0},
     "high_rise_urban": {"a": 27.23, "b": 0.08, "eta_los_db": 2.3, "eta_nlos_db": 34.0},
 }
 
@@ -151,6 +153,50 @@ def coverage_radius(
         else:
             hi = mid
     return lo
+
+
+def optimal_elevation_angle(
+    a: float,
+    b: float,
+    eta_los_db: float,
+    eta_nlos_db: float,
+) -> float:
+    """Elevation angle (degrees) maximizing the coverage radius — Al-Hourani Eq. (7).
+
+        (pi / (9 ln10)) * tan(theta)
+            + a*b*A*exp(-b(180/pi * theta - a)) / (a*exp(-b(180/pi * theta - a)) + 1)^2 = 0
+
+    with ``A = eta_los - eta_nlos`` and ``theta`` in radians. The striking
+    property, and the reason this is worth having as its own function: the
+    optimum depends **only on the environment** — not on the loss budget, the
+    frequency, or the altitude band. Alzenad et al. (2017) report 20.34 deg
+    (suburban), 42.44 (urban), 54.62 (dense urban) and 75.52 (high-rise); those
+    values are asserted against this solver in
+    ``tests/sanity_checks/check_mclp.py``.
+
+    Solved by bisection: the left-hand side rises monotonically from negative
+    (where the LoS term dominates) to +inf as theta -> 90 deg.
+    """
+    big_a = eta_los_db - eta_nlos_db
+
+    def lhs(theta_rad: float) -> float:
+        deg = math.degrees(theta_rad)
+        e = math.exp(-b * (deg - a))
+        return (
+            math.pi / (9.0 * math.log(10.0)) * math.tan(theta_rad)
+            + a * b * big_a * e / (a * e + 1.0) ** 2
+        )
+
+    lo, hi = 1e-6, math.radians(89.999)
+    if lhs(lo) > 0.0:
+        return math.degrees(lo)
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if lhs(mid) < 0.0:
+            lo = mid
+        else:
+            hi = mid
+    return math.degrees(0.5 * (lo + hi))
 
 
 def optimal_altitude_mozaffari(
