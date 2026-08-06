@@ -217,41 +217,74 @@ def the_3d_problem_decouples_as_claimed():
         )
 
 
-def path_loss_baselines_are_flagged_as_unequal_radius():
-    """The 618-vs-500 m artifact must stay visible, not be silently reintroduced.
+def no_method_publishes_a_private_coverage_radius():
+    """The 618-vs-500 m handicap is now structurally impossible, not just fixed.
 
-    mozaffari2016/alzenad2017 legitimately derive their own coverage radius. That
-    makes their self-reported fitness incomparable with a method scored at the
-    system gate, which is why the FL path re-scores. This asserts the condition
-    that makes re-scoring necessary is detectable from the result alone.
+    It arose because mozaffari2016 and alzenad2017 returned ``meta["radii"]`` — a
+    private coverage radius they were then scored at, while every other method
+    was gated at ``R_comm``. The bias flipped sign with ``R_comm``, so the
+    resulting fitness column could not be compared across methods in either
+    direction.
+
+    After the 2026-08-06 rewrite against the source PDFs, neither has a private
+    radius to publish: Mozaffari's comes from the circle packing geometry and
+    Alzenad's from the shared channel at its own chosen altitude. This asserts
+    the absence, which is a far stronger guarantee than re-scoring after the
+    fact — there is no ruler left to differ on.
     """
-    inst = _instance(R_comm=500.0)
-    for name in ("mozaffari2016", "alzenad2017"):
-        res = build_optimizer(name, {}, BUDGET).optimize(inst, _fit(inst), np.random.default_rng(4))
-        radii = res.meta.get("radii")
-        assert radii is not None, (
-            f"{name} no longer publishes result.meta['radii'] — the equal-radius "
-            "re-score in _place_uavs and the Tier-1 guard both key off it"
-        )
-        assert np.asarray(radii).shape == (inst.K,), f"{name} radii has wrong shape"
+    for r_comm in (500.0, 2000.0):
+        inst = _instance(R_comm=r_comm)
+        for name in REGISTRY:
+            res = build_optimizer(name, {}, BUDGET).optimize(
+                inst, _fit(inst), np.random.default_rng(4)
+            )
+            assert res.meta.get("radii") is None, (
+                f"{name} published a private coverage radius at R_comm={r_comm:.0f} m. "
+                "Every method must be gated by the shared link model on its own "
+                "altitude; a private radius reintroduces the handicap that voided "
+                "the first coverage sweep"
+            )
 
 
-def equal_radius_rescore_changes_the_ranking_metric():
-    """Guard the fix: re-scoring at R_comm must actually differ from self-scoring."""
-    inst = _instance(R_comm=500.0)
-    res = build_optimizer("mozaffari2016", {}, BUDGET).optimize(
-        inst, _fit(inst), np.random.default_rng(4)
+def rewritten_baselines_follow_their_published_rules():
+    """Spot-check the two rewrites at the level a reader of the papers would.
+
+    Mozaffari packs equal NON-OVERLAPPING discs (Eq. 11) and is demand-blind;
+    Alzenad recentres on the smallest enclosing circle of the users it covers
+    (Eq. 13) and sets ``h* = max(h_min, R2 tan(theta_opt))``. Both properties are
+    checkable from the returned layout alone.
+    """
+    inst = _instance(N=120, K=6, R_comm=1500.0)
+
+    moz = build_optimizer("mozaffari2016", {}, BUDGET).optimize(
+        inst, _fit(inst), np.random.default_rng(1)
     )
-    at_own = _fit(inst)(res.best_position, radii=res.meta["radii"])
-    at_gate = _fit(inst)(res.best_position)
-    assert abs(at_own - at_gate) > 1e-9, (
-        "mozaffari2016 scores identically at its own radius and at R_comm on this "
-        "instance — the equal-radius test has gone inert and would not catch the "
-        "handicap it exists to catch"
+    pos = moz.best_position.reshape(inst.K, 3)
+    r_u = moz.meta["packing_radius_m"]
+    d = np.sqrt(((pos[:, None, :2] - pos[None, :, :2]) ** 2).sum(axis=2))
+    np.fill_diagonal(d, np.inf)
+    assert d.min() >= 2.0 * r_u - 1.0, (
+        f"mozaffari2016 discs overlap ({d.min():.0f} m < {2 * r_u:.0f} m). Eq. (11) "
+        "forbids overlap; without it this is not circle packing"
+    )
+    assert len(set(np.round(pos[:, 2], 6))) == 1, (
+        "mozaffari2016 flew UAVs at different altitudes; the paper's equal-radius / "
+        "equal-power design requires a single shared altitude"
     )
 
-
-# --- 2. the candidate-set reduction --------------------------------------
+    alz = build_optimizer("alzenad2017", {}, BUDGET).optimize(
+        inst, _fit(inst), np.random.default_rng(1)
+    )
+    theta = np.radians(alz.meta["theta_opt_deg"])
+    zs = np.asarray(alz.meta["altitudes_m"])
+    assert (zs >= inst.lower[2] - 1e-6).all(), "alzenad2017 flew below h_min"
+    # h* = R2 tan(theta_opt) => the implied R2 must be a real enclosing radius,
+    # i.e. positive and no larger than the whole service area.
+    implied_r2 = zs / max(np.tan(theta), 1e-9)
+    assert (implied_r2 > 0).all() and (implied_r2 < inst.box_diagonal).all(), (
+        f"alzenad2017 altitudes imply enclosing radii {implied_r2} outside any "
+        "plausible range; step 6 (h* = max(h_min, R2 tan theta_opt)) is not being applied"
+    )
 
 
 def intersection_points_are_wedged_against_both_devices():
@@ -474,8 +507,8 @@ if __name__ == "__main__":
     check("link model gives altitude an interior optimum",
           the_link_model_gives_altitude_an_interior_optimum)
     check("the 3D problem decouples as claimed", the_3d_problem_decouples_as_claimed)
-    check("path-loss baselines still publish radii", path_loss_baselines_are_flagged_as_unequal_radius)
-    check("equal-radius re-score is not inert", equal_radius_rescore_changes_the_ranking_metric)
+    check("no method publishes a private coverage radius", no_method_publishes_a_private_coverage_radius)
+    check("rewritten baselines follow their published rules", rewritten_baselines_follow_their_published_rules)
     check("intersection points cover both generators", intersection_points_are_wedged_against_both_devices)
     check("candidate set matches brute-force best disc", candidate_set_matches_brute_force_best_disc)
     check("capped_covered_value matches naive top-cap", capped_covered_value_matches_the_naive_computation)
