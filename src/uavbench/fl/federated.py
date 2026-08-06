@@ -839,6 +839,8 @@ _METHOD_CFG: dict[str, tuple] = {
     "cap_kmeans_place": ("cap_kmeans", "ucb", True, True),  # capacity-constrained k-means
     "pso_cluster_place": ("pso_cluster", "ucb", True, True),  # Sawalmeh et al., Sensors 2021
     "ahc_place": ("ahc", "ucb", True, True),  # agglomerative clustering + minimax centre
+    "moon2022": ("moon2022", "ucb", True, True),  # Moon et al., Electronics 11(7):1036, 2022
+    "mogoa": ("mogoa", "ucb", True, True),  # Almaameri & Blazovics, Cluster Comput. 29:392, 2026
     "ga_place": ("ga", "ucb", True, True),  # GA over raw UAV coordinates
     "de_place": ("de", "ucb", True, True),  # differential evolution control
     "gwo_place": ("gwo", "ucb", True, True),  # grey wolf control
@@ -850,7 +852,7 @@ _PLACEMENT_BASELINES = frozenset(
     {
         "mozaffari2016", "alzenad2017", "centroid_place", "random_place",
         "mclp_place", "spiral_place", "cap_kmeans_place", "pso_cluster_place",
-        "ahc_place", "ga_place", "de_place", "gwo_place",
+        "ahc_place", "ga_place", "de_place", "gwo_place", "moon2022", "mogoa",
     }
 )
 

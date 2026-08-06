@@ -59,6 +59,58 @@ def optimum_dominates_a_heuristic():
     )
 
 
+def optimal_elevation_matches_the_published_values():
+    """The one number in the channel model that can be checked against print.
+
+    Al-Hourani et al. (2014) Eq. (7) has the striking property that the
+    radius-maximizing elevation angle depends ONLY on the environment constants —
+    not the loss budget, frequency, or altitude band. Alzenad et al. (2017,
+    Section III-A) and Moon et al. (2022, Section 3.1) independently tabulate the
+    same four values, so agreement to 0.05 deg validates the solver, the (a, b)
+    constants, and the degree/radian convention in one shot.
+    """
+    from uavbench.problem.path_loss import ENV_PRESETS, optimal_elevation_angle
+
+    published = {
+        "suburban": 20.34,
+        "urban": 42.44,
+        "dense_urban": 54.62,
+        "high_rise_urban": 75.52,
+    }
+    for env, expected in published.items():
+        got = optimal_elevation_angle(**ENV_PRESETS[env])
+        assert abs(got - expected) < 0.05, (
+            f"{env}: theta_opt = {got:.2f} deg, published {expected:.2f} deg. Either the "
+            "(a, b) constants are wrong, Eq. (7) is mis-transcribed, or the sigmoid is "
+            "being fed radians where it expects degrees"
+        )
+
+
+def mozaffari_packing_matches_the_published_table():
+    """Table I radii and the non-overlap the packing exists to guarantee."""
+    from uavbench.optimizers.mozaffari2016 import pack_circles, packing_ratio
+
+    # Spot-check the paper's Table I (M = 3 is the one it derives by hand).
+    assert abs(packing_ratio(3) - 0.464) < 1e-3, "M=3 packing radius != 0.464 Rc"
+    assert abs(packing_ratio(2) - 0.5) < 1e-9
+    assert abs(packing_ratio(1) - 1.0) < 1e-9
+
+    for m in (3, 7, 20):
+        r_c = 1000.0
+        r_u = packing_ratio(m) * r_c
+        pts = pack_circles(m, r_c, r_u)
+        assert pts.shape == (m, 2)
+        d = np.sqrt(((pts[:, None, :] - pts[None, :, :]) ** 2).sum(axis=2))
+        np.fill_diagonal(d, np.inf)
+        assert d.min() >= 2.0 * r_u - 1.0, (
+            f"M={m}: closest pair {d.min():.1f} m < 2*r_u = {2 * r_u:.1f} m — the discs "
+            "overlap, and non-overlap is the constraint the whole method is built on"
+        )
+        assert (np.linalg.norm(pts, axis=1) <= r_c - r_u + 1.0).all(), (
+            f"M={m}: a disc escapes the service area"
+        )
+
+
 def cip_optimum_dominates_the_actual_optimizers():
     """The bound must beat the methods it bounds — random placements are too weak.
 
@@ -158,6 +210,8 @@ def gap_is_reported():
 
 
 if __name__ == "__main__":
+    check("theta_opt matches the published values", optimal_elevation_matches_the_published_values)
+    check("mozaffari packing matches Table I", mozaffari_packing_matches_the_published_table)
     check("optimum dominates a random heuristic", optimum_dominates_a_heuristic)
     check("CIP optimum dominates the real optimizers", cip_optimum_dominates_the_actual_optimizers)
     check("CIP reference is at least the grid reference", cip_reference_is_at_least_the_grid_reference)

@@ -9,7 +9,12 @@ from .mclp_ls import MCLPLocalSearch
 from .mozaffari2016 import Mozaffari2016
 from .pso import PSO
 from .pso_plus import PSOPlus
-from .recent_baselines import HierarchicalPlacement, PSOClusterPlacement
+from .recent_baselines import (
+    MOGOA,
+    HierarchicalPlacement,
+    Moon2022Priority,
+    PSOClusterPlacement,
+)
 from .swarm_baselines import DifferentialEvolution, GreyWolfOptimizer
 
 # Registry keyed by the names used in configs.
@@ -25,6 +30,8 @@ REGISTRY: dict[str, type[Optimizer]] = {
     "spiral": SpiralPlacement,
     "pso_cluster": PSOClusterPlacement,
     "ahc": HierarchicalPlacement,
+    "moon2022": Moon2022Priority,
+    "mogoa": MOGOA,
     "random": RandomPlacement,
     "static": Static,
     "mozaffari2016": Mozaffari2016,
@@ -37,7 +44,9 @@ REGISTRY: dict[str, type[Optimizer]] = {
 # would confound "the new features help" with "it got more evaluations".
 # mclp_ls is budgeted for the same reason in the opposite direction — it is the
 # proposed method, so it must be shown to win *at* PSO's spend, not past it.
-_BUDGETED_METHODS = ("pso", "pso_plus", "ga", "de", "gwo", "mclp_ls", "pso_cluster")
+_BUDGETED_METHODS = (
+    "pso", "pso_plus", "ga", "de", "gwo", "mclp_ls", "pso_cluster", "mogoa",
+)
 
 
 def build_optimizer(
@@ -83,6 +92,8 @@ __all__ = [
     "SpiralPlacement",
     "PSOClusterPlacement",
     "HierarchicalPlacement",
+    "Moon2022Priority",
+    "MOGOA",
     "RandomPlacement",
     "Static",
     "Mozaffari2016",
