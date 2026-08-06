@@ -18,11 +18,15 @@ greedy assignment.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .assignment import AssignmentResult, greedy_assignment, greedy_assignment_batch
 from .instance import ProblemInstance
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .link import LinkModel
 
 _EPS = 1e-9
 
@@ -62,9 +66,15 @@ class Fitness:
         w1: float = 0.811,
         w2: float = 0.03,
         w3: float = 0.159,
+        link: "LinkModel | None" = None,
     ) -> None:
         self.instance = instance
         self.w1, self.w2, self.w3 = w1, w2, w3
+        # When present, coverage is gated on the radius each UAV's own altitude
+        # earns under the shared air-to-ground channel instead of a flat R_comm.
+        # This is what makes altitude a real decision (see uavbench.problem.link);
+        # None preserves the legacy hard range gate exactly.
+        self.link = link
         self.f_max = max(float(instance.value.sum()), _EPS)
         self.d_max = max(instance.K * instance.box_diagonal, _EPS)
         self.l_max = max(float(instance.N) ** 2, _EPS)
@@ -81,6 +91,8 @@ class Fitness:
         inst = self.instance
         positions = inst.positions_from_vector(x)
 
+        if radii is None and self.link is not None:
+            radii = self.link.slant_radius(positions[:, 2])
         res = greedy_assignment(inst, positions, radii=radii)
 
         d_move = float(np.sum(np.sqrt(np.sum((positions - inst.prev_positions) ** 2, axis=1))))
@@ -130,6 +142,10 @@ class Fitness:
         P = pos.shape[0]
         self.eval_count += P
 
+        if radii is None and self.link is not None:
+            # (P, K): candidates in a batch fly at different altitudes, so each
+            # gets its own radius vector rather than one shared across the batch.
+            radii = self.link.slant_radius(pos[:, :, 2])
         assignment, loads = greedy_assignment_batch(inst, pos, radii=radii)
 
         out = np.empty(P, dtype=np.float64)

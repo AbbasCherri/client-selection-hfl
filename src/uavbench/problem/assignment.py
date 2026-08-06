@@ -46,15 +46,29 @@ def _feasible_static(
     dist: np.ndarray,
     radii: np.ndarray | None,
 ) -> np.ndarray:
-    """Range + battery feasibility mask, broadcast over any leading axes of ``dist``."""
+    """Range + battery feasibility mask, broadcast over any leading axes of ``dist``.
+
+    ``radii`` may be ``(K,)`` — one radius per UAV, shared by every candidate —
+    or ``(P, K)``, one per UAV *per candidate*. The latter is what an
+    altitude-dependent link model needs: candidates in a batch fly at different
+    altitudes, so they do not share a radius vector. ``dist`` is ``(N, K)`` in
+    the scalar path and ``(P, N, K)`` in the batch path, so a ``(P, K)`` radius
+    is reshaped to ``(P, 1, K)`` to broadcast against the device axis.
+    """
     K = instance.K
     if radii is None:
         in_range = dist <= instance.R_comm
     else:
         r = np.asarray(radii, dtype=np.float64)
-        if r.shape != (K,):
-            raise ValueError(f"radii must have shape (K,)=({K},); got {r.shape}")
-        in_range = dist <= r
+        if r.shape == (K,):
+            in_range = dist <= r
+        elif r.ndim == 2 and r.shape[1] == K and dist.ndim == 3 and r.shape[0] == dist.shape[0]:
+            in_range = dist <= r[:, None, :]
+        else:
+            raise ValueError(
+                f"radii must have shape (K,)=({K},) or (P, K) matching dist "
+                f"{dist.shape}; got {r.shape}"
+            )
     return in_range & (instance.battery >= instance.B_min_uav)
 
 
