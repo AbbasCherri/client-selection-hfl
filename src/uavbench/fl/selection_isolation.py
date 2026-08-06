@@ -124,20 +124,19 @@ ARM_SPECS: dict[str, dict] = {
                        "consts": {"uavbench.fl.client_selection.REPCAP_GAMMA": 0.25}},
     "rep_cap_g0.75":  {"mode": "rep_cap", "class_source": "none",
                        "consts": {"uavbench.fl.client_selection.REPCAP_GAMMA": 0.75}},
-    # fair_mab's sensitivity arms. The T_stale_cap arms these replace no longer
-    # exist: that cap was OUR invention, and reading Zhu et al. (2026-08-06)
-    # showed the source has no cap at all — its freshness term t − a·C_m is
-    # unbounded, and capping it is what made the whole fairness half inert. With
-    # the published formulation restored, the only free reward parameter left is
-    # α, which the source fixes at 0.6 (Table 1); these bracket it.
-    "fair_mab_a0.3":  {"mode": "fair_mab", "class_source": "none",
-                       "consts": {"uavbench.fl.client_selection.FAIRMAB_ALPHA": 0.3}},
-    "fair_mab_a0.9":  {"mode": "fair_mab", "class_source": "none",
-                       "consts": {"uavbench.fl.client_selection.FAIRMAB_ALPHA": 0.9}},
-    # The freshness constant a (Eq. 14), which the source calls "a constant with
-    # a general value of 1" — i.e. stated as a default rather than derived.
-    "fair_mab_a_fresh5": {"mode": "fair_mab", "class_source": "none",
-                          "consts": {"uavbench.fl.client_selection.FAIRMAB_FRESHNESS_A": 5.0}},
+    # fair_mab has NO sensitivity arms, and that is a finding rather than an
+    # omission. Its published score is
+    #     alpha*Ebar + (1-alpha)*(t - a*C_m) + 2*log(1/xi)/sqrt(C_m + 1),
+    # in which both the freshness term and the exploration bonus depend only on
+    # the participation count C_m, and Ebar in [0,1] is the only other varying
+    # quantity. Within a group of equal C_m, ranking by alpha*Ebar + const is
+    # ranking by Ebar for ANY alpha > 0; across groups, one unit of C_m
+    # contributes (1-alpha) from freshness plus ~0.8 from the bonus, which
+    # alpha*dEbar <= 1 cannot overcome. So B3 ranks by participation count with
+    # an energy tie-break, and is rank-invariant to both alpha and a — the two
+    # constants the source states. Arms varying them would return bit-identical
+    # results, which is exactly the failure the T_stale_cap arms had.
+    # Pinned by check_selection_rules.py::fair_mab_is_rank_invariant_to_its_constants.
     # Cho et al. sweep the candidate-set multiplier d rather than fixing it, so
     # sweeping it here is the faithful reproduction, not a favour.
     "poc_d1":         {"mode": "power_of_choice", "class_source": "none",
