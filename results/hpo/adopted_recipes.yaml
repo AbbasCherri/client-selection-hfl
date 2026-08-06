@@ -1,0 +1,43 @@
+per_method:
+  fair_mab:
+    ema_decay: 0.45547359848868973
+    logit_adjust_tau: 0.8425368448440125
+    lr: 0.01137151083127974
+    lr_decay: none
+    server_momentum: 0.3883347454399128
+    uav_lr: 0.01137151083127974
+  fedcs:
+    ema_decay: 0.7168113833054126
+    logit_adjust_tau: 0.806673236718812
+    lr: 0.019216607260374
+    lr_decay: sqrt
+    server_momentum: 0.3800665885097503
+    uav_lr: 0.019216607260374
+  oort:
+    ema_decay: 0.7150220463520929
+    logit_adjust_tau: 0.6699232948232681
+    lr: 0.007259828082539474
+    lr_decay: cosine
+    server_momentum: 0.4930501862077924
+    uav_lr: 0.007259828082539474
+  power_of_choice:
+    ema_decay: 0.5346249302906768
+    logit_adjust_tau: 0.7344479027874043
+    lr: 0.015295390426054838
+    lr_decay: none
+    server_momentum: 0.3558317715052268
+    uav_lr: 0.015295390426054838
+  proposed_hfl:
+    ema_decay: 0.7833928761076289
+    logit_adjust_tau: 0.7001226050885416
+    lr: 0.01686180617951525
+    lr_decay: none
+    server_momentum: 0.7706227485907273
+    uav_lr: 0.01686180617951525
+  rep_cap:
+    ema_decay: 0.49433846836329615
+    logit_adjust_tau: 0.822414653405892
+    lr: 0.020776032695023632
+    lr_decay: none
+    server_momentum: 0.6237350685923337
+    uav_lr: 0.020776032695023632
