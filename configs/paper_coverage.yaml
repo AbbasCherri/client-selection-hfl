@@ -25,7 +25,10 @@
 # contrast (identical UCB selection, reputation FedAvg, and cadence).
 #
 # Grid: 6 R_comm × 7 methods × 10 seeds = 420 jobs at fixed N=200.
-calibrate_path_loss: true
+# Subsumed by fl.link_model=path_loss: every method now derives its coverage
+# radius from its own altitude through ONE shared, per-R_comm-calibrated
+# channel, so there is no per-baseline budget left to calibrate separately.
+calibrate_path_loss: false
 extends: tuned_weights.yaml
 
 name: paper_coverage
@@ -37,12 +40,17 @@ optimizer_seed: 9876
 epicentre: [37.488, 137.272]
 
 N: 200                       # fixed client count; only R_comm sweeps
+# Realistic ground radii. The previous grid bottomed out at 2 km, where every
+# method already covers most clients, so placement could not separate; and the
+# 20 km end is the saturated regime where coverage is unfalsifiable. These
+# values are the achievable radius at the channel-optimal altitude.
 R_comm_values:               # metres
+  - 250
+  - 500
+  - 1000
   - 2000
   - 4000
-  - 6000
   - 8000
-  - 12000
   - 20000
 
 data:
@@ -57,7 +65,13 @@ data:
 fl:
   K: 20
   R_comm: 20000.0            # overridden per job by run_coverage_sweep
-  uniform_coverage_radius: true   # all methods gated at the swept R_comm (fair)
+  # Air-to-ground link model: each UAV's coverage radius is derived from its own
+  # altitude through the shared Al-Hourani channel, calibrated per job so the
+  # best achievable radius equals the swept R_comm. This is what makes altitude
+  # a real decision (a flat gate makes lower always better) and it retires the
+  # uniform-radius override — nobody has a private radius left to be gated for.
+  link_model: path_loss
+  uniform_coverage_radius: true   # inert under path_loss; kept for range_gate runs
   capacity: 6
   n_rounds: 100
   n_local_epochs: 2
@@ -73,8 +87,6 @@ fl:
     name: sgd
     momentum: 0.9
   server_lr: 1.0
-  lr_decay: cosine
-  ema_decay: 0.9
   fusion_owner: uav
   placement_class_aware: true
   target_metric: macro_f1
@@ -98,10 +110,18 @@ optimizer_params:
     max_path_loss_db: 145.0
 
 methods:
-  - proposed_hfl      # adaptive class-aware PSO placement, repositioned every T_sel
-  - hfl_static        # PSO placement ONCE (isolates repositioning cadence)
-  - centroid_place    # naive: k-means centroids (isolates placement quality)
+  - mclp_place        # PROPOSED: candidate-set placement (1D altitude + 2D covering)
+  - proposed_hfl      # PSO placement, repositioned every T_sel
+  - ga_place          # GA over raw UAV coordinates
+  - de_place          # differential evolution control
+  - gwo_place         # grey wolf control
+  - pso_cluster_place # Sawalmeh et al., Sensors 22(1):223, 2021
+  - spiral_place      # Lyu et al., IEEE Comm. Lett. 21(3), 2017
+  - mozaffari2016     # Mozaffari et al., IEEE Comm. Lett. 20(8), 2016
+  - alzenad2017       # Alzenad et al., IEEE WCL 6(4), 2017
+  - cap_kmeans_place  # capacity-constrained k-means
+  - ahc_place         # agglomerative clustering + minimax centre
+  - centroid_place    # naive: k-means centroids
   - random_place      # naive: uniform-random UAV positions (placement floor)
-  - mozaffari2016     # physics baseline, radius-calibrated per R_comm
-  - alzenad2017       # physics baseline, radius-calibrated per R_comm
+  - hfl_static        # PSO placement ONCE (isolates repositioning cadence)
   - flat_fl           # no UAVs at all (coverage-independent reference)
