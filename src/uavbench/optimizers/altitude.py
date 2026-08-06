@@ -31,6 +31,43 @@ from ..problem.fitness import Fitness
 from ..problem.instance import ProblemInstance
 
 
+def optimal_shared_altitude(instance: ProblemInstance, link=None) -> tuple[float, float]:
+    """Solve the **vertical** subproblem: the altitude every UAV should fly.
+
+    The 3D placement problem decouples, and exactly. Altitude enters the
+    objective through one channel only — it sets the ground radius ``r(z)`` — and
+    the coverage term is monotonically non-decreasing in that radius, since a
+    larger disc can only enlarge the family of coverable device subsets. Every
+    UAV therefore wants the radius-maximizing altitude, no UAV wants any other,
+    and
+
+        max_{z, xy}  F(z, xy)   =   max_xy  F_2D( xy ; r(z*) ),
+        z* = argmax_z r(z)
+
+    so the vertical subproblem is a 1D unimodal maximization that can be solved
+    once, up front, and the remainder is a pure 2D covering problem. This is the
+    decoupling Mozaffari (2016) and Alzenad (2017) both assume; here it is a
+    consequence of the objective rather than a modelling convenience.
+
+    The decoupling is exact for the coverage term. The movement and imbalance
+    terms are altitude-sensitive in principle and could prefer some other ``z``,
+    but they carry w2=0.03 and w3=0.159 against w1=0.811 and measure ~0.04 and
+    ~0.002 normalized, so they cannot overturn a coverage difference.
+    :func:`optimize_altitudes` runs afterwards as a refinement and is expected to
+    find nothing — that it finds nothing is the empirical check on this argument.
+
+    Returns ``(z_star_m, ground_radius_m)``.
+    """
+    if link is not None:
+        z = float(link.z_star_m)
+        return z, float(link.radius(z))
+    # Legacy hard range gate: r(z) = sqrt(R_comm^2 - z^2) is strictly decreasing,
+    # so the unimodal maximum sits on the lower bound. Same argument, degenerate
+    # channel — and the reason that gate makes altitude a non-decision.
+    z = float(instance.lower[2])
+    return z, float(np.sqrt(max(instance.R_comm ** 2 - z * z, 0.0)))
+
+
 def optimize_altitudes(
     instance: ProblemInstance,
     fitness: Fitness,

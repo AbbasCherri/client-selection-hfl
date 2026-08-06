@@ -12,17 +12,29 @@ an ``O(N^2)`` finite set (see :mod:`.candidates`). A swarm searching the
 continuum is rediscovering, approximately and at 20k evaluations, positions this
 method writes down exactly.
 
+Architecture: the 3D problem is split in two, and the split is exact
+--------------------------------------------------------------------
+Altitude enters the objective through exactly one channel — it sets the ground
+radius ``r(z)`` — and coverage is monotonically non-decreasing in that radius.
+Every UAV therefore wants the radius-maximizing altitude ``z*``, none wants any
+other, and the joint problem collapses:
+
+    max_{z, xy} F(z, xy)  =  max_xy F_2D(xy ; r(z*))
+
+So placement is solved as **a 1D vertical problem then a 2D horizontal one**,
+which is the decoupling Mozaffari (2016) and Alzenad (2017) assume — here a
+consequence of the objective rather than a modelling convenience. Full argument
+and its limits in :func:`.altitude.optimal_shared_altitude`.
+
+Under the air-to-ground link model (:mod:`uavbench.problem.link`) the vertical
+problem is non-trivial: climbing raises P(LoS) and sheds the NLoS excess loss
+until free-space loss takes over, so ``r(z)`` is unimodal with an interior
+optimum. Under the legacy hard range gate it degenerates to the altitude floor.
+
 Pipeline
 --------
-1. **Altitude.** Coverage is a 3D range gate against ground devices, so a UAV at
-   altitude ``z`` projects a ground disc of radius ``sqrt(R_comm^2 - z^2)`` —
-   strictly decreasing in ``z``. The minimum feasible altitude is therefore
-   optimal for the coverage term, and the movement penalty for descending is
-   ~1e-4 of the objective. The layout is built at ``z_min`` and then re-scored
-   over an altitude grid, so the choice is *verified against the objective*
-   rather than assumed; if a future objective adds an altitude-dependent link
-   model, the grid picks up the trade-off instead of silently keeping ``z_min``.
-2. **Candidate set** at that radius (:func:`.build_candidate_set`).
+1. **Vertical (1D)** — ``z*`` in closed form from the link model.
+2. **Candidate set** at radius ``r(z*)`` (:func:`.build_candidate_set`).
 3. **Capacitated greedy seed** — each UAV in turn takes the candidate covering
    the most residual device *value*, counting only as many devices as it can
    actually serve. Truncating at capacity matters: an uncapacitated greedy piles
@@ -34,6 +46,8 @@ Pipeline
 5. **Movement polish** — slide each UAV back toward where it already is, as far
    as it can go without dropping a device it serves. Pure ``d_move`` savings at
    identical coverage.
+6. **Per-UAV altitude refinement** — expected to be a no-op by step 1's argument;
+   run so that "it changes nothing" is measured rather than assumed.
 
 It consumes the same ``P * (G_max + 1)`` evaluation budget as PSO/GA, so a win
 here is not a win bought with extra evaluations.
@@ -45,14 +59,9 @@ import numpy as np
 
 from ..problem.fitness import Fitness
 from ..problem.instance import ProblemInstance
-from .altitude import optimize_altitudes
+from .altitude import optimal_shared_altitude, optimize_altitudes
 from .base import Optimizer, Result
-from .candidates import (
-    build_candidate_set,
-    capped_covered_value,
-    coverage_matrix,
-    effective_radius,
-)
+from .candidates import build_candidate_set, capped_covered_value, coverage_matrix
 
 _EPS = 1e-12
 
@@ -156,33 +165,49 @@ class MCLPLocalSearch(Optimizer):
     # -- movement polish -------------------------------------------------
 
     def _polish_toward_prev(
-        self, instance: ProblemInstance, positions: np.ndarray, assignment: np.ndarray
+        self,
+        instance: ProblemInstance,
+        positions: np.ndarray,
+        assignment: np.ndarray,
+        link=None,
     ) -> np.ndarray:
         """Slide each UAV toward its previous position without dropping a device.
 
-        The set of points covering a fixed device set is an intersection of balls
+        The set of points covering a fixed device set is an intersection of discs
         and hence convex, so along the segment from the found position to the
         previous one the feasible portion is a single interval anchored at t=0.
         Bisection therefore finds the exact furthest feasible step.
+
+        Horizontal only: altitude is held at whatever the UAV is already flying,
+        because under the link model moving vertically changes the UAV's own
+        coverage radius and the disc would resize mid-slide. The altitude descent
+        is a separate stage that scores z on the full objective.
         """
         out = positions.copy()
         prev = instance.prev_positions
-        dev = instance.device_coords
-        R2 = instance.R_comm ** 2
+        dev_xy = instance.device_coords[:, :2]
         for j in range(instance.K):
-            served = dev[assignment == j]
+            served = dev_xy[assignment == j]
             if served.shape[0] == 0:
                 # Serving nobody: going home is free coverage-wise.
-                out[j] = prev[j]
+                out[j, :2] = prev[j, :2]
                 continue
-            p0, p1 = positions[j], prev[j]
+            p0, p1 = positions[j, :2], prev[j, :2]
             if np.allclose(p0, p1):
                 continue
+
+            z_j = positions[j, 2]
+            r_j = (
+                float(link.radius(z_j))
+                if link is not None
+                else float(np.sqrt(max(instance.R_comm ** 2 - z_j * z_j, 0.0)))
+            )
+            r2 = r_j * r_j
 
             def feasible(t: float) -> bool:
                 p = p0 + t * (p1 - p0)
                 d = served - p
-                return bool(np.max(np.sum(d * d, axis=1)) <= R2)
+                return bool(np.max(np.sum(d * d, axis=1)) <= r2)
 
             if feasible(1.0):
                 out[j] = p1
@@ -203,8 +228,16 @@ class MCLPLocalSearch(Optimizer):
         K, dim = instance.K, instance.dim
         device_xy = instance.device_coords[:, :2]
         z_min, z_max = float(instance.lower[2]), float(instance.upper[2])
-        r_eff = effective_radius(instance.R_comm, z_min)
 
+        # === STAGE 1: the vertical subproblem (1D) ===========================
+        # Solved in closed form off the link model. See optimal_shared_altitude
+        # for why this decoupling is exact rather than an approximation.
+        link = getattr(fitness, "link", None)
+        z0, r_eff = optimal_shared_altitude(instance, link)
+
+        # === STAGE 2: the horizontal subproblem (2D) =========================
+        # A pure planar capacitated covering problem at the fixed radius r(z*),
+        # which the circle-intersection candidate set renders finite and exact.
         cands = build_candidate_set(
             device_xy,
             r_eff,
@@ -221,7 +254,7 @@ class MCLPLocalSearch(Optimizer):
         value_sorted = instance.value[order]
 
         chosen = self._greedy_seed(instance, cover_sorted, value_sorted)
-        positions = np.column_stack([cands[chosen], np.full(K, z_min)])
+        positions = np.column_stack([cands[chosen], np.full(K, z0)])
 
         best_pos = positions.copy()
         best_fit = float(fitness(best_pos.reshape(dim)))
@@ -277,17 +310,20 @@ class MCLPLocalSearch(Optimizer):
         # --- movement polish -------------------------------------------------
         if self.polish:
             comp = fitness.components(best_pos.reshape(dim))
-            polished = self._polish_toward_prev(instance, best_pos, comp.assignment.assignment)
+            polished = self._polish_toward_prev(
+                instance, best_pos, comp.assignment.assignment, link=link
+            )
             f_pol = float(fitness(polished.reshape(dim)))
             if f_pol > best_fit:
                 best_pos, best_fit = polished, f_pol
             convergence.append(best_fit)
 
-        # --- altitude: per-UAV, on the shared objective -----------------------
-        # The candidate set is built at z_min because that maximises the ground
-        # disc, but z is a real decision variable and each UAV's is chosen
-        # independently — a fleet-wide altitude sweep would make this a 2D
-        # placement with a scalar height attached.
+        # === STAGE 3: per-UAV altitude refinement ============================
+        # Stage 1 argued every UAV wants z*, so this should find nothing. It runs
+        # anyway because the argument covers the coverage term only — the
+        # movement and imbalance terms are altitude-sensitive in principle — and
+        # because "the refinement changes nothing" is the empirical check on the
+        # decoupling claim rather than something to assume.
         if self.n_altitudes > 1 and z_max > z_min:
             best_pos = optimize_altitudes(
                 instance, fitness, best_pos,

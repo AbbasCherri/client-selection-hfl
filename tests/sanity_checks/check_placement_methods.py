@@ -155,6 +155,68 @@ def altitude_optimization_never_makes_a_layout_worse():
         )
 
 
+def the_link_model_gives_altitude_an_interior_optimum():
+    """Without this, "3D placement" is planar placement with a height column.
+
+    Under the hard range gate the ground disc ``sqrt(R_comm^2 - z^2)`` shrinks
+    monotonically, so the vertical dimension is degenerate and any correct
+    optimizer pins z to the floor. The air-to-ground channel makes climbing buy
+    line-of-sight before free-space loss reclaims it, which is the entire reason
+    altitude is a decision variable in this literature.
+    """
+    from uavbench.problem.link import LinkModel
+
+    link = LinkModel(r_comm_m=500.0, z_min_m=20.0, z_max_m=300.0)
+    z = np.linspace(20.0, 300.0, 60)
+    r = link.radius(z)
+    assert 20.0 < link.z_star_m < 300.0, (
+        f"the radius-maximizing altitude is {link.z_star_m:.0f} m, on the band edge — "
+        "the channel is not producing an interior optimum and altitude is degenerate"
+    )
+    assert r.max() > r[0] + 1.0 and r.max() > r[-1] + 1.0, (
+        "coverage radius is monotone in altitude; the LoS/free-space trade-off is absent"
+    )
+    assert abs(link.r_max_m - 500.0) < 1.0, (
+        f"calibration failed: best achievable radius {link.r_max_m:.1f} m != the "
+        "configured R_comm of 500 m, so configured sweep values no longer mean what "
+        "they meant under the range gate"
+    )
+
+
+def the_3d_problem_decouples_as_claimed():
+    """Refining altitude per UAV after the 2D solve must find nothing.
+
+    mclp_ls solves a 1D vertical problem then a 2D horizontal one, on the
+    argument that every UAV wants the radius-maximizing altitude. If per-UAV
+    refinement against the *full* objective can beat the shared z*, the
+    decoupling is not exact and the architecture — and the paper's framing of it
+    — is wrong. This is the measurement, not an assumption.
+    """
+    from uavbench.optimizers.altitude import optimize_altitudes
+    from uavbench.optimizers.mclp_ls import MCLPLocalSearch
+    from uavbench.problem.link import LinkModel
+
+    for seed in (0, 1, 2):
+        inst = _instance(seed=seed, R_comm=800.0)
+        link = LinkModel(800.0, float(inst.lower[2]), float(inst.upper[2]))
+        fit = Fitness(inst, **W, link=link)
+        res = MCLPLocalSearch(n_altitudes=0, **BUDGET).optimize(
+            inst, fit, np.random.default_rng(3)
+        )
+        shared = float(Fitness(inst, **W, link=link)(res.best_position))
+
+        refine_fit = Fitness(inst, **W, link=link)
+        refined = optimize_altitudes(
+            inst, refine_fit, res.best_position.reshape(inst.K, 3), n_levels=25, n_passes=3
+        )
+        got = float(Fitness(inst, **W, link=link)(refined.reshape(-1)))
+        assert got <= shared + 1e-6, (
+            f"[seed {seed}] per-UAV altitude refinement improved on the shared z* "
+            f"({shared:.6f} -> {got:.6f}). The vertical/horizontal decoupling is not "
+            "exact and mclp_ls's two-stage architecture is unsound as described"
+        )
+
+
 def path_loss_baselines_are_flagged_as_unequal_radius():
     """The 618-vs-500 m artifact must stay visible, not be silently reintroduced.
 
@@ -409,6 +471,9 @@ if __name__ == "__main__":
     check("every method returns K in-bounds positions", every_method_returns_k_positions_in_bounds)
     check("every method deploys in three dimensions", every_method_deploys_in_three_dimensions)
     check("altitude descent never worsens a layout", altitude_optimization_never_makes_a_layout_worse)
+    check("link model gives altitude an interior optimum",
+          the_link_model_gives_altitude_an_interior_optimum)
+    check("the 3D problem decouples as claimed", the_3d_problem_decouples_as_claimed)
     check("path-loss baselines still publish radii", path_loss_baselines_are_flagged_as_unequal_radius)
     check("equal-radius re-score is not inert", equal_radius_rescore_changes_the_ranking_metric)
     check("intersection points cover both generators", intersection_points_are_wedged_against_both_devices)
