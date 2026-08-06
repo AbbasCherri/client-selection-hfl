@@ -10,8 +10,6 @@ import numpy as np
 from _lib import check, finish
 
 from uavbench.fl.client_selection import (
-    FAIRMAB_W_ENERGY,
-    FAIRMAB_W_STALE,
     REPCAP_GAMMA,
     ClientSelector,
 )
@@ -62,25 +60,85 @@ def rep_cap_formula_and_static_ranking():
     assert sel._counts[3] == 0
 
 
-def fair_mab_reward_and_fairness_pressure():
-    # reward = w_e*battery + w_s*min(1, staleness/T_stale_cap) (Zhu 2024),
-    # staleness cap tied to the T_sel cadence via t_stale_cap.
+def fair_mab_matches_the_published_formulation():
+    """B3 must be Zhu et al.'s algorithm, not something wearing its name.
+
+    Verified against Sensors 24(5):1599 on 2026-08-06. The previous
+    implementation used 0.5/0.5 weights, a capped staleness term, battery as the
+    energy proxy, and no exploration bonus — while the source is a UCB bandit
+    over normalized transmission energy and unbounded participation freshness.
+    Each published component is pinned here so a future "simplification" cannot
+    quietly reintroduce a different algorithm.
+    """
     sel = ClientSelector([0])
-    scores = sel._fair_mab_scores([0], {0: _state(battery=0.7)}, round_num=3, t_stale_cap=5)
-    assert abs(scores[0] - (FAIRMAB_W_ENERGY * 0.7 + FAIRMAB_W_STALE * 0.6)) < 1e-12
-    scores = sel._fair_mab_scores([0], {0: _state(battery=0.0)}, round_num=100, t_stale_cap=5)
-    assert abs(scores[0] - FAIRMAB_W_STALE * 1.0) < 1e-12  # staleness capped at 1
-    # Fairness pressure: neither of two devices is starved over 7 rounds.
+    st = {0: _state(snr_db=20.0)}
+
+    # A never-participated arm must be pulled first — the 1/sqrt(C_m) bonus
+    # diverges at C_m = 0, which is what forces the bandit to explore.
+    assert np.isinf(sel._fair_mab_scores([0], st, round_num=5)[0]), (
+        "an unvisited client did not receive an infinite exploration bonus; the "
+        "UCB term of Eq. 16 is missing and B3 is no longer a bandit"
+    )
+
+    # Freshness (Eq. 14) is UNBOUNDED: t - a*C_m. Capping it is exactly what
+    # made the old version inert, so a large t must keep growing the score.
+    sel = ClientSelector([0])
+    sel._counts[0] = 1
+    early = sel._fair_mab_scores([0], st, round_num=10)[0]
+    late = sel._fair_mab_scores([0], st, round_num=100)[0]
+    assert late - early > 50.0, (
+        f"freshness grew only {late - early:.3f} between round 10 and 100; the "
+        "unbounded t - a*C_m term of Eq. 14 has been capped again"
+    )
+
+    # A device that has participated often must lose to an equally-provisioned
+    # device that has not — the whole point of the fairness enhancement.
     sel = ClientSelector([0, 1])
-    states = {0: _state(battery=0.9), 1: _state(battery=0.7)}
-    winners = []
-    for rnd in range(1, 8):
-        result = sel.select(
-            {0: 0, 1: 0}, states, {0: 0.5, 1: 0.5}, _coords(2), [], rnd, 1,
-            mode="fair_mab", t_stale_cap=5,
-        )
-        winners.append(next(iter(result.keys())))
-    assert 0 in winners and 1 in winners
+    sel._counts[0], sel._counts[1] = 20, 1
+    scores = sel._fair_mab_scores([0, 1], {0: _state(snr_db=20.0), 1: _state(snr_db=20.0)},
+                                  round_num=50)
+    assert scores[1] > scores[0], (
+        "a device with 20 participations outscored one with 1 at equal channel; "
+        "the freshness term is not creating fairness pressure"
+    )
+
+    # Better channel => less transmission energy => higher energy term (Eq. 13).
+    sel = ClientSelector([0, 1])
+    sel._counts[0] = sel._counts[1] = 5
+    scores = sel._fair_mab_scores([0, 1], {0: _state(snr_db=30.0), 1: _state(snr_db=3.0)},
+                                  round_num=20)
+    assert scores[0] > scores[1], (
+        "a device on a 30 dB channel did not outscore one on 3 dB at equal "
+        "participation; the normalized-energy term of Eq. 13 is inert"
+    )
+
+
+def fair_mab_is_not_rank_equivalent_to_battery():
+    """The exact failure that went unnoticed for months.
+
+    The old reward collapsed to battery order, so B3 was reported as a
+    fairness/energy bandit while actually being "highest battery first". Battery
+    is now not an input to the score at all, and this asserts it: varying only
+    battery must not reorder the ranking.
+    """
+    sel = ClientSelector([0, 1, 2])
+    for cid in (0, 1, 2):
+        sel._counts[cid] = 3
+    same_snr = {c: _state(snr_db=15.0) for c in (0, 1, 2)}
+    base = sel._fair_mab_scores([0, 1, 2], same_snr, round_num=30)
+
+    sel2 = ClientSelector([0, 1, 2])
+    for cid in (0, 1, 2):
+        sel2._counts[cid] = 3
+    varied_battery = {0: _state(snr_db=15.0, battery=0.2),
+                      1: _state(snr_db=15.0, battery=0.6),
+                      2: _state(snr_db=15.0, battery=0.99)}
+    got = sel2._fair_mab_scores([0, 1, 2], varied_battery, round_num=30)
+    assert np.allclose(base, got), (
+        f"battery changed the fair_mab score ({base} -> {got}). Zhu et al.'s "
+        "reward is over transmission energy and freshness; battery is a "
+        "stored state, and scoring by it is the degenerate rule this replaced"
+    )
 
 
 def fair_mab_arms_actually_vary_something():
@@ -91,18 +149,12 @@ def fair_mab_arms_actually_vary_something():
     failure: it looks like the honest finding "this baseline is insensitive to
     its own hyperparameters" while actually measuring the same run four times.
 
-    The two causes are both invisible in a results table:
-      * ``DEFAULT_T_STALE_CAP`` is only a function default, shadowed at both
-        call sites by an explicit ``t_stale_cap=`` argument;
-      * at the 1x cap, staleness is identically 1.0 for every client at every
-        selection event, so the reward ranking is battery order whatever the
-        weights are.
-
-    So this drives the REAL cadence (selection every T_sel rounds, cap derived
-    from FAIRMAB_STALE_CAP_MULT as the call sites do) and demands that each
-    arm's picks differ from the stock arm's.
+    Both original causes are gone with the published formulation restored (the
+    cap was ours and no longer exists, and the reward is no longer battery
+    order), but the *class* of failure — an arm whose constants reach nothing —
+    is not specific to them, so the guard stays: drive the real selection
+    cadence and demand each arm's picks differ from the stock arm's.
     """
-    import uavbench.fl.client_selection as cs
     from uavbench.fl.selection_isolation import (
         ARM_SPECS,
         apply_const_overrides,
@@ -124,7 +176,6 @@ def fair_mab_arms_actually_vary_something():
             chosen = sel.select(
                 covered, states, reps, _coords(n), [], event * t_sel, cap_per_uav,
                 mode="fair_mab", rng=np.random.default_rng(0),
-                t_stale_cap=t_sel * cs.FAIRMAB_STALE_CAP_MULT,
             )
             picks.append(frozenset(chosen))
         return picks
@@ -147,31 +198,6 @@ def fair_mab_arms_actually_vary_something():
             )
         finally:
             restore_const_overrides(restores)
-
-
-def staleness_is_flat_at_the_1x_cap():
-    """Pin the known degeneracy so it stays documented rather than surprising.
-
-    FAIRMAB_STALE_CAP_MULT stays at 1 so pre-2026-08-04 results remain
-    reproducible; this records WHY that default cannot be read as a working
-    fairness mechanism.
-    """
-    sel = ClientSelector([0, 1])
-    sel._last_selected = {0: 5, 1: 0}  # 0 just picked, 1 never picked
-    fresh = sel._fair_mab_scores([0], {0: _state(battery=0.5)}, round_num=10, t_stale_cap=5)
-    starved = sel._fair_mab_scores([1], {1: _state(battery=0.5)}, round_num=10, t_stale_cap=5)
-    assert abs(fresh[0] - starved[0]) < 1e-12, (
-        "at cap == T_sel a just-selected and a never-selected client are "
-        "expected to score identically; if they no longer do, the 1x default "
-        "changed and every historical fair_mab result needs re-running"
-    )
-    # ... and that a wider cap restores the distinction.
-    fresh_w = sel._fair_mab_scores([0], {0: _state(battery=0.5)}, round_num=10, t_stale_cap=20)
-    starved_w = sel._fair_mab_scores([1], {1: _state(battery=0.5)}, round_num=10, t_stale_cap=20)
-    assert starved_w[0] > fresh_w[0], (
-        "a wider cap must let the starved client outscore the fresh one, "
-        "otherwise the staleness term is inert at every cap"
-    )
 
 
 def capacity_respected_by_all_modes():
@@ -254,9 +280,9 @@ def eligibility_gate_thresholds():
 
 check("FedCS: greedy fastest-first under deadline, eligibility respected", fedcs_fastest_first_and_deadline)
 check("rep_cap: exact score formula (gamma=0.5), static no-exploration ranking", rep_cap_formula_and_static_ranking)
-check("fair_mab: exact reward formula, staleness cap, fairness pressure", fair_mab_reward_and_fairness_pressure)
+check("fair_mab matches the published formulation", fair_mab_matches_the_published_formulation)
+check("fair_mab is not rank-equivalent to battery", fair_mab_is_not_rank_equivalent_to_battery)
 check("fair_mab arms actually vary the selection", fair_mab_arms_actually_vary_something)
-check("staleness is flat at the 1x cap (documented degeneracy)", staleness_is_flat_at_the_1x_cap)
 check("all modes respect per-UAV capacity", capacity_respected_by_all_modes)
 check("mode 'all' is eligibility-gated; unknown mode raises", mode_all_and_unknown_mode)
 check("oort/power_of_choice: loss ranking, straggler penalty, prior", oort_and_power_of_choice_loss_ranking)

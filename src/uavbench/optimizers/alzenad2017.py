@@ -9,7 +9,7 @@ separately — the *lowest* altitude whose path-loss-derived radius still
 covers the served devices (energy-efficient: minimum transmit power).
 
 Adaptation notes (report in the paper's baseline-methodology section,
-matching the REPCAP_GAMMA / FAIRMAB_W_* convention in client_selection.py):
+matching the REPCAP_GAMMA / FAIRMAB_ALPHA convention in client_selection.py):
 the source paper places a single UAV-BS; here devices are partitioned into
 K value-weighted k-means clusters and the paper's decoupled 2D+altitude
 rule is applied per cluster, yielding genuinely non-uniform per-UAV radii.

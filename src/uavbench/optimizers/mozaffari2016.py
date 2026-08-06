@@ -8,7 +8,7 @@ air-to-ground path-loss model (see :mod:`uavbench.problem.path_loss`),
 then UAV disc positions are chosen to maximize covered ground area.
 
 Adaptation note (report in the paper's baseline-methodology section, the
-same convention as REPCAP_GAMMA / FAIRMAB_W_* in client_selection.py):
+same convention as REPCAP_GAMMA / FAIRMAB_ALPHA in client_selection.py):
 the paper's core result is the single-(h*, r*) derivation; its multi-UAV
 deployment packs equal discs to maximize total coverage. Here that packing
 is realized as greedy maximal covering discretized at the device
