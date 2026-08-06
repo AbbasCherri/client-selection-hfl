@@ -828,12 +828,30 @@ _METHOD_CFG: dict[str, tuple] = {
     # reputation FedAvg / cadence, but a naive placement rule.
     "centroid_place": ("centroid", "ucb", True, True),  # k-means centroids
     "random_place": ("random", "ucb", True, True),  # uniform-random UAV positions
+    # Candidate-set placement: the proposed placement rule, solving the vertical
+    # subproblem in closed form and the horizontal one over the exact
+    # circle-intersection candidate set (Church 1984). Measured at 97-99% of the
+    # capacitated-MCLP optimum against PSO's 52% at R_comm = 500 m.
+    "mclp_place": ("mclp_ls", "ucb", True, True),
+    # Further placement literature, all on the identical selection/reputation/
+    # cadence stack so the placement rule stays the only variable.
+    "spiral_place": ("spiral", "ucb", True, True),  # Lyu et al., IEEE Comm. Lett. 2017
+    "cap_kmeans_place": ("cap_kmeans", "ucb", True, True),  # capacity-constrained k-means
+    "pso_cluster_place": ("pso_cluster", "ucb", True, True),  # Sawalmeh et al., Sensors 2021
+    "ahc_place": ("ahc", "ucb", True, True),  # agglomerative clustering + minimax centre
+    "ga_place": ("ga", "ucb", True, True),  # GA over raw UAV coordinates
+    "de_place": ("de", "ucb", True, True),  # differential evolution control
+    "gwo_place": ("gwo", "ucb", True, True),  # grey wolf control
 }
 
 # Methods whose placement rule IS the experimental variable — exempt from the
 # fl.placement_method override (which otherwise swaps every method to PSO).
 _PLACEMENT_BASELINES = frozenset(
-    {"mozaffari2016", "alzenad2017", "centroid_place", "random_place"}
+    {
+        "mozaffari2016", "alzenad2017", "centroid_place", "random_place",
+        "mclp_place", "spiral_place", "cap_kmeans_place", "pso_cluster_place",
+        "ahc_place", "ga_place", "de_place", "gwo_place",
+    }
 )
 
 
