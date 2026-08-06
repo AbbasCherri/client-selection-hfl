@@ -124,7 +124,19 @@ def mclp_reference(
     d = np.sqrt(((coords[:, None, :] - site_xyz[None, :, :]) ** 2).sum(axis=2))
     cover = (d <= r).astype(np.float64)
 
-    # variables: [y_0..y_{m-1}, x flattened (n*m)]; all binary
+    # variables: [y_0..y_{m-1}, x flattened (n*m)]. y_j is an INTEGER count of
+    # UAVs stationed at site j, not a 0/1 "is this site used".
+    #
+    # Binary y_j silently makes this a *lower* bound, not an upper one, whenever
+    # capacity binds: a dense cluster holding more than `cap` devices needs two
+    # UAVs on top of each other, and one-UAV-per-site forbids that. With
+    # dominance-pruned candidate sites the effect is severe — a 6-UAV instance
+    # pruned to 3 distinct maximal sites could serve at most 3*cap devices, and
+    # the "optimum" came out at 70% while the heuristics it was bounding reached
+    # 100%. Allowing multiplicity restores a genuine upper bound (co-located UAVs
+    # are a relaxation of any physical deployment, which only loosens it) and is
+    # also what makes dominance pruning valid: a solution stationing k UAVs at a
+    # site can always move them to a site covering a superset.
     nx = n * m
     n_var = m + nx
     c = np.concatenate([np.zeros(m), -np.repeat(value, m)])  # minimize -covered value
@@ -142,7 +154,7 @@ def mclp_reference(
             rows.append(ri); cols.append(m + i * m + j); data.append(1.0)
         rows.append(ri); cols.append(j); data.append(-cap)
         ub.append(0.0); ri += 1
-    # (A3) at most K sites: sum_j y_j <= K
+    # (A3) at most K UAVs in total: sum_j y_j <= K
     for j in range(m):
         rows.append(ri); cols.append(j); data.append(1.0)
     ub.append(float(instance.K)); ri += 1
@@ -154,7 +166,9 @@ def mclp_reference(
 
     # x_ij fixed to 0 where not covered
     x_ub = cover.ravel()
-    bounds = Bounds(np.zeros(n_var), np.concatenate([np.ones(m), x_ub]))
+    bounds = Bounds(
+        np.zeros(n_var), np.concatenate([np.full(m, float(instance.K)), x_ub])
+    )
     integrality = np.ones(n_var)
 
     res = milp(
