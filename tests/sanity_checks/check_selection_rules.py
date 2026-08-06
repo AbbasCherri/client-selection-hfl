@@ -174,7 +174,14 @@ def fair_mab_arms_actually_vary_something():
     # 10 slots for 40 eligible clients, so score ORDER decides who trains —
     # with more slots than clients every arm would trivially agree.
     covered = {i: i % n_uav for i in range(n)}
-    states = {i: _state(battery=0.30 + 0.7 * (i % 17) / 16.0) for i in range(n)}
+    # SNR must vary, not just battery: fair_mab's energy term is over the
+    # *channel* (battery is deliberately not an input any more), so a pool of
+    # identical channels makes alpha inert and the arm check vacuous.
+    states = {
+        i: _state(battery=0.30 + 0.7 * (i % 17) / 16.0,
+                  snr_db=5.0 + 25.0 * (i % 13) / 12.0)
+        for i in range(n)
+    }
     reps = {i: 0.5 for i in range(n)}
 
     def cadence():
