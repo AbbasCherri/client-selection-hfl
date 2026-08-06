@@ -149,46 +149,53 @@ def fair_mab_is_not_rank_equivalent_to_battery():
     )
 
 
-def fair_mab_is_rank_invariant_to_its_constants():
-    """B3 ranks by participation count; neither alpha nor a can change that.
+def fair_mab_alpha_is_inert_under_this_benchmarks_cadence():
+    """Why B3 has no alpha sensitivity arms — measured, and narrower than it looks.
 
-    Measured, not assumed. Both of Zhu et al.'s stated constants enter a score
-    whose varying parts are dominated by C_m, so sweeping them would produce
-    bit-identical arms — the same vacuous comparison the old T_stale_cap arms
-    gave. This records the invariance so nobody re-adds those arms, and fails if
-    the reward ever becomes genuinely sensitive (in which case arms are worth
-    having again).
+    A first attempt asserted alpha could never reorder the ranking. That is
+    false: with participation counts spread and Ebar varied by hand, alpha=0.9
+    does reorder, because the exploration bonus is alpha-independent so raising
+    alpha shrinks the freshness spread while growing the energy spread.
+
+    What is true is narrower and is what actually matters here. Under this
+    benchmark's selection cadence — reselection every T_sel rounds, far more
+    eligible clients than slots — the participation terms dominate and alpha
+    changes nothing. Arms sweeping it would return bit-identical results, which
+    is the vacuous comparison the old T_stale_cap arms produced. So the arms are
+    omitted, and the reason is pinned here rather than left to be rediscovered.
     """
     import uavbench.fl.client_selection as cs
 
-    n = 30
-    ids = list(range(n))
+    n, n_uav, cap_per_uav, t_sel = 40, 2, 5, 5
+    covered = {i: i % n_uav for i in range(n)}
     states = {
-        i: _state(snr_db=5.0 + 25.0 * (i % 13) / 12.0, battery=0.5 + 0.4 * (i % 7) / 6.0)
-        for i in ids
+        i: _state(battery=0.30 + 0.7 * (i % 17) / 16.0,
+                  snr_db=5.0 + 25.0 * (i % 13) / 12.0)
+        for i in range(n)
     }
+    reps = {i: 0.5 for i in range(n)}
 
-    def ranking(alpha, a_fresh):
-        sel = ClientSelector(ids)
-        for i in ids:
-            sel._counts[i] = i % 4          # spread participation counts
-            sel._fairmab_e_bar[i] = (i % 5) / 4.0
-        old_al, old_a = cs.FAIRMAB_ALPHA, cs.FAIRMAB_FRESHNESS_A
-        cs.FAIRMAB_ALPHA, cs.FAIRMAB_FRESHNESS_A = alpha, a_fresh
+    def cadence(alpha):
+        old = cs.FAIRMAB_ALPHA
+        cs.FAIRMAB_ALPHA = alpha
         try:
-            return tuple(np.argsort(-sel._fair_mab_scores(ids, states, round_num=40)))
+            sel = ClientSelector(list(range(n)))
+            return [
+                frozenset(sel.select(covered, states, reps, _coords(n), [], e * t_sel,
+                                     cap_per_uav, mode="fair_mab",
+                                     rng=np.random.default_rng(0)))
+                for e in range(6)
+            ]
         finally:
-            cs.FAIRMAB_ALPHA, cs.FAIRMAB_FRESHNESS_A = old_al, old_a
+            cs.FAIRMAB_ALPHA = old
 
-    base = ranking(0.6, 1.0)
-    for alpha in (0.1, 0.3, 0.9):
-        assert ranking(alpha, 1.0) == base, (
-            f"alpha={alpha} reordered the fair_mab ranking. B3 is now sensitive to "
-            "alpha, so the sensitivity arms removed from ARM_SPECS should be restored"
-        )
-    for a_fresh in (2.0, 5.0):
-        assert ranking(0.6, a_fresh) == base, (
-            f"a={a_fresh} reordered the fair_mab ranking; see the note above"
+    base = cadence(0.6)
+    assert all(len(p) < n for p in base), "score never binds; the check cannot detect anything"
+    for alpha in (0.3, 0.9):
+        assert cadence(alpha) == base, (
+            f"alpha={alpha} changed the selection under the real cadence. B3 is "
+            "sensitive to alpha after all, so sensitivity arms are worth adding "
+            "back to ARM_SPECS"
         )
 
 
@@ -340,7 +347,7 @@ check("FedCS: greedy fastest-first under deadline, eligibility respected", fedcs
 check("rep_cap: exact score formula (gamma=0.5), static no-exploration ranking", rep_cap_formula_and_static_ranking)
 check("fair_mab matches the published formulation", fair_mab_matches_the_published_formulation)
 check("fair_mab is not rank-equivalent to battery", fair_mab_is_not_rank_equivalent_to_battery)
-check("fair_mab is rank-invariant to its constants", fair_mab_is_rank_invariant_to_its_constants)
+check("fair_mab alpha is inert under this cadence", fair_mab_alpha_is_inert_under_this_benchmarks_cadence)
 check("fair_mab arms actually vary the selection", fair_mab_arms_actually_vary_something)
 check("all modes respect per-UAV capacity", capacity_respected_by_all_modes)
 check("mode 'all' is eligibility-gated; unknown mode raises", mode_all_and_unknown_mode)
