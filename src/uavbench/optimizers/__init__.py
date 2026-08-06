@@ -9,6 +9,7 @@ from .mclp_ls import MCLPLocalSearch
 from .mozaffari2016 import Mozaffari2016
 from .pso import PSO
 from .pso_plus import PSOPlus
+from .recent_baselines import HierarchicalPlacement, PSOClusterPlacement
 from .swarm_baselines import DifferentialEvolution, GreyWolfOptimizer
 
 # Registry keyed by the names used in configs.
@@ -22,6 +23,8 @@ REGISTRY: dict[str, type[Optimizer]] = {
     "centroid": Centroid,
     "cap_kmeans": CapacitatedKMeans,
     "spiral": SpiralPlacement,
+    "pso_cluster": PSOClusterPlacement,
+    "ahc": HierarchicalPlacement,
     "random": RandomPlacement,
     "static": Static,
     "mozaffari2016": Mozaffari2016,
@@ -34,7 +37,7 @@ REGISTRY: dict[str, type[Optimizer]] = {
 # would confound "the new features help" with "it got more evaluations".
 # mclp_ls is budgeted for the same reason in the opposite direction — it is the
 # proposed method, so it must be shown to win *at* PSO's spend, not past it.
-_BUDGETED_METHODS = ("pso", "pso_plus", "ga", "de", "gwo", "mclp_ls")
+_BUDGETED_METHODS = ("pso", "pso_plus", "ga", "de", "gwo", "mclp_ls", "pso_cluster")
 
 
 def build_optimizer(
@@ -78,6 +81,8 @@ __all__ = [
     "Centroid",
     "CapacitatedKMeans",
     "SpiralPlacement",
+    "PSOClusterPlacement",
+    "HierarchicalPlacement",
     "RandomPlacement",
     "Static",
     "Mozaffari2016",

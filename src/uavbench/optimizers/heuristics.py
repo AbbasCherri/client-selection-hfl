@@ -10,6 +10,7 @@ import numpy as np
 
 from ..problem.fitness import Fitness
 from ..problem.instance import ProblemInstance
+from .altitude import optimize_altitudes
 from .base import Optimizer, Result
 from .seeding import weighted_kmeans
 
@@ -23,10 +24,20 @@ class Centroid(Optimizer):
 
     name = "centroid"
 
-    def __init__(self, altitude_frac: float = 0.5, value_weighted: bool = True, **kw) -> None:
+    def __init__(
+        self,
+        altitude_frac: float = 0.5,
+        value_weighted: bool = True,
+        optimize_z: bool = True,
+        **kw,
+    ) -> None:
         super().__init__(**kw)
         self.altitude_frac = altitude_frac
         self.value_weighted = value_weighted
+        # k-means is a planar clustering rule with no altitude of its own; the
+        # old fixed mid-band z made this a 2D placement competing in a 3D
+        # benchmark. See :mod:`.altitude`.
+        self.optimize_z = optimize_z
 
     def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         device_xy = instance.device_coords[:, :2]
@@ -34,6 +45,8 @@ class Centroid(Optimizer):
         centers = weighted_kmeans(rng, device_xy, instance.K, weights)
         z = instance.lower[2] + self.altitude_frac * (instance.upper[2] - instance.lower[2])
         positions = np.column_stack([centers, np.full(instance.K, z)])
+        if self.optimize_z:
+            positions = optimize_altitudes(instance, fitness, positions)
         x = positions.reshape(instance.dim)
         f = fitness(x)
         return Result(
@@ -42,6 +55,7 @@ class Centroid(Optimizer):
             best_fitness=f,
             convergence=[f],
             n_iterations=1,
+            meta={"altitude_m": float(positions[:, 2].mean())},
         )
 
 
