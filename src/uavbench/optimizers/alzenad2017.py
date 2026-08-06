@@ -66,6 +66,7 @@ class Alzenad2017(Optimizer):
         return lo, hi
 
     def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
+        link = getattr(fitness, "link", None)
         env = ENV_PRESETS[self.environment]
         h_lo, h_hi = self._altitude_bounds(instance)
 
@@ -86,25 +87,38 @@ class Alzenad2017(Optimizer):
             # If no altitude in-band reaches req_r, min_altitude_for_radius
             # falls back to the best achievable radius (partial coverage,
             # reported honestly through the shared fitness).
-            h_k, r_k = min_altitude_for_radius(
-                max(req_r, 1.0),
-                self.max_path_loss_db,
-                self.freq_ghz * 1e9,
-                **env,
-                h_min_m=h_lo,
-                h_max_m=h_hi,
-            )
+            if link is not None:
+                # Same rule — lowest altitude that reaches the cluster's required
+                # radius — resolved against the shared channel instead of this
+                # method's private path-loss budget, so no radii override is
+                # published and the equal-radius question does not arise.
+                h_k = link.min_altitude_for_radius(max(req_r, 1.0))
+                r_k = float(link.radius(h_k))
+            else:
+                h_k, r_k = min_altitude_for_radius(
+                    max(req_r, 1.0),
+                    self.max_path_loss_db,
+                    self.freq_ghz * 1e9,
+                    **env,
+                    h_min_m=h_lo,
+                    h_max_m=h_hi,
+                )
             z[k] = h_k
             radii[k] = r_k
 
         positions = np.column_stack([centers, z])
         x = positions.reshape(instance.dim)
-        f = fitness(x, radii=radii)
+        if link is not None:
+            f = fitness(x)
+            meta = {"altitudes_m": z.tolist()}
+        else:
+            f = fitness(x, radii=radii)
+            meta = {"radii": radii, "altitudes_m": z.tolist()}
         return Result(
             method=self.name,
             best_position=x,
             best_fitness=f,
             convergence=[f],
             n_iterations=1,
-            meta={"radii": radii, "altitudes_m": z.tolist()},
+            meta=meta,
         )

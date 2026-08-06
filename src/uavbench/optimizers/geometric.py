@@ -20,9 +20,9 @@ import numpy as np
 
 from ..problem.fitness import Fitness
 from ..problem.instance import ProblemInstance
-from .altitude import optimize_altitudes
+from .altitude import optimal_shared_altitude, optimize_altitudes
 from .base import Optimizer, Result
-from .candidates import circle_intersection_points, effective_radius
+from .candidates import circle_intersection_points
 from .seeding import kmeanspp_centers
 
 _EPS = 1e-12
@@ -38,32 +38,30 @@ class SpiralPlacement(Optimizer):
       fixed by the fleet, so the spiral is truncated at ``K`` discs. Under a
       fleet too small to cover everything this becomes a coverage heuristic
       rather than a feasibility one, which is the regime the benchmark runs in.
-    * The paper's per-step disc is the smallest enclosing circle of a terminal
-      subset. Here the step picks, among discs of radius ``r`` whose boundary
-      passes through the anchor terminal, the one covering the most residual
-      **value** — value-weighted because that is this benchmark's coverage
-      objective, and the disc-through-anchor family is exactly the set the
-      smallest-enclosing-circle construction searches.
-    * Radius comes from the shared 3D range gate at the lowest feasible
-      altitude, not from a path-loss derivation. That keeps it scored on the
-      same ruler as every other method — the equal-radius requirement.
+      This truncation is forced by the benchmark, not a choice.
+    * The per-step disc is chosen among those of radius ``r`` whose boundary
+      passes through the anchor terminal — the family the paper's
+      smallest-enclosing-circle construction searches — maximizing the **count**
+      of newly covered terminals, as published. It is deliberately *not*
+      value-weighted: Lyu et al. treat all ground terminals alike, and weighting
+      by this benchmark's per-device value would be a different algorithm
+      wearing the paper's name. That the benchmark's objective *is*
+      value-weighted while this baseline optimizes an unweighted count is a
+      property of the baseline, faithfully represented.
+    * Altitude is unspecified by the paper, which works in the plane at an
+      assumed coverage radius ``r``. The altitude that delivers the largest such
+      ``r`` under the shared channel is used, which is the reading that leaves
+      the published 2D rule untouched.
     """
 
     name = "spiral"
 
-    def __init__(self, altitude_frac: float = 0.0, optimize_z: bool = True, **kw) -> None:
+    def __init__(self, **kw) -> None:
         super().__init__(**kw)
-        self.altitude_frac = altitude_frac
-        # Lyu et al. place discs in the plane and say nothing about altitude, so
-        # a fixed z here would be the author's choice standing in for the
-        # method's. Optimizing it on the shared objective makes this a genuine 3D
-        # deployment and can only help the baseline.
-        self.optimize_z = optimize_z
 
     def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         device_xy = instance.device_coords[:, :2]
-        z = instance.lower[2] + self.altitude_frac * (instance.upper[2] - instance.lower[2])
-        r = effective_radius(instance.R_comm, z)
+        z, r = optimal_shared_altitude(instance, getattr(fitness, "link", None))
 
         residual = np.ones(instance.N, dtype=bool)
         centers: list[np.ndarray] = []
@@ -95,7 +93,7 @@ class SpiralPlacement(Optimizer):
             dx = cand[:, None, 0] - device_xy[None, residual, 0]
             dy = cand[:, None, 1] - device_xy[None, residual, 1]
             covered = (dx * dx + dy * dy) <= r * r  # (C, n_residual)
-            gain = covered @ instance.value[residual]
+            gain = covered.sum(axis=1)  # count, as published — not value-weighted
             b = int(np.argmax(gain))
 
             centers.append(cand[b])
@@ -104,8 +102,6 @@ class SpiralPlacement(Optimizer):
             residual &= ~hit
 
         positions = np.column_stack([np.array(centers), np.full(instance.K, z)])
-        if self.optimize_z:
-            positions = optimize_altitudes(instance, fitness, positions)
         x = positions.reshape(instance.dim)
         f = fitness(x)
         return Result(

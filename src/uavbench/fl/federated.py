@@ -62,6 +62,7 @@ from uavbench.optimizers import build_optimizer
 from uavbench.problem.energy import EnergyModel
 from uavbench.problem.fitness import Fitness
 from uavbench.problem.instance import ProblemInstance
+from uavbench.problem.link import LinkModel
 from uavbench.reporting.tables import write_table as _write_table
 
 from .class_histograms import build_class_info
@@ -149,6 +150,7 @@ def _place_uavs(
     prev_positions_m: np.ndarray | None,
     value: np.ndarray | None = None,
     method_params: dict | None = None,
+    link_model: str = "path_loss",
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray | None]:
     """Run a placement optimizer and return UAV positions in metres.
 
@@ -164,7 +166,16 @@ def _place_uavs(
     instance, ref = _build_problem_instance(
         client_coords, K, R_comm, capacity, prev_positions_m, value=value
     )
-    fitness = Fitness(instance)
+    link = None
+    if link_model == "path_loss":
+        link = LinkModel(
+            r_comm_m=R_comm,
+            z_min_m=float(instance.lower[2]),
+            z_max_m=float(instance.upper[2]),
+        )
+    elif link_model != "range_gate":
+        raise ValueError(f"link_model must be 'path_loss' or 'range_gate'; got {link_model!r}")
+    fitness = Fitness(instance, link=link)
 
     optimizer = build_optimizer(method, params=method_params, budget={"P": P, "G_max": G_max})
     result = optimizer.optimize(instance, fitness, rng)
@@ -184,8 +195,13 @@ def _place_uavs(
     # Re-scoring the returned layout once on a fresh Fitness at the shared
     # R_comm puts every method on one ruler. Fresh so the optimizer's own
     # eval_count (already read back by Optimizer.optimize) stays untouched.
-    placement_score = float(Fitness(instance)(uav_pos.reshape(-1)))
-    return uav_pos, np.array(ref), placement_score, result.meta.get("radii")
+    placement_score = float(Fitness(instance, link=link)(uav_pos.reshape(-1)))
+    radii = result.meta.get("radii")
+    if link is not None and radii is None:
+        # The coverage gate the placement was scored under, handed to the system
+        # gate so participation matches the objective the UAVs were placed for.
+        radii = np.asarray(link.slant_radius(uav_pos[:, 2]), dtype=np.float64)
+    return uav_pos, np.array(ref), placement_score, radii
 
 
 def _covered_clients(
@@ -539,7 +555,15 @@ def run_tier2(cfg: dict) -> dict:
     # path-loss-derived per-UAV radius — same knob as run_full_hfl. Referenced
     # below but never defined here from e79701f5 until 2026-07-26, so every
     # placement method in this harness raised NameError on its first placement.
+    # Air-to-ground link model gating coverage. "path_loss" derives each UAV's
+    # radius from its own altitude through one shared channel, which is what
+    # makes altitude a real decision and removes the need for a uniform-radius
+    # override — every method is already on the same model, so the override is
+    # forced off. "range_gate" is the legacy flat R_comm behaviour.
+    link_model: str = str(cfg["fl"].get("link_model", "path_loss"))
     uniform_coverage_radius: bool = bool(cfg["fl"].get("uniform_coverage_radius", False))
+    if link_model == "path_loss":
+        uniform_coverage_radius = False
     capacity: int = cfg["fl"]["capacity"]
     T_sel: int = cfg["fl"].get("T_sel", 5)
     P: int = cfg["budget"]["P"]
@@ -632,6 +656,7 @@ def run_tier2(cfg: dict) -> dict:
                         G_max=G_max,
                         prev_positions_m=prev_uav_positions_m,
                         method_params=optimizer_params.get(method, {}),
+                        link_model=link_model,
                     )
                     # cumulative_energy_j counts repositioning (movement) energy
                     # only — hover/communication energy has no simulated-time
@@ -1038,7 +1063,15 @@ def run_full_hfl(cfg: dict) -> dict:
     # any path-loss-derived per-UAV radius (mozaffari/alzenad). Needed for the
     # coverage sweep so their fixed ~20 km radius can't bypass a tight R_comm —
     # only PLACEMENT differs, not the coverage radius (Tier-1 equal-radius rule).
+    # Air-to-ground link model gating coverage. "path_loss" derives each UAV's
+    # radius from its own altitude through one shared channel, which is what
+    # makes altitude a real decision and removes the need for a uniform-radius
+    # override — every method is already on the same model, so the override is
+    # forced off. "range_gate" is the legacy flat R_comm behaviour.
+    link_model = str(fl.get("link_model", "path_loss"))
     uniform_coverage_radius = bool(fl.get("uniform_coverage_radius", False))
+    if link_model == "path_loss":
+        uniform_coverage_radius = False
     capacity = fl["capacity"]
     T_sel = fl.get("T_sel", 5)
     lambda_min = fl.get("lambda_min", 0.5)  # early-reselection trigger (paper §IV-E6)
@@ -1336,6 +1369,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         prev_positions_m=prev_uav_pos_m,
                         value=device_values,
                         method_params=optimizer_params.get(placement_method, {}),
+                        link_model=link_model,
                     )
                     # Movement (repositioning) energy only — see run_tier2 note.
                     if prev_uav_pos_m is not None:
