@@ -149,6 +149,49 @@ def fair_mab_is_not_rank_equivalent_to_battery():
     )
 
 
+def fair_mab_is_rank_invariant_to_its_constants():
+    """B3 ranks by participation count; neither alpha nor a can change that.
+
+    Measured, not assumed. Both of Zhu et al.'s stated constants enter a score
+    whose varying parts are dominated by C_m, so sweeping them would produce
+    bit-identical arms — the same vacuous comparison the old T_stale_cap arms
+    gave. This records the invariance so nobody re-adds those arms, and fails if
+    the reward ever becomes genuinely sensitive (in which case arms are worth
+    having again).
+    """
+    import uavbench.fl.client_selection as cs
+
+    n = 30
+    ids = list(range(n))
+    states = {
+        i: _state(snr_db=5.0 + 25.0 * (i % 13) / 12.0, battery=0.5 + 0.4 * (i % 7) / 6.0)
+        for i in ids
+    }
+
+    def ranking(alpha, a_fresh):
+        sel = ClientSelector(ids)
+        for i in ids:
+            sel._counts[i] = i % 4          # spread participation counts
+            sel._fairmab_e_bar[i] = (i % 5) / 4.0
+        old_al, old_a = cs.FAIRMAB_ALPHA, cs.FAIRMAB_FRESHNESS_A
+        cs.FAIRMAB_ALPHA, cs.FAIRMAB_FRESHNESS_A = alpha, a_fresh
+        try:
+            return tuple(np.argsort(-sel._fair_mab_scores(ids, states, round_num=40)))
+        finally:
+            cs.FAIRMAB_ALPHA, cs.FAIRMAB_FRESHNESS_A = old_al, old_a
+
+    base = ranking(0.6, 1.0)
+    for alpha in (0.1, 0.3, 0.9):
+        assert ranking(alpha, 1.0) == base, (
+            f"alpha={alpha} reordered the fair_mab ranking. B3 is now sensitive to "
+            "alpha, so the sensitivity arms removed from ARM_SPECS should be restored"
+        )
+    for a_fresh in (2.0, 5.0):
+        assert ranking(0.6, a_fresh) == base, (
+            f"a={a_fresh} reordered the fair_mab ranking; see the note above"
+        )
+
+
 def fair_mab_arms_actually_vary_something():
     """Every fair_mab arm of the 0.3 sweep must change the selected set.
 
@@ -297,6 +340,7 @@ check("FedCS: greedy fastest-first under deadline, eligibility respected", fedcs
 check("rep_cap: exact score formula (gamma=0.5), static no-exploration ranking", rep_cap_formula_and_static_ranking)
 check("fair_mab matches the published formulation", fair_mab_matches_the_published_formulation)
 check("fair_mab is not rank-equivalent to battery", fair_mab_is_not_rank_equivalent_to_battery)
+check("fair_mab is rank-invariant to its constants", fair_mab_is_rank_invariant_to_its_constants)
 check("fair_mab arms actually vary the selection", fair_mab_arms_actually_vary_something)
 check("all modes respect per-UAV capacity", capacity_respected_by_all_modes)
 check("mode 'all' is eligibility-gated; unknown mode raises", mode_all_and_unknown_mode)
