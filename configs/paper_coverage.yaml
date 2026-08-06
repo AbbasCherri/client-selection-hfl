@@ -100,14 +100,16 @@ budget:
 # baselines vs no-repositioning vs no-UAV. All share the proposed selection /
 # reputation / cadence — only the placement rule differs.
 optimizer_params:
+  # Mozaffari 2016 takes no path-loss budget: its radius comes from the circle
+  # packing and its altitude from the antenna beamwidth (verified against the
+  # source PDF 2026-08-06). Alzenad's theta_opt is a function of the environment
+  # alone, and its radius now comes from the shared link model.
   mozaffari2016:
-    environment: suburban
-    freq_ghz: 2.0
-    max_path_loss_db: 145.0
+    theta_b_deg: 80.0
   alzenad2017:
     environment: suburban
-    freq_ghz: 2.0
-    max_path_loss_db: 145.0
+  moon2022:
+    environment: suburban
 
 methods:
   - mclp_place        # PROPOSED: candidate-set placement (1D altitude + 2D covering)
@@ -121,6 +123,8 @@ methods:
   - alzenad2017       # Alzenad et al., IEEE WCL 6(4), 2017
   - cap_kmeans_place  # capacity-constrained k-means
   - ahc_place         # agglomerative clustering + minimax centre
+  - moon2022          # Moon, Dung & Kim, Electronics 11(7):1036, 2022
+  - mogoa             # Almaameri & Blazovics, Cluster Comput. 29:392, 2026
   - centroid_place    # naive: k-means centroids
   - random_place      # naive: uniform-random UAV positions (placement floor)
   - hfl_static        # PSO placement ONCE (isolates repositioning cadence)
