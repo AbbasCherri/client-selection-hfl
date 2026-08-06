@@ -73,11 +73,17 @@ def fair_mab_matches_the_published_formulation():
     sel = ClientSelector([0])
     st = {0: _state(snr_db=20.0)}
 
-    # A never-participated arm must be pulled first — the 1/sqrt(C_m) bonus
-    # diverges at C_m = 0, which is what forces the bandit to explore.
-    assert np.isinf(sel._fair_mab_scores([0], st, round_num=5)[0]), (
-        "an unvisited client did not receive an infinite exploration bonus; the "
-        "UCB term of Eq. 16 is missing and B3 is no longer a bandit"
+    # The exploration bonus must actually decay with participation, and must
+    # stay finite at C_m = 0 (see the smoothing note in _fair_mab_scores: an
+    # infinite tie would make round 1 select by client index).
+    sel._counts[0] = 0
+    unvisited = sel._fair_mab_scores([0], st, round_num=5)[0]
+    sel._counts[0] = 25
+    visited = sel._fair_mab_scores([0], st, round_num=5)[0]
+    assert np.isfinite(unvisited), "the C_m = 0 exploration bonus is infinite; ties would sort by index"
+    assert unvisited > visited, (
+        "the exploration bonus did not decay with participation count; the UCB "
+        "term of Eq. 16 is missing and B3 is no longer a bandit"
     )
 
     # Freshness (Eq. 14) is UNBOUNDED: t - a*C_m. Capping it is exactly what
@@ -86,9 +92,11 @@ def fair_mab_matches_the_published_formulation():
     sel._counts[0] = 1
     early = sel._fair_mab_scores([0], st, round_num=10)[0]
     late = sel._fair_mab_scores([0], st, round_num=100)[0]
-    assert late - early > 50.0, (
-        f"freshness grew only {late - early:.3f} between round 10 and 100; the "
-        "unbounded t - a*C_m term of Eq. 14 has been capped again"
+    # FM contributes (1 - alpha) = 0.4 of the score, so 90 rounds must move it
+    # by ~0.4 * 90 = 36. A capped term would move it by O(1).
+    assert late - early > 30.0, (
+        f"freshness grew only {late - early:.3f} between round 10 and 100; expected "
+        "~36 = (1 - alpha) * 90. The unbounded t - a*C_m term of Eq. 14 is capped again"
     )
 
     # A device that has participated often must lose to an equally-provisioned

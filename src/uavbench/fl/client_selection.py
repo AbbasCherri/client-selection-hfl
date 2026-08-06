@@ -556,13 +556,20 @@ class ClientSelector:
         freshness = round_num - FAIRMAB_FRESHNESS_A * counts  # Eq. 14
         mu = FAIRMAB_ALPHA * e_bar + (1.0 - FAIRMAB_ALPHA) * freshness  # Eq. 15
 
-        # Eq. 16. ξ = 1/(t−1) leaves log(1/ξ) undefined at t=1 and non-positive
-        # at t=2, so the argument is floored at 2 — the exploration term may not
-        # turn into a penalty. C_m = 0 gets an infinite bonus, which is the
-        # standard bandit initialisation (pull every arm once) and what the
-        # source's 1/√C_m implies.
+        # Eq. 16, with two guards on quantities the source leaves undefined.
+        #
+        # ξ = 1/(t−1) makes log(1/ξ) undefined at t=1 and non-positive at t=2, so
+        # the argument is floored at 2 — the exploration term may not invert into
+        # a penalty.
+        #
+        # 1/√C_m diverges at C_m = 0. Taking that literally gives every
+        # never-selected client an identical infinite score, and argsort then
+        # breaks the tie by *client index* — so the first round would select
+        # clients 0..k systematically rather than by any property of the bandit.
+        # √(C_m + 1) is the standard smoothing: finite, same decay, and it lets
+        # μ̄ order the unexplored arms instead of their position in a list.
         log_term = math.log(max(round_num - 1, 2))
-        bonus = np.where(counts > 0, 2.0 * log_term / np.sqrt(np.maximum(counts, 1.0)), np.inf)
+        bonus = 2.0 * log_term / np.sqrt(counts + 1.0)
 
         # Ē is a running mean over participations, so it advances only for the
         # devices actually selected — stashed here, applied in _record_selection.
