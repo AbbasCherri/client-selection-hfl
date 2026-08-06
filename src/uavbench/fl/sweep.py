@@ -37,7 +37,13 @@ logger = logging.getLogger("uavbench.fl.sweep")
 # 2026-07-17 tensor-sliced shard loader): checkpoints written by an older
 # version are no longer reproducible under the current code, so the resume
 # gate refuses them and the affected jobs rerun.
-PIPELINE_VERSION = 3
+#
+# v4 (2026-08-06): `placement_fitness` is now the equal-radius, canonical-
+# normaliser re-score of the returned layout rather than each optimizer's own
+# self-reported best_fitness (see _place_uavs in federated.py). FL numerics are
+# untouched, but resuming a v3 checkpoint would splice old-convention rounds
+# onto new-convention rounds inside one column, so v3 checkpoints are refused.
+PIPELINE_VERSION = 4
 
 # Checkpoint-resume config comparison: sections that define what a job
 # computes. Keys in _RESUME_VOLATILE_DATA_KEYS are locations/credentials, not

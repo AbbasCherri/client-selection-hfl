@@ -170,7 +170,22 @@ def _place_uavs(
     result = optimizer.optimize(instance, fitness, rng)
 
     uav_pos = result.best_position.reshape(K, 3)
-    return uav_pos, np.array(ref), result.best_fitness, result.meta.get("radii")
+
+    # Equal-radius, canonical-normaliser re-score. `result.best_fitness` is
+    # whatever the method measured ITSELF at, and two methods do not measure the
+    # same thing:
+    #   * mozaffari2016/alzenad2017 score through `fitness(x, radii=r*)` with the
+    #     altitude-derived r* (618 m at the suburban preset), while PSO is scored
+    #     at the instance R_comm. At R_comm=500 m that is 1.24x the radius; at
+    #     R_comm=2 km it is 0.31x. The direction of the bias flips with R_comm, so
+    #     the column is not merely shifted — it is uninterpretable across methods.
+    #   * pso_plus with move_norm="reachable" optimises under a tighter d_max, so
+    #     its returned fitness is on a different scale again.
+    # Re-scoring the returned layout once on a fresh Fitness at the shared
+    # R_comm puts every method on one ruler. Fresh so the optimizer's own
+    # eval_count (already read back by Optimizer.optimize) stays untouched.
+    placement_score = float(Fitness(instance)(uav_pos.reshape(-1)))
+    return uav_pos, np.array(ref), placement_score, result.meta.get("radii")
 
 
 def _covered_clients(

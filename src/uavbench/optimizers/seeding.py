@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..problem.instance import ProblemInstance
+
 
 def kmeanspp_centers(
     rng: np.random.Generator,
@@ -50,6 +52,49 @@ def kmeanspp_centers(
         new_sq = np.sum((points - centers[k]) ** 2, axis=1)
         closest_sq = np.minimum(closest_sq, new_sq)
     return centers
+
+
+def seeded_population(
+    rng: np.random.Generator,
+    instance: ProblemInstance,
+    P: int,
+    lo: np.ndarray,
+    hi: np.ndarray,
+    *,
+    seeding: str = "value_kmeans",
+    jitter_m: float = 10.0,
+) -> np.ndarray:
+    """``(P, 3K)`` initial population: half k-means++ seeds, half uniform.
+
+    This is PSO's initialization rule, factored out so the alternative
+    metaheuristics (DE, GWO) start from the *identical* distribution. Without
+    that, "DE beats PSO" would be confounded by initialization and would say
+    nothing about the search dynamics, which is the only thing those baselines
+    exist to isolate.
+
+    :meth:`PSO._init_positions` deliberately keeps its own copy of this logic
+    rather than calling here: every published PSO number depends on its exact RNG
+    draw order, and ``check_pso_plus.py`` asserts bit-identity against it.
+    """
+    dim, K = instance.dim, instance.K
+    if seeding == "uniform":
+        return rng.uniform(lo, hi, size=(P, dim))
+
+    n_seed = P // 2
+    device_xy = instance.device_coords[:, :2]
+    weights = instance.value if seeding == "value_kmeans" else None
+    z_lo, z_hi = instance.lower[2], instance.upper[2]
+
+    seeded = np.empty((n_seed, dim), dtype=np.float64)
+    for p in range(n_seed):
+        centers = kmeanspp_centers(rng, device_xy, K, weights)
+        xy = centers + rng.normal(0.0, jitter_m, size=(K, 2))
+        z = rng.uniform(z_lo, z_hi, size=(K, 1))
+        seeded[p] = np.column_stack([xy, z]).reshape(dim)
+
+    seeded = np.clip(seeded, lo, hi)
+    uniform = rng.uniform(lo, hi, size=(P - n_seed, dim))
+    return np.vstack([seeded, uniform])
 
 
 def weighted_kmeans(

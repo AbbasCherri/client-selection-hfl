@@ -3,17 +3,25 @@
 from .alzenad2017 import Alzenad2017
 from .base import Optimizer, Result
 from .ga import GA
+from .geometric import CapacitatedKMeans, SpiralPlacement
 from .heuristics import Centroid, RandomPlacement, Static
+from .mclp_ls import MCLPLocalSearch
 from .mozaffari2016 import Mozaffari2016
 from .pso import PSO
 from .pso_plus import PSOPlus
+from .swarm_baselines import DifferentialEvolution, GreyWolfOptimizer
 
 # Registry keyed by the names used in configs.
 REGISTRY: dict[str, type[Optimizer]] = {
     "pso": PSO,
     "pso_plus": PSOPlus,
     "ga": GA,
+    "de": DifferentialEvolution,
+    "gwo": GreyWolfOptimizer,
+    "mclp_ls": MCLPLocalSearch,
     "centroid": Centroid,
+    "cap_kmeans": CapacitatedKMeans,
+    "spiral": SpiralPlacement,
     "random": RandomPlacement,
     "static": Static,
     "mozaffari2016": Mozaffari2016,
@@ -24,7 +32,9 @@ REGISTRY: dict[str, type[Optimizer]] = {
 # one-shot literature baselines take no budget, exactly like centroid/static.
 # pso_plus is budgeted too: comparing it against pso at a different budget
 # would confound "the new features help" with "it got more evaluations".
-_BUDGETED_METHODS = ("pso", "pso_plus", "ga")
+# mclp_ls is budgeted for the same reason in the opposite direction — it is the
+# proposed method, so it must be shown to win *at* PSO's spend, not past it.
+_BUDGETED_METHODS = ("pso", "pso_plus", "ga", "de", "gwo", "mclp_ls")
 
 
 def build_optimizer(
@@ -62,7 +72,12 @@ __all__ = [
     "PSO",
     "PSOPlus",
     "GA",
+    "DifferentialEvolution",
+    "GreyWolfOptimizer",
+    "MCLPLocalSearch",
     "Centroid",
+    "CapacitatedKMeans",
+    "SpiralPlacement",
     "RandomPlacement",
     "Static",
     "Mozaffari2016",
