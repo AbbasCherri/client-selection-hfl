@@ -45,6 +45,7 @@ import numpy as np
 
 from ..problem.fitness import Fitness
 from ..problem.instance import ProblemInstance
+from .altitude import optimize_altitudes
 from .base import Optimizer, Result
 from .candidates import (
     build_candidate_set,
@@ -91,15 +92,17 @@ class MCLPLocalSearch(Optimizer):
         """Match PSO's spend exactly: P initial + P per generation."""
         return self.P * (self.G_max + 1)
 
-    @property
-    def _tail_evals(self) -> int:
+    def _tail_evals(self, instance: ProblemInstance) -> int:
         """Evaluations the polish and altitude stages will need after the search.
 
         Held back from the local search rather than spent on top of it: a method
         that quietly overruns the shared budget makes every comparison against it
-        meaningless, and this is exactly where an overrun would hide.
+        meaningless, and this is exactly where an overrun would hide. The
+        altitude descent is per-UAV, so its cost scales with K.
         """
-        return (2 if self.polish else 0) + (self.n_altitudes if self.n_altitudes > 1 else 0)
+        polish = 2 if self.polish else 0
+        alt = 2 + instance.K * self.n_altitudes if self.n_altitudes > 1 else 0
+        return polish + alt
 
     # -- greedy seed -----------------------------------------------------
 
@@ -236,7 +239,7 @@ class MCLPLocalSearch(Optimizer):
 
         # --- local search: remove one UAV, reinsert it at the best candidate ---
         cur_pos, cur_fit = positions.copy(), float(convergence[0])
-        search_budget = self.max_evals - self._tail_evals
+        search_budget = self.max_evals - self._tail_evals(instance)
         n_iter = 0
         while fitness.eval_count + self.screen_top <= search_budget:
             n_iter += 1
@@ -280,19 +283,18 @@ class MCLPLocalSearch(Optimizer):
                 best_pos, best_fit = polished, f_pol
             convergence.append(best_fit)
 
-        # --- altitude check --------------------------------------------------
-        # z_min is provably optimal for the coverage term under the current 3D
-        # range gate; this grid verifies that against the objective actually in
-        # force rather than trusting the derivation.
+        # --- altitude: per-UAV, on the shared objective -----------------------
+        # The candidate set is built at z_min because that maximises the ground
+        # disc, but z is a real decision variable and each UAV's is chosen
+        # independently — a fleet-wide altitude sweep would make this a 2D
+        # placement with a scalar height attached.
         if self.n_altitudes > 1 and z_max > z_min:
-            levels = np.linspace(z_min, z_max, self.n_altitudes)
-            trials = np.repeat(best_pos[None, :, :], levels.size, axis=0)
-            trials[:, :, 2] = levels[:, None]
-            scores = fitness.batch(trials)
-            b = int(np.argmax(scores))
-            if scores[b] > best_fit:
-                best_fit = float(scores[b])
-                best_pos = trials[b].copy()
+            best_pos = optimize_altitudes(
+                instance, fitness, best_pos,
+                n_levels=self.n_altitudes,
+                max_evals=max(self.max_evals - fitness.eval_count, 0),
+            )
+            best_fit = float(fitness(best_pos.reshape(dim)))
             convergence.append(best_fit)
 
         return Result(

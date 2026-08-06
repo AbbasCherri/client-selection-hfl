@@ -99,6 +99,62 @@ def every_method_returns_k_positions_in_bounds():
         )
 
 
+def every_method_deploys_in_three_dimensions():
+    """Altitude must be a decision the method makes, not a constant it inherits.
+
+    Several constructive methods originally pinned ``z`` (mid-band for centroid,
+    ``z_min`` for the clustering baselines), which made them planar placements
+    competing in a 3D benchmark — their altitude was the implementer's choice
+    standing in for the method's. Every method except ``static`` (whose defining
+    behaviour is to not move) now selects altitude, and this asserts the degree
+    of freedom is genuinely exercised: changing the altitude band must change
+    where the method flies.
+    """
+    tall = {"x": [0.0, 6000.0], "y": [0.0, 6000.0], "z": [20.0, 120.0]}
+    lifted = {"x": [0.0, 6000.0], "y": [0.0, 6000.0], "z": [300.0, 400.0]}
+    for name in REGISTRY:
+        if name in ("static", "random"):
+            continue  # static holds position by definition; random is uniform by definition
+        zs = []
+        for area in (tall, lifted):
+            inst = generate_instance(
+                N=80, K=6, distribution="clustered", seed=1, area=area,
+                R_comm=600.0, capacity=12,
+            )
+            res = build_optimizer(name, {}, BUDGET).optimize(
+                inst, _fit(inst), np.random.default_rng(4)
+            )
+            pos = res.best_position.reshape(inst.K, 3)
+            assert (pos[:, 2] >= area["z"][0] - 1e-6).all() and (
+                pos[:, 2] <= area["z"][1] + 1e-6
+            ).all(), f"{name} flew outside the altitude band {area['z']}"
+            zs.append(float(pos[:, 2].mean()))
+        assert abs(zs[1] - zs[0]) > 1.0, (
+            f"{name} flew at {zs[0]:.1f} m and {zs[1]:.1f} m under altitude bands "
+            f"{tall['z']} and {lifted['z']} — its z is a hard-coded constant, not a "
+            "placement decision, so it is a 2D method in a 3D benchmark"
+        )
+
+
+def altitude_optimization_never_makes_a_layout_worse():
+    from uavbench.optimizers.altitude import optimize_altitudes
+
+    for seed in (0, 1, 2):
+        inst = _instance(seed=seed)
+        fit = _fit(inst)
+        start = np.column_stack([
+            inst.device_coords[: inst.K, :2],
+            np.full(inst.K, 0.5 * (inst.lower[2] + inst.upper[2])),
+        ])
+        f0 = float(_fit(inst)(start.reshape(-1)))
+        out = optimize_altitudes(inst, fit, start)
+        f1 = float(_fit(inst)(out.reshape(-1)))
+        assert f1 >= f0 - 1e-12, (
+            f"[seed {seed}] altitude descent lowered fitness {f0:.6f} -> {f1:.6f}; it is "
+            "applied to every constructive method and must be safe to apply blind"
+        )
+
+
 def path_loss_baselines_are_flagged_as_unequal_radius():
     """The 618-vs-500 m artifact must stay visible, not be silently reintroduced.
 
@@ -351,6 +407,8 @@ if __name__ == "__main__":
     check("reported fitness matches the returned position", reported_fitness_matches_returned_position)
     check("no method outspends the shared budget", no_method_outspends_the_shared_budget)
     check("every method returns K in-bounds positions", every_method_returns_k_positions_in_bounds)
+    check("every method deploys in three dimensions", every_method_deploys_in_three_dimensions)
+    check("altitude descent never worsens a layout", altitude_optimization_never_makes_a_layout_worse)
     check("path-loss baselines still publish radii", path_loss_baselines_are_flagged_as_unequal_radius)
     check("equal-radius re-score is not inert", equal_radius_rescore_changes_the_ranking_metric)
     check("intersection points cover both generators", intersection_points_are_wedged_against_both_devices)

@@ -20,6 +20,7 @@ import numpy as np
 
 from ..problem.fitness import Fitness
 from ..problem.instance import ProblemInstance
+from .altitude import optimize_altitudes
 from .base import Optimizer, Result
 from .candidates import circle_intersection_points, effective_radius
 from .seeding import kmeanspp_centers
@@ -50,9 +51,14 @@ class SpiralPlacement(Optimizer):
 
     name = "spiral"
 
-    def __init__(self, altitude_frac: float = 0.0, **kw) -> None:
+    def __init__(self, altitude_frac: float = 0.0, optimize_z: bool = True, **kw) -> None:
         super().__init__(**kw)
         self.altitude_frac = altitude_frac
+        # Lyu et al. place discs in the plane and say nothing about altitude, so
+        # a fixed z here would be the author's choice standing in for the
+        # method's. Optimizing it on the shared objective makes this a genuine 3D
+        # deployment and can only help the baseline.
+        self.optimize_z = optimize_z
 
     def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         device_xy = instance.device_coords[:, :2]
@@ -98,6 +104,8 @@ class SpiralPlacement(Optimizer):
             residual &= ~hit
 
         positions = np.column_stack([np.array(centers), np.full(instance.K, z)])
+        if self.optimize_z:
+            positions = optimize_altitudes(instance, fitness, positions)
         x = positions.reshape(instance.dim)
         f = fitness(x)
         return Result(
@@ -106,7 +114,7 @@ class SpiralPlacement(Optimizer):
             best_fitness=f,
             convergence=[f],
             n_iterations=1,
-            meta={"altitude_m": z, "r_eff_m": r},
+            meta={"altitude_m": float(positions[:, 2].mean()), "r_eff_m": r},
         )
 
 
@@ -129,10 +137,13 @@ class CapacitatedKMeans(Optimizer):
 
     name = "cap_kmeans"
 
-    def __init__(self, n_iter: int = 30, altitude_frac: float = 0.0, **kw) -> None:
+    def __init__(
+        self, n_iter: int = 30, altitude_frac: float = 0.0, optimize_z: bool = True, **kw
+    ) -> None:
         super().__init__(**kw)
         self.n_iter = n_iter
         self.altitude_frac = altitude_frac
+        self.optimize_z = optimize_z
 
     def _run(self, instance: ProblemInstance, fitness: Fitness, rng: np.random.Generator) -> Result:
         device_xy = instance.device_coords[:, :2]
@@ -169,6 +180,8 @@ class CapacitatedKMeans(Optimizer):
             centers = new_centers
 
         positions = np.column_stack([centers, np.full(K, z)])
+        if self.optimize_z:
+            positions = optimize_altitudes(instance, fitness, positions)
         x = positions.reshape(instance.dim)
         f = fitness(x)
         return Result(
@@ -177,5 +190,5 @@ class CapacitatedKMeans(Optimizer):
             best_fitness=f,
             convergence=[f],
             n_iterations=1,
-            meta={"altitude_m": z},
+            meta={"altitude_m": float(positions[:, 2].mean())},
         )
