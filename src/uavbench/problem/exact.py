@@ -50,12 +50,35 @@ def _candidate_sites(instance: ProblemInstance, grid_res: int) -> np.ndarray:
     return np.column_stack([gx.ravel(), gy.ravel(), np.full(gx.size, z)])
 
 
+def _cip_sites(instance: ProblemInstance, altitude: float, r: float) -> np.ndarray:
+    """(M, 3) exact circle-intersection candidate sites at ``altitude``.
+
+    A grid reference is only a bound on methods that also search the grid. Once
+    :mod:`uavbench.optimizers.mclp_ls` places UAVs at exact intersection points,
+    a 20x20 grid "optimum" can be *beaten* by the heuristic it is supposed to
+    bound — a reference that reports 105% of optimum is worse than none. These
+    sites are the provably sufficient set (Church 1984), dominance-pruned so the
+    MILP stays closable, so the bound is genuine.
+    """
+    from ..optimizers.candidates import build_candidate_set, coverage_matrix, prune_dominated
+
+    xy = build_candidate_set(
+        instance.device_coords[:, :2], r, instance.lower[:2], instance.upper[:2],
+        max_candidates=20000, dedupe_grid_m=1.0,
+    )
+    keep = prune_dominated(coverage_matrix(xy, instance.device_coords[:, :2], r))
+    xy = xy[keep]
+    return np.column_stack([xy, np.full(xy.shape[0], altitude)])
+
+
 def mclp_reference(
     instance: ProblemInstance,
     grid_res: int = 20,
     radii: np.ndarray | None = None,
     time_limit: float = 120.0,
     max_clients: int = 100000,
+    sites: str = "grid",
+    altitude: float | None = None,
 ) -> MCLPResult:
     """Solve the capacitated MCLP coverage reference for ``instance``.
 
@@ -74,9 +97,17 @@ def mclp_reference(
         coords, value = coords[keep], value[keep]
     n = coords.shape[0]
 
-    sites = _candidate_sites(instance, grid_res)
-    m = sites.shape[0]
     r = float(np.max(radii)) if radii is not None else float(instance.R_comm)
+    if sites == "cip":
+        # Altitude eats radius under the 3D gate, so the sites are built at the
+        # altitude actually flown and the ground radius derived from it.
+        z = float(instance.lower[2]) if altitude is None else float(altitude)
+        site_xyz = _cip_sites(instance, z, float(np.sqrt(max(r * r - z * z, 0.0))))
+    elif sites == "grid":
+        site_xyz = _candidate_sites(instance, grid_res)
+    else:
+        raise ValueError(f"sites must be 'grid' or 'cip'; got {sites!r}")
+    m = site_xyz.shape[0]
     # max(), not min() or mean(), and deliberately so: candidate sites are grid
     # points, not specific UAVs, so there is no per-site capacity to use. Taking
     # the largest makes the MILP *stronger* than any real deployment, which
@@ -90,7 +121,7 @@ def mclp_reference(
     # This was 2-D ground range through 2026-07, which at z~70 m / R=500 m gave
     # the MILP a ~1% larger effective footprint than the heuristics it bounds —
     # small, and conservative for PSO%, but not a like-for-like comparison.
-    d = np.sqrt(((coords[:, None, :] - sites[None, :, :]) ** 2).sum(axis=2))
+    d = np.sqrt(((coords[:, None, :] - site_xyz[None, :, :]) ** 2).sum(axis=2))
     cover = (d <= r).astype(np.float64)
 
     # variables: [y_0..y_{m-1}, x flattened (n*m)]; all binary
