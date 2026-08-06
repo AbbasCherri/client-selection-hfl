@@ -210,7 +210,7 @@ class MCLPLocalSearch(Optimizer):
                 return bool(np.max(np.sum(d * d, axis=1)) <= r2)
 
             if feasible(1.0):
-                out[j] = p1
+                out[j, :2] = p1
                 continue
             lo, hi = 0.0, 1.0
             for _ in range(self.polish_iters):
@@ -219,7 +219,7 @@ class MCLPLocalSearch(Optimizer):
                     lo = mid
                 else:
                     hi = mid
-            out[j] = p0 + lo * (p1 - p0)
+            out[j, :2] = p0 + lo * (p1 - p0)
         return out
 
     # -- main ------------------------------------------------------------
