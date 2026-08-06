@@ -60,9 +60,14 @@ _C = 299_792_458.0  # speed of light, m/s
 ENV_PRESETS: dict[str, dict[str, float]] = {
     "suburban": {"a": 4.88, "b": 0.43, "eta_los_db": 0.1, "eta_nlos_db": 21.0},
     "urban": {"a": 9.61, "b": 0.16, "eta_los_db": 1.0, "eta_nlos_db": 20.0},
-    # b = 0.114, not 0.11: confirmed against Alzenad 2017 and Moon et al. 2022
-    # (Electronics 11(7):1036, Table 3), both of which tabulate (12.08, 0.114).
-    "dense_urban": {"a": 12.08, "b": 0.114, "eta_los_db": 1.6, "eta_nlos_db": 23.0},
+    # b = 0.11 and NOT the 0.114 printed in Moon et al. 2022 (Electronics
+    # 11(7):1036, Table 3). Resolved by cross-check, not by preference: the
+    # radius-maximizing elevation angle is a pure function of (a, b), and every
+    # source — including Moon et al. themselves — reports 54.62 deg for dense
+    # urban. b = 0.11 gives 54.619; b = 0.114 gives 53.83. Their table and their
+    # own stated optimum are inconsistent, and the optimum is the checkable one.
+    # Pinned by check_mclp.py::optimal_elevation_matches_the_published_values.
+    "dense_urban": {"a": 12.08, "b": 0.11, "eta_los_db": 1.6, "eta_nlos_db": 23.0},
     "high_rise_urban": {"a": 27.23, "b": 0.08, "eta_los_db": 2.3, "eta_nlos_db": 34.0},
 }
 
