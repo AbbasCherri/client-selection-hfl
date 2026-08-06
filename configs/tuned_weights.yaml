@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Optuna-tuned training weights — THE single source of truth.
+# Validation-tuned training recipes — THE single source of truth.
 #
 # Inherit these from any experiment config with:
 #
@@ -11,15 +11,82 @@
 # at lr 1.0e-3 (17.75x below the tuned value) through the 2026-07-22 full run
 # and produced 440 jobs of undertrained, non-significant robustness results.
 #
-# Source: scripts/tune_weights.py, 2026-07-20 weight search (+22% on the
-# search objective vs the prior hand-picked recipe).
+# Source: scripts/tune_weights.py, 2026-08-05 per-method search
+# (results/hpo/weights_<method>.*; adoption table in adopted_recipes.yaml).
 #
-# NOT from that search: ema_decay (its short 20-round evaluation horizon made
-# heavy EMA smoothing look structurally bad regardless of its merit at full
-# 100-round scale) — it stays at the original pick, set per-config.
+# TWO THINGS CHANGED vs the 2026-07-20 numbers this replaces
+# ───────────────────────────────────────────────────────────
+# 1. The old search maximised `macro_f1` — the reported TEST metric. Those
+#    values were selected by looking at the answer. The objective is now
+#    `val_macro_f1` on tuning seeds 20-22, disjoint from evaluation seeds 0-19.
+#    The honest optimum sits elsewhere: lr_decay went cosine -> none and
+#    sel_static_blend 0.43 -> 0.12, so the leak was not cosmetic.
+# 2. The recipe was fit to proposed_hfl alone and imposed on every baseline —
+#    a tuned method against untuned opponents. Each literature baseline now
+#    carries its own recipe under `per_method`. They differ substantially
+#    (lr spans 2.86x, and the schedule splits three ways), so this was not a
+#    formality.
+#
+# Winners are chosen on POOLED validation over all five val seeds (3 tuning +
+# 2 transfer), not on the transfer seeds alone — selecting on the held-out
+# seeds would fold them into the choice and make the transfer check circular.
+# fair_mab and power_of_choice adopt their tune-rank-2 config on that basis.
+#
+# NOT adopted: the module constants proposed_hfl additionally searched
+# (SEL_STATIC_BLEND, the utility/reputation simplexes, w1-w3). Giving the
+# proposed method tuned selector internals that no baseline has an analogue of
+# would re-create the asymmetry this block exists to remove.
 # ─────────────────────────────────────────────────────────────────────────────
 fl:
-  lr: 1.775e-2            # momentum-SGD client learning rate
-  uav_lr: 1.775e-2        # UAV-tier learning rate (tunable independently of lr)
-  logit_adjust_tau: 0.601 # logit-adjusted CE vs the global prior; 0 -> plain CE
-  server_momentum: 0.528  # FedAvgM server-side momentum (damps non-IID oscillation)
+  # Base recipe = proposed_hfl's. Its ablations (hfl_no_selection, hfl_static,
+  # hfl_no_reputation) and the reference points (flat_fl, centralized) inherit
+  # it, so an ablation differs from the proposed system only in the ablated
+  # component rather than in its training recipe too.
+  lr: 1.686e-2            # momentum-SGD client learning rate
+  uav_lr: 1.686e-2        # UAV-tier learning rate (tunable independently of lr)
+  lr_decay: none          # across-round client-LR decay; the val-selected choice
+                          # (the test-selected search picked cosine)
+  logit_adjust_tau: 0.700 # logit-adjusted CE vs the global prior; 0 -> plain CE
+  server_momentum: 0.771  # FedAvgM server-side momentum (damps non-IID oscillation)
+  ema_decay: 0.783        # now searched; the 2026-07 note that a 20-round horizon
+                          # made EMA look structurally bad no longer applies, since
+                          # selection is on val rather than the test curve
+
+  # Applied by sweep._paper_job, which pops this key and merges the entry for
+  # the method it is running. A method absent here keeps the base recipe.
+  per_method:
+    fedcs:
+      lr: 1.9217e-2
+      uav_lr: 1.9217e-2
+      lr_decay: sqrt
+      logit_adjust_tau: 0.8067
+      server_momentum: 0.3801
+      ema_decay: 0.7168
+    rep_cap:
+      lr: 2.0776e-2
+      uav_lr: 2.0776e-2
+      lr_decay: none
+      logit_adjust_tau: 0.8224
+      server_momentum: 0.6237
+      ema_decay: 0.4943
+    fair_mab:          # tune-rank 2, adopted on pooled val (+0.0026)
+      lr: 1.1372e-2
+      uav_lr: 1.1372e-2
+      lr_decay: none
+      logit_adjust_tau: 0.8425
+      server_momentum: 0.3883
+      ema_decay: 0.4555
+    oort:
+      lr: 7.2598e-3
+      uav_lr: 7.2598e-3
+      lr_decay: cosine
+      logit_adjust_tau: 0.6699
+      server_momentum: 0.4931
+      ema_decay: 0.7150
+    power_of_choice:   # tune-rank 2, adopted on pooled val (+0.0020)
+      lr: 1.5295e-2
+      uav_lr: 1.5295e-2
+      lr_decay: none
+      logit_adjust_tau: 0.7344
+      server_momentum: 0.3558
+      ema_decay: 0.5346

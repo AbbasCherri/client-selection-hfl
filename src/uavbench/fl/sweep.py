@@ -336,6 +336,20 @@ def _paper_job(N: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # Wilcoxon pairing valid).
     job_cfg["data"]["partition_seed"] = partition_seed_for(seed_idx)
     job_cfg["methods"] = [method]
+    # Per-method training recipe (rigor plan §0.3b). lr / schedule / tau /
+    # momentum / ema were previously fit to proposed_hfl alone and imposed on
+    # every baseline, making the headline comparison tuned-vs-untuned. Each
+    # method now carries the recipe from its OWN validation study; methods with
+    # no entry (ablations, flat_fl, centralized) keep the base recipe, which is
+    # proposed_hfl's — an ablation must differ from it only in the ablated part.
+    #
+    # POPPED, not merged: leaving the whole map in job_cfg would put every
+    # method's recipe into every job's resume signature, so editing one
+    # method's numbers would invalidate all the others' checkpoints. Popping
+    # also keeps methods without an entry byte-identical to a pre-0.3b config,
+    # so their existing checkpoints stay valid.
+    _per_method = job_cfg["fl"].pop("per_method", None) or {}
+    job_cfg["fl"].update(_per_method.get(method, {}))
     # Method identity is folded into the seed exactly once, inside run_full_hfl
     # (via fullsim_method_seed). Do NOT add a method hash here too, or every
     # (N, seed_idx) job's seed double-counts the method and silently shifts

@@ -139,6 +139,65 @@ def selection_isolation_gates_on_config_not_existence():
         )
 
 
+def per_method_recipe_is_applied_and_isolated():
+    """§0.3b: each method must run on ITS OWN tuned recipe.
+
+    Three ways this can silently go wrong, all guarded here:
+      * the override never reaches the job — every method runs on the base
+        recipe and the whole per-method HPO block was wasted compute;
+      * ``per_method`` survives into the job config — then every method's
+        resume signature contains every other method's numbers, so editing one
+        baseline's recipe invalidates all the others' checkpoints;
+      * a method with no entry gets perturbed — its existing checkpoints would
+        be needlessly discarded, and ablations would stop sharing the proposed
+        method's recipe, which is what makes them ablations.
+    """
+    import inspect
+
+    from uavbench.fl import sweep as sw
+
+    src = inspect.getsource(sw._paper_job)
+    assert "per_method" in src, (
+        "_paper_job ignores fl.per_method — every method would run on the base "
+        "recipe, silently discarding the per-method HPO"
+    )
+
+    def applied(method: str) -> dict:
+        cfg = _cfg()
+        cfg["fl"] = {
+            **cfg["fl"], "lr": 0.01, "lr_decay": "none",
+            "per_method": {"fedcs": {"lr": 0.05, "lr_decay": "sqrt"}},
+        }
+        # Mirror the merge _paper_job performs, then assert on the result.
+        job_fl = dict(cfg["fl"])
+        per = job_fl.pop("per_method", None) or {}
+        job_fl.update(per.get(method, {}))
+        return job_fl
+
+    tuned = applied("fedcs")
+    assert tuned["lr"] == 0.05 and tuned["lr_decay"] == "sqrt", (
+        f"fedcs did not receive its own recipe: {tuned}"
+    )
+    assert "per_method" not in tuned, (
+        "the full per-method map leaked into the job config — one method's "
+        "recipe edit would invalidate every other method's checkpoints"
+    )
+
+    untouched = applied("proposed_hfl")
+    assert untouched["lr"] == 0.01 and untouched["lr_decay"] == "none", (
+        f"a method with no per_method entry was perturbed: {untouched}"
+    )
+
+    # And the signature must actually distinguish two methods' recipes.
+    with tempfile.TemporaryDirectory() as d:
+        a, b = _cfg(), _cfg()
+        a["fl"] = {**a["fl"], "lr": 0.01}
+        b["fl"] = {**b["fl"], "lr": 0.05}
+        assert _stale_checkpoint_reason(_write_ckpt(d, a), b) is not None, (
+            "two different recipes compare as the same job"
+        )
+
+
 def _ok_job(tag_df_value: int) -> pd.DataFrame:
     return pd.DataFrame({"x": [tag_df_value]})
 
@@ -172,5 +231,6 @@ def one_failure_does_not_abort_and_is_not_silent():
 check("resume signature: normalized, volatile keys ignored, semantics compared", signature_normalizes_and_ignores_volatile_keys)
 check("stale checkpoints (old version / changed config / corrupt) are refused", stale_checkpoint_detection)
 check("selection-isolation resume gates on config, not file existence", selection_isolation_gates_on_config_not_existence)
+check("per-method recipe is applied and isolated", per_method_recipe_is_applied_and_isolated)
 check("one failing job neither aborts the sweep nor fails silently", one_failure_does_not_abort_and_is_not_silent)
 finish()

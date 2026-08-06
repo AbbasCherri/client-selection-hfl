@@ -80,21 +80,17 @@ fl:
   placement_method: pso   # authoritative placement optimizer ("ga" for the ablation)
 
   # ── Training recipe (Tier A) ──────────────────────────────────────────
-  # lr, uav_lr, logit_adjust_tau and server_momentum come from
-  # tuned_weights.yaml (see `extends:` at the top) — the 2026-07-20 Optuna
-  # weight search, +22% on the search's objective vs the prior hand-picked
-  # recipe. Override them here only with a deliberate reason.
-  # ema_decay is NOT from that search (its short 20-round evaluation horizon
-  # made heavy EMA smoothing structurally look bad regardless of whether it
-  # actually is at full 100-round scale) — kept at the original pick pending
-  # a longer-horizon follow-up check.
+  # The ENTIRE recipe — lr, uav_lr, lr_decay, logit_adjust_tau,
+  # server_momentum, ema_decay, and the per-method overrides — comes from
+  # tuned_weights.yaml (see `extends:` at the top). Do not restate any of it
+  # here. lr_decay and ema_decay used to be set in this file, which silently
+  # overrode the tuned values for every method: exactly the copied-weight drift
+  # tuned_weights.yaml's header warns about.
   balanced_sampling: false  # uniform shard sampling (imbalance handled in the loss)
   local_optimizer:          # momentum SGD amortizes across rounds (unlike fresh Adam)
     name: sgd
     momentum: 0.9
   server_lr: 1.0
-  lr_decay: cosine          # across-round client-LR decay ("none" to disable)
-  ema_decay: 0.9            # evaluate an EMA of the global model (0 → raw snapshot)
 
   # ── Hierarchy / method design (Tier B + C) ────────────────────────────
   fusion_owner: uav         # UAV tier owns img_proj+fusion (both modalities co-located)
