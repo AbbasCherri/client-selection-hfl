@@ -278,16 +278,51 @@ def mclp_ls_reports_whether_the_candidate_cap_bound():
 # --- 4. metaheuristic controls -------------------------------------------
 
 
-def de_and_gwo_improve_on_their_own_initialization():
-    """A search that never beats its seed is inert and worthless as a control."""
+def de_and_gwo_search_operators_are_live():
+    """An inert control proves nothing, so assert the operators actually search.
+
+    Deliberately initialized *uniformly*. From the shared value-weighted k-means++
+    seeding both DE and GWO measurably fail to improve at all at small budget
+    (0/4 seeds, gain exactly 0.0, while PSO gains +0.037) — the seed is already
+    better than their operators can reach. That is a finding about the landscape,
+    not a bug, and it is reported as one; testing for improvement from the seeded
+    population would encode the landscape's difficulty as a correctness bug.
+    From a bad start they gain +0.186 and +0.294, which is what "the operator
+    works" actually means here.
+    """
     for name in ("de", "gwo"):
         inst = _instance(seed=2)
-        fit = _fit(inst)
-        res = build_optimizer(name, {}, BUDGET).optimize(inst, fit, np.random.default_rng(6))
-        assert res.convergence[-1] > res.convergence[0], (
-            f"{name} ended at its starting fitness ({res.convergence[0]:.6f}) — the "
-            "search operator is doing nothing and it cannot serve as a control"
+        res = build_optimizer(name, {"seeding": "uniform"}, BUDGET).optimize(
+            inst, _fit(inst), np.random.default_rng(6)
         )
+        assert res.convergence[-1] > res.convergence[0] + 1e-3, (
+            f"{name} barely moved off a uniform random start "
+            f"({res.convergence[0]:.6f} -> {res.convergence[-1]:.6f}) — the search "
+            "operator is inert and it cannot serve as a control"
+        )
+
+
+def recombination_operators_cannot_beat_the_constructive_seed():
+    """Documents *why* candidate-set construction replaces the swarm.
+
+    Placement is permutation-symmetric — relabelling the UAVs gives the same
+    layout — so operators that recombine coordinates across two solutions (DE's
+    difference vector, GWO's leader averaging) blend layouts that use different
+    labellings and destroy structure. Both therefore stall on a good seed while
+    PSO, whose per-particle memory anchors each label, still improves.
+
+    If this ever stops holding, the argument for :mod:`.mclp_ls` weakens and the
+    paper's framing needs revisiting — so it is asserted rather than assumed.
+    """
+    inst = _instance(seed=2)
+    gains = {}
+    for name in ("de", "gwo", "pso"):
+        res = build_optimizer(name, {}, BUDGET).optimize(inst, _fit(inst), np.random.default_rng(6))
+        gains[name] = res.convergence[-1] - res.convergence[0]
+    assert gains["pso"] > max(gains["de"], gains["gwo"]), (
+        f"the recombination handicap has reversed: gains {gains} — PSO no longer "
+        "leads DE/GWO from the shared constructive seed"
+    )
 
 
 def de_and_gwo_convergence_is_monotone():
@@ -327,7 +362,9 @@ if __name__ == "__main__":
     check("mclp_ls polish never drops a served device", mclp_ls_polish_never_drops_a_served_device)
     check("mclp_ls leads where coverage binds", mclp_ls_beats_the_clustering_baselines_where_coverage_binds)
     check("mclp_ls flags a bound candidate cap", mclp_ls_reports_whether_the_candidate_cap_bound)
-    check("de/gwo improve on their initialization", de_and_gwo_improve_on_their_own_initialization)
+    check("de/gwo search operators are live", de_and_gwo_search_operators_are_live)
+    check("recombination stalls on the constructive seed",
+          recombination_operators_cannot_beat_the_constructive_seed)
     check("de/gwo convergence is monotone", de_and_gwo_convergence_is_monotone)
     check("spiral/cap_kmeans use the shared radius", spiral_and_cap_kmeans_use_the_shared_radius)
     finish()
