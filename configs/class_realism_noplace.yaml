@@ -1,0 +1,18 @@
+# Class-awareness realism ablation — arm 3/4: class-BLIND placement.
+#
+# Keeps the oracle histogram for *selection* and removes it from *placement*.
+# Paired against arm 1 this isolates exactly what class-aware placement buys,
+# which is the arm that decides whether the placement-side information
+# assumption is worth making at all. Paired against arm 4 it isolates what
+# class-aware selection buys once placement is blind.
+#
+# See configs/class_realism.yaml for the full design.
+
+extends: class_realism.yaml
+
+name: class_realism_noplace
+results_dir: results/class_realism_noplace
+
+fl:
+  class_source: true
+  placement_class_aware: false

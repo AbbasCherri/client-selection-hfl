@@ -1,0 +1,22 @@
+# Class-awareness realism ablation — arm 4/4: no class information anywhere.
+#
+# The lower anchor. class_source="none" removes the histogram entirely, so the
+# selector falls back to its priority ordering and _class_value_vector returns
+# all-ones — the two must degrade together, or a "no class information" run
+# would still be steering UAVs with class information (guarded by
+# tests/sanity_checks/check_class_histograms.py).
+#
+# placement_class_aware is set false explicitly rather than left to the
+# histogram fallback: the config should state the arm it is running, not rely
+# on a downstream no-op to produce it.
+#
+# See configs/class_realism.yaml for the full design.
+
+extends: class_realism.yaml
+
+name: class_realism_none
+results_dir: results/class_realism_none
+
+fl:
+  class_source: none
+  placement_class_aware: false
