@@ -146,11 +146,51 @@ eligibility gate and the identical greedy assignment:
 - `ucb_noclass` — the full pipeline with `class_counts=None`, falling back to
   the pre-Tier-C deterministic priority ordering. The lower anchor.
 
-**0.5 Placement class-awareness.** `fl.placement_class_aware` biases PSO
-coverage by `_client_class_value`, also derived from ground-truth labels
-(`federated.py:1269`). It is applied globally, so it is **not** a fairness
-asymmetry between methods — but it is the same oracle-realism question. Add
-`placement_class_source: {true, pseudo, none}` and put it in the ladder.
+**0.5 Placement class-awareness.** — **implemented 2026-08-07** (`configs/class_realism*.yaml`,
+`scripts/run_class_realism.sh`). `fl.placement_class_aware` biases placement
+coverage by `_client_class_value`, derived from the same histogram as
+selection. Applied globally, so it is **not** a fairness asymmetry between
+methods — but it is the oracle-realism question, and it is a *sharper* one for
+placement than for selection:
+
+> Selection only ranks clients some UAV already covers, so their histograms are
+> observable by construction. Placement decides **who becomes reachable**, so
+> conditioning it on per-client histograms needs histograms from clients no UAV
+> covers yet — circular unless the report path is separate from the data path.
+
+The assumption the benchmark makes is now stated explicitly at
+`federated.py`'s `placement_class_aware`: the placer already receives every
+client's coordinates, exactly as every placement baseline does (a demand map is
+the standard input to maximal-covering placement), and a 4-bin histogram is a
+few bytes over the same low-rate control channel while `R_comm` is sized for
+sustained model-update throughput. That is an increment on an assumption
+already made, not a new class of oracle — but it is still an assumption, hence
+the ablation rather than the default.
+
+Rather than a separate `placement_class_source` knob, placement inherits
+`fl.class_source` (the two must degrade together, or a "no class information"
+run would still be steering UAVs with class information — guarded by
+`check_class_histograms.py`). Two things had to be fixed first:
+
+- **`class_source: pseudo` was unreachable from `run_full_hfl`** — it called
+  `build_class_info` without `model`/`cached_dataset`, so the rung raised on
+  every run and the realism answer existed only in the selection-isolation
+  harness. It now starts at `None` and refreshes from the current global model
+  on the reselection cadence, ahead of placement so placement and selection
+  within a round see the same histogram. `check_integration_hfl.py` exercises
+  all four rungs end-to-end: a rung nobody can run is not a rung.
+- The histogram is now a **per-method** copy, so a pseudo refresh under one
+  method cannot leak into the next.
+
+Four paired arms at N=200 (`class_realism{,_pseudo,_noplace,_none}`):
+`(1 vs 2)` is the cost of removing the oracle, `(1 vs 3)` is what class-aware
+*placement* is worth at all, `(3 vs 4)` is what class-aware *selection* is
+worth once placement is blind. **Pre-registered reading:** the coverage sweep
+already found placement does not move macro-F1 at any `R_comm`, so `(1 vs 3)`
+is expected null — in which case class-aware placement buys nothing for an
+information assumption and comes out of the headline claim, leaving the
+placement contribution to stand on its optimality guarantee and operational
+metrics, which assume no class information at all.
 
 **0.6 Reporting.** `reporting/tables.py`: emit accuracy, macro-F1 and all four
 per-class F1s side by side in every headline table; run `significance` over
