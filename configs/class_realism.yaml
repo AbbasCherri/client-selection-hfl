@@ -55,5 +55,5 @@ methods:
   - proposed_hfl
 
 fl:
-  class_source: true
+  class_source: "true"
   placement_class_aware: true

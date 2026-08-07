@@ -113,6 +113,24 @@ def class_source_ladder_runs_end_to_end():
                 assert rows["macro_f1"].between(0, 1).all(), f"{source}/{m}: macro_f1 out of range"
 
 
+def unquoted_class_source_is_rejected():
+    """YAML turns `class_source: true` into a bool and `class_source:` into None.
+
+    str().lower() would coerce both — the second into "none", i.e. the
+    lower-anchor arm running under the default's name. A silently wrong arm is
+    indistinguishable from a real result, so this must raise.
+    """
+    for bad in (True, None, 1):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = _cfg(d, ["proposed_hfl"], n_rounds=1)
+            cfg["fl"]["class_source"] = bad
+            try:
+                run_full_hfl(cfg)
+            except ValueError:
+                continue
+            raise AssertionError(f"class_source={bad!r} was silently coerced")
+
+
 def clone_model_matches_deepcopy():
     # clone_model is a hand-rolled fast path replacing copy.deepcopy. It must
     # stay bit-identical: same param values, same per-parameter requires_grad,
@@ -185,6 +203,7 @@ check("T_sel repositioning cadence; hfl_static truly static", placement_cadence)
 check("same seed -> identical accuracy/selection trajectories", same_seed_reproduces)
 check("different seeds -> different random selections", different_seeds_differ)
 check("every class_source rung runs end-to-end", class_source_ladder_runs_end_to_end)
+check("unquoted/empty class_source is rejected, not coerced", unquoted_class_source_is_rejected)
 check("clone_model is bit-identical to deepcopy and preserves the RNG stream", clone_model_matches_deepcopy)
 check("fedavg/reputation_fedavg in-place accumulation matches naive formula", fedavg_inplace_matches_naive)
 finish()

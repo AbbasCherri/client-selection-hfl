@@ -1163,7 +1163,18 @@ def run_full_hfl(cfg: dict) -> dict:
     # globally (every HFL method shares it), so it is not a fairness asymmetry
     # between methods — but it is the same oracle-realism question, and the
     # degradation ladder has to cover placement too, not just selection.
-    class_source = str(fl.get("class_source", "true")).lower()
+    # Must be an explicit string. Unquoted YAML scalars are a trap here:
+    # `class_source: true` parses as the bool True and `class_source:` (empty)
+    # parses as None, both of which str().lower() would silently coerce — the
+    # second one into the *lower-anchor* arm, i.e. a run with no class
+    # information at all wearing the default's name. Fail loudly instead.
+    _cs_raw = fl.get("class_source", "true")
+    if not isinstance(_cs_raw, str):
+        raise ValueError(
+            f"fl.class_source must be a quoted string, got {_cs_raw!r} "
+            f"({type(_cs_raw).__name__}) — write class_source: \"true\", not true"
+        )
+    class_source = _cs_raw.lower()
     dp_epsilon = float(fl.get("dp_epsilon", 1.0))
     # Rounds-to-target now tracks the reported primary metric (macro-F1) against
     # a meaningful floor, not raw accuracy against an 0.82 majority-class ceiling.

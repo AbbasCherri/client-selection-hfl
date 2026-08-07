@@ -14,5 +14,5 @@ name: class_realism_noplace
 results_dir: results/class_realism_noplace
 
 fl:
-  class_source: true
+  class_source: "true"
   placement_class_aware: false
