@@ -60,6 +60,7 @@ import numpy as np
 from ..problem.fitness import Fitness
 from ..problem.instance import ProblemInstance
 from .altitude import optimal_shared_altitude, optimize_altitudes
+from .class_coverage import ClassCoverage
 from .base import Optimizer, Result
 from .candidates import build_candidate_set, capped_covered_value, coverage_matrix
 
@@ -82,6 +83,8 @@ class MCLPLocalSearch(Optimizer):
         polish: bool = True,
         polish_iters: int = 24,
         seed_from_prev: bool = True,
+        class_balance_w: float = 0.0,
+        class_quota_frac: float = 0.35,
         **kw,
     ) -> None:
         super().__init__(**kw)
@@ -93,6 +96,29 @@ class MCLPLocalSearch(Optimizer):
         self.polish = bool(polish)
         self.polish_iters = int(polish_iters)
         self.seed_from_prev = bool(seed_from_prev)
+        if not 0.0 <= class_balance_w <= 1.0:
+            raise ValueError(f"class_balance_w must be in [0,1]; got {class_balance_w}")
+        # Weight on the submodular class-coverage term (see .class_coverage).
+        # 0.0 is exactly the linear value objective, so the ablation is clean.
+        self.class_balance_w = float(class_balance_w)
+        self.class_quota_frac = float(class_quota_frac)
+
+    def _class_objective(self, instance: ProblemInstance) -> "ClassCoverage | None":
+        """The class-coverage term, or None when it is off or unavailable.
+
+        Returns None rather than raising when the instance carries no label
+        histogram: most callers (Tier-1 scenarios, synthetic instances) have no
+        labels, and a placement method must not become unusable on them. The
+        blend weight is then forced to 0, which is reported in the result meta so
+        a run that silently fell back is visible.
+        """
+        if self.class_balance_w <= 0.0 or instance.class_hist is None:
+            return None
+        return ClassCoverage(
+            instance.class_hist,
+            instance.class_scarcity,
+            quota_frac=self.class_quota_frac,
+        )
 
     # -- budget ----------------------------------------------------------
 
@@ -120,6 +146,8 @@ class MCLPLocalSearch(Optimizer):
         instance: ProblemInstance,
         cover_sorted: np.ndarray,
         value_sorted: np.ndarray,
+        cover_raw: np.ndarray | None = None,
+        class_obj: "ClassCoverage | None" = None,
     ) -> np.ndarray:
         """Return ``(K,)`` candidate indices from capacitated greedy covering.
 
@@ -132,6 +160,9 @@ class MCLPLocalSearch(Optimizer):
         chosen = np.zeros(K, dtype=np.int64)
         usable = instance.battery >= instance.B_min_uav
         order = np.argsort(-instance.capacity, kind="stable")
+        # Class-coverage bookkeeping is in ORIGINAL device order, unlike the
+        # value greedy which works in descending-value order.
+        covered_mask = np.zeros(value_sorted.shape[0], dtype=bool)
 
         for j in order:
             if not usable[j]:
@@ -141,6 +172,16 @@ class MCLPLocalSearch(Optimizer):
                 continue
             live = cover_sorted & residual
             marginal = capped_covered_value(live, value_sorted, float(instance.capacity[j]))
+            if class_obj is not None and cover_raw is not None:
+                # Blend on normalized scales: the value marginal is divided by
+                # the largest single-candidate gain so the two terms are
+                # comparable regardless of the value model's units.
+                scale = max(float(marginal.max()), _EPS)
+                cls_gain = class_obj.marginal(cover_raw, covered_mask)
+                marginal = (
+                    (1.0 - self.class_balance_w) * (marginal / scale)
+                    + self.class_balance_w * cls_gain
+                )
             m = int(np.argmax(marginal))
             chosen[j] = m
             if marginal[m] <= _EPS:
@@ -148,6 +189,8 @@ class MCLPLocalSearch(Optimizer):
             row = live[m]
             take = row & (np.cumsum(row) <= instance.capacity[j])
             residual &= ~take
+            if cover_raw is not None:
+                covered_mask |= cover_raw[m]
         return chosen
 
     # -- local search ----------------------------------------------------
@@ -253,7 +296,10 @@ class MCLPLocalSearch(Optimizer):
         cover_sorted = cover[:, order]
         value_sorted = instance.value[order]
 
-        chosen = self._greedy_seed(instance, cover_sorted, value_sorted)
+        class_obj = self._class_objective(instance)
+        chosen = self._greedy_seed(
+            instance, cover_sorted, value_sorted, cover_raw=cover, class_obj=class_obj
+        )
         positions = np.column_stack([cands[chosen], np.full(K, z0)])
 
         best_pos = positions.copy()
@@ -344,5 +390,7 @@ class MCLPLocalSearch(Optimizer):
                 "candidate_cap_hit": bool(cands.shape[0] >= self.max_candidates),
                 "r_eff_m": r_eff,
                 "altitude_m": float(best_pos[0, 2]),
+                "class_balance_w": self.class_balance_w if class_obj is not None else 0.0,
+                "class_objective_active": class_obj is not None,
             },
         )
