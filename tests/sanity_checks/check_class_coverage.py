@@ -148,35 +148,79 @@ def quota_frac_one_is_exactly_linear_coverage():
         )
 
 
-def saturation_actually_changes_the_selection():
-    """Guard the guard: an inert flag would pass every check above."""
-    _, hist, _, cover = _toy(seed=5)
+def _imbalanced_toy(seed=5, n_cls=4, r=700.0):
+    """Devices whose LABEL SUPPLY is strongly imbalanced and spatially segregated.
+
+    The balanced fixture used by the checks above cannot test class diversity:
+    with roughly equal supply per class, plain coverage already returns a
+    balanced set and there is nothing for saturation to correct. Non-IID
+    federated data is the opposite — a dominant class and rare ones confined to
+    particular places — and that is the regime this objective exists for.
+    """
+    rng = np.random.default_rng(seed)
+    n_dev = 60
+    xy = rng.uniform(300.0, 3700.0, size=(n_dev, 2))
+    hist = np.zeros((n_dev, n_cls))
+    # 70% of devices are dominated by class 0; the rare classes sit in tight
+    # pockets, so reaching them costs the greedy something.
+    for i in range(n_dev):
+        if i < int(0.7 * n_dev):
+            hist[i, 0] = rng.integers(20, 60)
+        else:
+            c = 1 + (i % (n_cls - 1))
+            xy[i] = np.array([500.0 + 1200.0 * c, 3200.0]) + rng.normal(0, 180.0, 2)
+            hist[i, c] = rng.integers(4, 12)
+    cands = build_candidate_set(xy, r, np.array([0.0, 0.0]), np.array([4000.0, 4000.0]),
+                                max_candidates=400, rng=rng)
+    return hist, coverage_matrix(cands, xy, r)
+
+
+def saturation_improves_class_balance_under_imbalanced_supply():
+    """The objective's actual claim, tested where it applies.
+
+    Guards two things at once: that the flag is not inert, and that its effect
+    is in the intended direction. An earlier quota rule (``tau_c`` proportional
+    to each class's own supply) passed "not inert" while making coverage *less*
+    balanced than plain weighted coverage — it capped the rare classes first.
+    """
+    hist, cover = _imbalanced_toy()
     pool = list(range(cover.shape[0]))
 
-    def run(rho):
+    def run(rho, k=6):
         obj = ClassCoverage(hist, quota_frac=rho)
         covered = np.zeros(cover.shape[1], dtype=bool)
         picks = []
-        for _ in range(4):
+        for _ in range(k):
             gains = obj.marginal(cover[pool], covered)
             p = pool[int(np.argmax(gains))]
             picks.append(p)
             covered = covered | cover[p]
         return picks, covered
 
+    def n_classes_reached(mask):
+        return int((mask.astype(float) @ hist > 0).sum())
+
     picks_lin, cov_lin = run(1.0)
-    picks_sat, cov_sat = run(0.2)
+    picks_sat, cov_sat = run(0.15)
+
     assert picks_lin != picks_sat, (
-        "saturating the quota selected the identical sites as plain coverage — the "
+        "saturation selected the identical sites as plain coverage — the "
         "class-diversity term is inert and cannot be driving any result"
     )
-    # And the saturated run must be the more class-diverse one.
+    reached_lin = n_classes_reached(cov_lin)
+    reached_sat = n_classes_reached(cov_sat)
+    assert reached_sat >= reached_lin, (
+        f"saturated selection reached {reached_sat} classes vs {reached_lin} for plain "
+        "coverage; the objective is pushing the wrong way"
+    )
+
     def spread(mask):
         n = mask.astype(float) @ hist
         return float(n.min() / max(n.max(), 1e-12))
     assert spread(cov_sat) > spread(cov_lin), (
-        f"saturated selection is less class-balanced ({spread(cov_sat):.3f}) than the "
-        f"linear one ({spread(cov_lin):.3f}); the objective is not doing what it claims"
+        f"min/max class ratio {spread(cov_sat):.3f} (saturated) vs {spread(cov_lin):.3f} "
+        "(linear) — saturation did not improve class balance on imbalanced supply, "
+        "which is the only thing it is for"
     )
 
 
@@ -237,7 +281,7 @@ if __name__ == "__main__":
     check("objective is monotone", objective_is_monotone)
     check("greedy meets the (1-1/e) bound", greedy_beats_the_one_minus_one_over_e_bound)
     check("quota_frac=1 is exactly linear coverage", quota_frac_one_is_exactly_linear_coverage)
-    check("saturation changes the selection", saturation_actually_changes_the_selection)
+    check("saturation improves class balance", saturation_improves_class_balance_under_imbalanced_supply)
     check("mclp_ls class flag inert off / live on", mclp_ls_class_flag_is_inert_when_off_and_live_when_on)
     check("missing labels fall back visibly", missing_labels_fall_back_visibly)
     finish()
