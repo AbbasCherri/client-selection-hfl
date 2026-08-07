@@ -1,10 +1,49 @@
 fl:
-  lr: 0.01775
-  uav_lr: 0.01775
-  logit_adjust_tau: 0.601
-  server_momentum: 0.528
+  lr: 0.01686
+  uav_lr: 0.01686
+  lr_decay: none
+  logit_adjust_tau: 0.7
+  server_momentum: 0.771
+  ema_decay: 0.783
+  per_method:
+    fedcs:
+      lr: 0.019217
+      uav_lr: 0.019217
+      lr_decay: sqrt
+      logit_adjust_tau: 0.8067
+      server_momentum: 0.3801
+      ema_decay: 0.7168
+    rep_cap:
+      lr: 0.020776
+      uav_lr: 0.020776
+      lr_decay: none
+      logit_adjust_tau: 0.8224
+      server_momentum: 0.6237
+      ema_decay: 0.4943
+    fair_mab:
+      lr: 0.011372
+      uav_lr: 0.011372
+      lr_decay: none
+      logit_adjust_tau: 0.8425
+      server_momentum: 0.3883
+      ema_decay: 0.4555
+    oort:
+      lr: 0.0072598
+      uav_lr: 0.0072598
+      lr_decay: cosine
+      logit_adjust_tau: 0.6699
+      server_momentum: 0.4931
+      ema_decay: 0.715
+    power_of_choice:
+      lr: 0.015295
+      uav_lr: 0.015295
+      lr_decay: none
+      logit_adjust_tau: 0.7344
+      server_momentum: 0.3558
+      ema_decay: 0.5346
   K: 20
   R_comm: 20000.0
+  link_model: path_loss
   uniform_coverage_radius: true
   capacity: 6
   n_rounds: 100
@@ -21,14 +60,12 @@ fl:
     name: sgd
     momentum: 0.9
   server_lr: 1.0
-  lr_decay: cosine
-  ema_decay: 0.9
   fusion_owner: uav
   placement_class_aware: true
   target_metric: macro_f1
   target_value: 0.45
   seed: 23995
-calibrate_path_loss: true
+calibrate_path_loss: false
 name: paper_coverage
 results_dir: results/paper_coverage/R20000/seed1/centroid_place
 n_workers: 12
@@ -39,11 +76,12 @@ epicentre:
 - 137.272
 N: 200
 R_comm_values:
+- 250
+- 500
+- 1000
 - 2000
 - 4000
-- 6000
 - 8000
-- 12000
 - 20000
 data:
   source: real
@@ -60,15 +98,13 @@ budget:
   G_max: 30
 optimizer_params:
   mozaffari2016:
-    environment: suburban
-    freq_ghz: 2.0
-    max_path_loss_db: 145.0
+    theta_b_deg: 80.0
   alzenad2017:
     environment: suburban
-    freq_ghz: 2.0
-    max_path_loss_db: 145.0
+  moon2022:
+    environment: suburban
 methods:
 - centroid_place
-_pipeline_version: 3
+_pipeline_version: 4
 _diagnostics:
   black_chip_rate: 0.0

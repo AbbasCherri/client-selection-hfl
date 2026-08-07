@@ -98,13 +98,11 @@ budget:
   G_max: 30
 optimizer_params:
   mozaffari2016:
-    environment: suburban
-    freq_ghz: 2.0
-    max_path_loss_db: 145.0
+    theta_b_deg: 80.0
   alzenad2017:
     environment: suburban
-    freq_ghz: 2.0
-    max_path_loss_db: 145.0
+  moon2022:
+    environment: suburban
 methods:
 - pso_cluster_place
 _pipeline_version: 4
