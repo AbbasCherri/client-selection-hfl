@@ -1,0 +1,59 @@
+# Class-awareness realism ablation — arm 1 of 4 (the oracle arm).
+#
+# The question a reviewer will ask
+# --------------------------------
+# The proposed system uses per-client label histograms twice: to rank clients
+# during *selection*, and to bias UAV *placement* toward rare-class-rich
+# clients (fl.placement_class_aware). Every result through 2026-08 was produced
+# with class_source="true" — the ground-truth bincount, a statistic no
+# participant discloses. This family measures what the method is worth without
+# it, and separates the two uses, which are not equally defensible:
+#
+#   Selection only ever ranks clients some UAV already covers, so their
+#   histograms are observable by construction.
+#
+#   Placement decides *who becomes reachable*, so conditioning it on per-client
+#   histograms needs histograms from clients no UAV covers yet. That is only
+#   non-circular if the report path is separate from the data path — which this
+#   benchmark assumes (see the comment at federated.py's placement_class_aware:
+#   the placer already receives every client's coordinates, exactly as every
+#   placement baseline does, and a 4-bin histogram is a few bytes over the same
+#   low-rate control channel while R_comm is sized for model-update throughput).
+#   It is an assumption either way, so it gets measured rather than assumed.
+#
+# The four arms
+# -------------
+#   class_realism            true   + class-aware placement  ← this file, the oracle
+#   class_realism_pseudo     pseudo + class-aware placement  ← zero disclosure
+#   class_realism_noplace    true   + class-BLIND placement  ← isolates placement's share
+#   class_realism_none       none   + class-BLIND placement  ← lower anchor
+#
+# Read them together: (1 vs 2) is the cost of removing the oracle, (1 vs 3) is
+# what class-aware placement is worth at all, and (3 vs 4) is what class-aware
+# selection is worth once placement is blind. If (1 vs 3) is null, class-aware
+# placement carries an information assumption for nothing and should be dropped
+# from the headline claim — which is the outcome the coverage sweep's null
+# (placement does not move macro-F1 at any R_comm) leads us to expect.
+#
+# Run at N=200 ONLY. This is a sensitivity analysis at the single operating
+# point where selection pressure is highest (K=20 x cap=6 = 120 slots < 200
+# clients, so the selection rule actually binds). Running the full N grid would
+# quadruple the cost without supporting an additional claim.
+#
+# All four arms share optimizer_seed, data.seed and the method list, so the
+# per-job seeds match arm for arm and the comparison is properly paired.
+
+extends: paper_full.yaml
+
+name: class_realism_true
+results_dir: results/class_realism_true
+
+N_values:
+  - 200
+
+methods:
+  - proposed_hfl
+
+fl:
+  class_source: true
+  placement_class_aware: true

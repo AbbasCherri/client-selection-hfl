@@ -15,11 +15,18 @@ What must hold:
      without it rather than silently degrading to a priority greedy;
   5. scarcity is derived from the same source as the counts — pairing a
      disclosure-free histogram with an oracle scarcity vector would smuggle
-     the oracle back in.
+     the oracle back in;
+  6. `pseudo` is genuinely degraded — an untrained model must not reproduce the
+     ground truth, or the rung is the oracle wearing a different name — and it
+     raises without a model rather than falling back to blind;
+  7. the class-scarcity *placement* weight degrades together with the histogram
+     it comes from, so a "no class information" run cannot still be steering
+     UAVs with class information.
 """
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent))
 import numpy as np  # noqa: E402
@@ -31,10 +38,12 @@ from uavbench.fl.class_histograms import (  # noqa: E402
     VALID_SOURCES,
     build_class_info,
     dp_histograms,
+    pseudo_histograms,
     scarcity_from_counts,
     true_histograms,
 )
 from uavbench.fl.client_selection import ClientSelector  # noqa: E402
+from uavbench.fl.federated import _class_value_vector  # noqa: E402
 from uavbench.fl.device_state import DeviceState  # noqa: E402
 from uavbench.fl.selection_isolation import ARM_SPECS, resolve_arm  # noqa: E402
 
@@ -107,6 +116,70 @@ def scarcity_favours_rare_classes_and_is_normalised():
     assert s[2] > s[3], f"rarer class should carry more weight: {s}"
 
 
+class _StubCache:
+    """Minimal stand-in exposing exactly what pseudo_histograms reads."""
+
+    def __init__(self, n, seed=0):
+        g = torch.Generator().manual_seed(seed)
+        self.img_features = torch.randn(n, 512, generator=g)
+        self.struct_features = torch.randn(n, 9, generator=g)
+        self.labels = LABELS
+
+
+def pseudo_is_genuinely_degraded_not_a_hidden_oracle():
+    """The whole point of the rung: an untrained model must NOT reproduce truth.
+
+    If `pseudo` ever matched `true`, the realism claim would be vacuous — the
+    oracle would still be in the loop, just relabelled.
+    """
+    from uavbench.fl.model import CachedFusionModel  # noqa: PLC0415
+
+    torch.manual_seed(0)
+    model = CachedFusionModel()
+    cache = _StubCache(len(LABELS))
+    got = pseudo_histograms(model, cache, CLIENTS)
+    truth = true_histograms(LABELS, CLIENTS)
+    assert set(got) == set(truth), "pseudo must cover the same clients"
+    for cid in truth:
+        assert got[cid].sum() == truth[cid].sum(), "pseudo must preserve each client's row count"
+    assert any(not np.array_equal(got[c], truth[c]) for c in truth), (
+        "pseudo histogram from an untrained model equals the ground truth — "
+        "the rung is a relabelled oracle, not a degradation"
+    )
+
+
+def pseudo_needs_a_model_rather_than_silently_falling_back():
+    """A missing model must raise, not quietly return no class information.
+
+    run_full_hfl used to call build_class_info without model/cached_dataset,
+    which made `class_source: pseudo` unreachable — it raised on every run. The
+    loud failure is what makes that reachable-or-broken, never silently blind.
+    """
+    try:
+        build_class_info("pseudo", labels=LABELS, client_indices=CLIENTS)
+    except ValueError:
+        return
+    raise AssertionError("pseudo source accepted a call with no model")
+
+
+def class_value_vector_degrades_with_its_histogram():
+    """Class-aware placement must go inert exactly when the histogram does."""
+    clients = [SimpleNamespace(client_id=cid) for cid in CLIENTS]
+    counts = true_histograms(LABELS, CLIENTS)
+    scarcity = scarcity_from_counts(counts)
+
+    ones = np.ones(len(clients))
+    assert np.array_equal(_class_value_vector(clients, None, scarcity), ones)
+    assert np.array_equal(_class_value_vector(clients, counts, None), ones)
+    assert np.array_equal(_class_value_vector(clients, None, None), ones)
+
+    got = _class_value_vector(clients, counts, scarcity)
+    assert abs(got.mean() - 1.0) < 1e-9, f"must be mean-normalised, got {got.mean()}"
+    # Client 1 holds the singleton class 2; client 2 is four samples of the
+    # most common class. The rare-class holder must be weighted higher.
+    assert got[1] > got[2], f"rare-class client should outweigh common-class client: {got}"
+
+
 def _eligible_states(ids):
     """Device states that pass the four-condition gate.
 
@@ -167,6 +240,9 @@ if __name__ == "__main__":
     check("dp noise is real and epsilon-ordered", dp_is_actually_noisy_and_epsilon_ordered)
     check("dp noise is seed-reproducible", dp_is_reproducible_under_a_fixed_seed)
     check("none source yields no class info", none_source_yields_no_class_information)
+    check("pseudo is degraded, not a relabelled oracle", pseudo_is_genuinely_degraded_not_a_hidden_oracle)
+    check("pseudo without a model raises", pseudo_needs_a_model_rather_than_silently_falling_back)
+    check("class value vector degrades with its histogram", class_value_vector_degrades_with_its_histogram)
     check("scarcity favours rare classes", scarcity_favours_rare_classes_and_is_normalised)
     check("fixture states pass the eligibility gate", gate_lets_these_clients_through)
     check("class_greedy refuses to run blind", class_greedy_refuses_to_run_blind)

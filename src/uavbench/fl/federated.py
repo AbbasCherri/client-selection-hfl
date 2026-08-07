@@ -138,6 +138,26 @@ def _build_problem_instance(
     )
 
 
+def _class_value_vector(
+    clients: list[ClientData],
+    counts: dict[int, np.ndarray] | None,
+    scarcity: np.ndarray | None,
+) -> np.ndarray:
+    """Per-client minority-information weight ``Σ_c scarcity_c · count_c``.
+
+    Normalized to mean 1, so it re-weights placement value without changing its
+    overall scale. ``None`` counts (``class_source="none"``, or a ``pseudo``
+    histogram not yet refreshed) return all-ones: class-aware placement must
+    degrade together with the histogram it is derived from, or a "no class
+    information" run would still be steering UAVs with it.
+    """
+    if counts is None or scarcity is None:
+        return np.ones(len(clients))
+    value = np.array([float(np.dot(scarcity, counts[c.client_id])) for c in clients])
+    mean = float(value.mean())
+    return value / mean if mean > 0 else np.ones(len(clients))
+
+
 def _place_uavs(
     client_coords: dict[int, tuple[float, float]],
     K: int,
@@ -1116,6 +1136,28 @@ def run_full_hfl(cfg: dict) -> dict:
     ema_decay = float(fl.get("ema_decay", 0.9))  # 0 → evaluate the raw global model
     fusion_owner = str(fl.get("fusion_owner", "uav")).lower()  # "uav" | "client"
     reselect_every = int(fl.get("reselect_every", 1))  # selection cadence (≠ placement T_sel)
+    # Class-aware placement biases UAV coverage toward clients holding rare
+    # classes. It carries an information assumption that class-aware *selection*
+    # does not, and the difference is worth stating precisely:
+    #
+    #   Selection only ever ranks clients that some UAV already covers, so their
+    #   histograms are observable by construction. Placement decides *who
+    #   becomes reachable*, so conditioning it on per-client histograms needs
+    #   those histograms from clients no UAV covers yet — circular unless the
+    #   report path is separate from the data path.
+    #
+    # The assumption this benchmark makes, explicitly: the placer already
+    # receives every client's coordinates (`client_coord_map`), exactly as every
+    # placement baseline in the comparison set does — a demand map is the
+    # standard input to maximal-covering placement. A 4-bin histogram is a few
+    # bytes over that same low-rate control path, whereas `R_comm` is calibrated
+    # for sustained model-update throughput. Going from "I know where the
+    # devices are" to "I know their label mix" is an increment on an assumption
+    # already made, not a new class of oracle.
+    #
+    # It is nonetheless an assumption, which is why this is an ablation axis and
+    # not an unexamined default: report it on/off against the class_source
+    # ladder rather than folding it into the headline claim.
     placement_class_aware = bool(fl.get("placement_class_aware", True))
     # Histogram source for BOTH selection and class-aware placement. Applied
     # globally (every HFL method shares it), so it is not a fairness asymmetry
@@ -1176,18 +1218,26 @@ def run_full_hfl(cfg: dict) -> dict:
     _prior = _train_label_counts / _train_label_counts.sum().clamp_min(1.0)
     log_prior = torch.log(_prior.clamp_min(1e-8)).to(torch.float32) if logit_tau > 0 else None
     loss_fn = make_loss_fn(log_prior, tau=logit_tau)
-    client_class_counts, class_scarcity = build_class_info(
-        class_source,
-        labels=cached_dataset.labels,
-        client_indices={c.client_id: list(c.train_indices) for c in clients},
-        global_prior=_prior.numpy() if class_source == "true" else None,
-        epsilon=dp_epsilon,
-        # run_seed, not data.seed: the DP noise draw belongs to the run's RNG
-        # family so each seed repetition gets an independent release, and the
-        # noise enters the confidence intervals like every other stochastic
-        # component instead of being frozen across the sweep.
-        rng=np.random.default_rng(run_seed),
-    )
+    _client_train_idx = {c.client_id: list(c.train_indices) for c in clients}
+    if class_source == "pseudo":
+        # Needs a trained model, which does not exist yet — refreshed inside
+        # each method's round loop below. Starting at None means a bug in that
+        # refresh degrades to the documented no-class fallback rather than
+        # silently reusing an oracle histogram. Mirrors selection_isolation.py.
+        client_class_counts, class_scarcity = None, None
+    else:
+        client_class_counts, class_scarcity = build_class_info(
+            class_source,
+            labels=cached_dataset.labels,
+            client_indices=_client_train_idx,
+            global_prior=_prior.numpy() if class_source == "true" else None,
+            epsilon=dp_epsilon,
+            # run_seed, not data.seed: the DP noise draw belongs to the run's RNG
+            # family so each seed repetition gets an independent release, and the
+            # noise enters the confidence intervals like every other stochastic
+            # component instead of being frozen across the sweep.
+            rng=np.random.default_rng(run_seed),
+        )
     # Epicentre — use config override or default to Noto Peninsula 2024
     epicentre = tuple(cfg.get("epicentre", [37.488, 137.272]))  # type: ignore[assignment]
 
@@ -1308,19 +1358,34 @@ def run_full_hfl(cfg: dict) -> dict:
         # class_source="none" removes the histogram entirely, which also
         # disables class-aware placement — the two must degrade together, or a
         # "no class information" run would still be steering UAVs with it.
-        if client_class_counts is None or class_scarcity is None:
-            _client_class_value = np.ones(len(clients))
-        else:
-            _client_class_value = np.array(
-                [float(np.dot(class_scarcity, client_class_counts[c.client_id])) for c in clients]
-            )
-            _cv_mean = float(_client_class_value.mean())
-            _client_class_value = (
-                _client_class_value / _cv_mean if _cv_mean > 0 else np.ones(len(clients))
-            )
+        #
+        # Per-method copies: under class_source="pseudo" these are refreshed
+        # from *this* method's global model, so they must not leak across
+        # methods in the loop above.
+        _cc_counts, _cc_scarcity = client_class_counts, class_scarcity
+        _client_class_value = _class_value_vector(clients, _cc_counts, _cc_scarcity)
 
         for rnd in range(1, n_rounds + 1):
             t0 = time.perf_counter()
+
+            # ── Pseudo-label histogram refresh ────────────────────────────
+            # Refreshed from the *current* global model on the scheduled
+            # reselection cadence, ahead of placement so that placement and
+            # selection within a round both see the same histogram. Round 1
+            # therefore runs on an untrained model — that is the honest cost of
+            # removing the oracle, and warm-starting it from the true counts
+            # would defeat the purpose of this rung. An early trigger
+            # (low_eligible) reselects on the last scheduled histogram rather
+            # than forcing an extra pass.
+            if class_source == "pseudo" and (rnd - 1) % reselect_every == 0:
+                _cc_counts, _cc_scarcity = build_class_info(
+                    "pseudo",
+                    labels=cached_dataset.labels,
+                    client_indices=_client_train_idx,
+                    model=global_model,
+                    cached_dataset=cached_dataset,
+                )
+                _client_class_value = _class_value_vector(clients, _cc_counts, _cc_scarcity)
 
             # ── Client state (needed for both triggers and selection) ─────
             device_states = device_mgr.get_all_states()
@@ -1428,8 +1493,8 @@ def run_full_hfl(cfg: dict) -> dict:
                     # At the 1x default this saturates on the reselection
                     # cadence, which makes fair_mab's staleness term a constant
                     # and the baseline invariant to its own weights — see
-                    class_counts=client_class_counts,  # proposed (ucb) class-coverage utility
-                    class_scarcity=class_scarcity,
+                    class_counts=_cc_counts,  # proposed (ucb) class-coverage utility
+                    class_scarcity=_cc_scarcity,
                 )
 
             coverage_pct = 100.0 * len(covered_all) / max(len(clients), 1)

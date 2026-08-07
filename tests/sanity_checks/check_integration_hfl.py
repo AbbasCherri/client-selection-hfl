@@ -93,6 +93,26 @@ def different_seeds_differ():
     assert len(set(results)) > 1, "all seeds produced identical selections — rng unused"
 
 
+def class_source_ladder_runs_end_to_end():
+    """Every rung of the oracle ladder must be reachable from run_full_hfl.
+
+    `pseudo` was not: run_full_hfl called build_class_info without a model, so
+    the rung raised on every run and the realism answer existed only in the
+    selection-isolation harness. Exercising all four here is what keeps the
+    ladder honest — a rung nobody can run is not a rung.
+    """
+    for source in ("true", "pseudo", "dp", "none"):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = _cfg(d, ["proposed_hfl", "hfl_no_selection"], n_rounds=2)
+            cfg["fl"]["class_source"] = source
+            cfg["fl"]["dp_epsilon"] = 1.0
+            df = run_full_hfl(cfg)["rounds"]
+            for m in ("proposed_hfl", "hfl_no_selection"):
+                rows = df[df["method"] == m]
+                assert len(rows) == 2, f"{source}/{m}: got {len(rows)} rounds, want 2"
+                assert rows["macro_f1"].between(0, 1).all(), f"{source}/{m}: macro_f1 out of range"
+
+
 def clone_model_matches_deepcopy():
     # clone_model is a hand-rolled fast path replacing copy.deepcopy. It must
     # stay bit-identical: same param values, same per-parameter requires_grad,
@@ -164,6 +184,7 @@ check("all ablations share one schema; bounds hold; files on disk", schema_and_b
 check("T_sel repositioning cadence; hfl_static truly static", placement_cadence)
 check("same seed -> identical accuracy/selection trajectories", same_seed_reproduces)
 check("different seeds -> different random selections", different_seeds_differ)
+check("every class_source rung runs end-to-end", class_source_ladder_runs_end_to_end)
 check("clone_model is bit-identical to deepcopy and preserves the RNG stream", clone_model_matches_deepcopy)
 check("fedavg/reputation_fedavg in-place accumulation matches naive formula", fedavg_inplace_matches_naive)
 finish()

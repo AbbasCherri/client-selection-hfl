@@ -1,0 +1,21 @@
+# Class-awareness realism ablation — arm 2/4: zero-disclosure histogram.
+#
+# The histogram comes from the *current global model's own predictions* on each
+# client's data, refreshed on the reselection cadence. No labels leave any
+# device and the server computes it from a model it already holds, so the
+# disclosure objection does not apply at all. Round 1 therefore runs on an
+# untrained model: that warm-up cost is the honest price of removing the
+# oracle, and warm-starting from the true counts would defeat the purpose.
+#
+# If the method survives this arm, the realism objection to class-aware FL
+# dissolves. If it only works on arm 1, report `true` as an oracle upper bound
+# and say so plainly. See configs/class_realism.yaml for the full design.
+
+extends: class_realism.yaml
+
+name: class_realism_pseudo
+results_dir: results/class_realism_pseudo
+
+fl:
+  class_source: pseudo
+  placement_class_aware: true
