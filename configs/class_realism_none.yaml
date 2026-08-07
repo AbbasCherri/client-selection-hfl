@@ -18,5 +18,5 @@ name: class_realism_none
 results_dir: results/class_realism_none
 
 fl:
-  class_source: none
+  class_source: "none"
   placement_class_aware: false

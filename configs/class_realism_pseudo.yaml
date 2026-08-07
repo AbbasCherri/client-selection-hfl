@@ -17,5 +17,5 @@ name: class_realism_pseudo
 results_dir: results/class_realism_pseudo
 
 fl:
-  class_source: pseudo
+  class_source: "pseudo"
   placement_class_aware: true
