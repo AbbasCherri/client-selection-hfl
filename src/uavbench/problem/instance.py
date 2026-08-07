@@ -69,6 +69,12 @@ class ProblemInstance:
     upper: np.ndarray
     R_comm: float = 500.0
     B_min_uav: float = 0.2
+    # Optional per-device label histogram ``(N, C)`` and per-class scarcity
+    # weights ``(C,)``. Only the class-coverage placement objective reads these;
+    # every other method and every existing caller ignores them, so instances
+    # built without them behave exactly as before.
+    class_hist: np.ndarray | None = None
+    class_scarcity: np.ndarray | None = None
     meta: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
