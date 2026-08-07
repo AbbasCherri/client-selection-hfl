@@ -55,11 +55,23 @@ optimum:
 
     F(S_greedy) >= (1 - 1/e) * max over all placements in R^2 of F
 
-``tau_c = rho * total_c`` makes the flag exactly inert at ``rho = 1``: no set can
-cover more of class ``c`` than exists, so the truncation never binds and ``F``
-collapses to plain weighted coverage — the objective the method already had.
-Any behaviour change at ``rho < 1`` is therefore attributable to saturation and
-nothing else.
+The quota is a **single absolute count shared by every class**,
+``tau_c = rho * max_c(total_c)``, and that detail is the whole mechanism. The
+obvious alternative, ``tau_c = rho * total_c``, is wrong in the exact direction
+that matters: it hands common classes a large quota and rare classes a small
+one, so the greedy saturates the rare classes first and then spends the rest of
+its budget chasing the common ones. Measured, it produced selections *less*
+class-balanced than plain coverage (min/max class ratio 0.18 vs 0.40).
+
+An equal absolute quota is what macro-F1 actually implies — every class counts
+the same, so "enough" means the same number of samples for each. Common classes
+hit the cap early and stop earning; rare ones keep earning until they catch up.
+
+It also keeps the flag exactly inert at ``rho = 1``: ``tau_c`` is then the
+largest class total, which no class can exceed, so the truncation never binds
+and ``F`` collapses to plain weighted coverage — the objective the method
+already had. Any behaviour change at ``rho < 1`` is therefore attributable to
+saturation and nothing else.
 
 Scope, stated honestly: the guarantee is for the uncapacitated class-coverage
 objective. Per-UAV capacity is enforced downstream by the shared greedy
@@ -84,8 +96,10 @@ class ClassCoverage:
         ``(C,)`` per-class weights; ``None`` weights all classes equally, which
         is what macro-F1 itself does.
     quota_frac:
-        ``rho`` in ``tau_c = rho * total_c``. ``1.0`` disables saturation and
-        reduces ``F`` to weighted coverage exactly.
+        ``rho`` in ``tau_c = rho * max_c(total_c)`` — one absolute quota shared by
+        all classes. ``1.0`` disables saturation and reduces ``F`` to weighted
+        coverage exactly; smaller values push harder toward equal per-class
+        representation.
     """
 
     def __init__(
@@ -107,7 +121,12 @@ class ClassCoverage:
             raise ValueError(f"quota_frac must be in (0, 1]; got {quota_frac}")
         self.quota_frac = float(quota_frac)
         self.total = self.hist.sum(axis=0)  # (C,) how much of each class exists
-        self.tau = self.quota_frac * self.total
+        # One shared absolute quota, NOT one proportional to each class's supply
+        # — see the module docstring for why the proportional form inverts the
+        # intended effect.
+        self.tau = np.full_like(
+            self.total, self.quota_frac * float(self.total.max())
+        )
         # Normaliser: the largest F any placement could reach.
         self.f_max = max(float(np.dot(self.w, self.tau)), 1e-12)
 
