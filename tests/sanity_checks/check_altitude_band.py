@@ -43,13 +43,36 @@ def _z_star(r_comm, z_min=Z_MIN_M_DEFAULT, z_max=Z_MAX_M_DEFAULT):
 
 
 def optimum_is_interior_in_the_default_band():
-    """z_star must be strictly inside the band, or altitude is not a decision."""
-    for r_comm in (500.0, 1000.0, 2000.0, 3000.0):
+    """z_star must be strictly inside the band, or altitude is not a decision.
+
+    Valid only inside the band's reach. The coherent ground-radius interval is
+    ``z/tan(theta_opt)`` = 270 m .. 2700 m for a 100-1000 m band; outside it the
+    optimum correctly sits on a bound, which is a property of the geometry, not
+    a bug. `coherent_interval_edges_are_where_expected` pins those edges.
+    """
+    for r_comm in (500.0, 1000.0, 2000.0, 2500.0):
         z = _z_star(r_comm)
         assert Z_MIN_M_DEFAULT < z < Z_MAX_M_DEFAULT, (
             f"R_comm={r_comm}: z*={z} is pinned at a bound of "
             f"[{Z_MIN_M_DEFAULT}, {Z_MAX_M_DEFAULT}] — vertical decision degenerate"
         )
+
+
+def coherent_interval_edges_are_where_expected():
+    """Radii outside z/tan(theta_opt) must pin — that is the constraint's shape.
+
+    Documents the usable window so a future config change that walks past it
+    fails loudly here instead of quietly reproducing the degenerate regime this
+    whole change was made to escape.
+    """
+    assert _z_star(4000.0) >= Z_MAX_M_DEFAULT - 1e-6, (
+        "R_comm=4 km should exceed the band's reach and pin at the ceiling; "
+        "if it no longer does, the coherent interval has moved and the shipped "
+        "R_comm values need rechecking"
+    )
+    assert _z_star(150.0) <= Z_MIN_M_DEFAULT + 1e-6, (
+        "R_comm=150 m should sit below the band's reach and pin at the floor"
+    )
 
 
 def the_old_band_is_shown_to_be_degenerate():
@@ -109,16 +132,41 @@ def shipped_configs_stay_in_the_coherent_band():
         z_min = float(fl.get("z_min_m", Z_MIN_M_DEFAULT))
         z_max = float(fl.get("z_max_m", Z_MAX_M_DEFAULT))
         r_comm = float(fl["R_comm"])
-        z = _z_star(r_comm, z_min, z_max)
+        # Every radius the config actually deploys at, including swept grids —
+        # checking only fl.R_comm would miss a sweep whose cells leave the band.
+        radii = [r_comm] + [float(r) for r in cfg.get("R_comm_values", [])]
+        for r in radii:
+            z = _z_star(r, z_min, z_max)
+            assert z_min < z < z_max, (
+                f"{name}: R_comm={r} with band [{z_min}, {z_max}] pins z*={z} "
+                "at a bound — placement would be run outside the model's physics"
+            )
+
+
+def swept_radius_grids_stay_in_the_band():
+    """The coverage sweep's whole grid must be coherent, not just its default."""
+    path = _REPO / "configs" / "paper_coverage.yaml"
+    if not path.exists():
+        return
+    cfg = load_config(path)
+    fl = cfg["fl"]
+    z_min = float(fl.get("z_min_m", Z_MIN_M_DEFAULT))
+    z_max = float(fl.get("z_max_m", Z_MAX_M_DEFAULT))
+    grid = [float(r) for r in cfg["R_comm_values"]]
+    assert grid, "paper_coverage has no R_comm_values"
+    for r in grid:
+        z = _z_star(r, z_min, z_max)
         assert z_min < z < z_max, (
-            f"{name}: R_comm={r_comm} with band [{z_min}, {z_max}] pins z*={z} "
-            "at a bound — placement would be run outside the model's physics"
+            f"paper_coverage R_comm={r} pins z*={z} in band [{z_min}, {z_max}] — "
+            "that cell would repeat the degenerate-altitude regime"
         )
 
 
 check("optimum is interior in the default band", optimum_is_interior_in_the_default_band)
+check("coherent interval edges are where expected", coherent_interval_edges_are_where_expected)
 check("the retired 20-120 m band is demonstrably degenerate", the_old_band_is_shown_to_be_degenerate)
 check("altitude materially changes the radius", altitude_actually_changes_the_radius)
 check("operating point is LoS-dominated", operating_point_is_los_dominated)
 check("shipped configs stay in the coherent band", shipped_configs_stay_in_the_coherent_band)
+check("swept radius grids stay in the band", swept_radius_grids_stay_in_the_band)
 finish()
