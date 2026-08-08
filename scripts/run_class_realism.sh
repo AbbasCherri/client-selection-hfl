@@ -81,7 +81,7 @@ python scripts/merge_class_realism.py || STATUS=$?
 # hid that the selection advantage does not transfer to accuracy.
 for metric in macro_f1 accuracy f1_collapsed f1_missing f1_obstructed f1_survived; do
     say "significance vs the oracle arm: ${metric}"
-    python -m uavbench significance --config results/class_realism \
+    python -m uavbench significance --config results/class_realism_main_merged \
         --metric "$metric" --reference true_placeaware --correction-scope group || true
 done
 

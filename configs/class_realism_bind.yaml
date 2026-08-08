@@ -1,0 +1,34 @@
+# Class-awareness realism ablation — arm 5/6: placement contrast at a BINDING radius.
+#
+# Why this arm exists (a correction to arms 1/3)
+# ----------------------------------------------
+# Arms 1-4 inherit R_comm = 20 km from paper_full, where proposed_hfl already
+# covers 99.95% of clients (measured, arm 1). Class-aware placement works by
+# steering *which* clients fall inside coverage — at 99.95% there is nothing
+# left to steer, so `true_placeaware` vs `true_placeblind` at 20 km is null by
+# construction and carries no information about whether class-aware placement
+# helps. Reading that null as evidence would be a mistake.
+#
+# Note the coverage sweep *does* separate placement methods at 20 km (macro-F1
+# spread 0.412-0.538). That is bad placement rules failing to cover at all —
+# it does not give proposed_hfl any headroom against itself.
+#
+# R_comm = 8 km is the operating point for the placement question: coverage is
+# partial so placement decides who participates, while enough clients remain
+# reachable that selection still binds (120 slots vs 200 clients) and macro-F1
+# is well clear of the floor (0.409 for proposed_hfl in the coverage sweep, vs
+# 0.317 at 4 km where the task starts to starve).
+#
+# Paired against class_realism_bind_noplace, this is the test arms 1/3 were
+# supposed to be. Everything else — seeds, N, method, rounds — is unchanged, so
+# the pairing is valid and the only variable is placement_class_aware.
+
+extends: class_realism.yaml
+
+name: class_realism_bind
+results_dir: results/class_realism_bind
+
+fl:
+  R_comm: 8000.0
+  class_source: "true"
+  placement_class_aware: true

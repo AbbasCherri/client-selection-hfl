@@ -1,0 +1,18 @@
+# Class-awareness realism ablation — arm 6/6: class-blind placement at a binding radius.
+#
+# The comparator for class_realism_bind. Same R_comm = 8 km, same oracle
+# histogram for selection, class-aware placement OFF. This pair is the actual
+# test of whether class-aware placement earns its information assumption; the
+# 20 km pair (arms 1/3) cannot answer it because coverage saturates at 99.95%.
+#
+# See configs/class_realism_bind.yaml for why 8 km.
+
+extends: class_realism.yaml
+
+name: class_realism_bind_noplace
+results_dir: results/class_realism_bind_noplace
+
+fl:
+  R_comm: 8000.0
+  class_source: "true"
+  placement_class_aware: false
