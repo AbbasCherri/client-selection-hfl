@@ -93,6 +93,38 @@ _ENERGY_MODEL = EnergyModel()
 # ---------------------------------------------------------------------------
 
 
+# Altitude band for UAV placement, metres AGL.
+#
+# This is NOT the 120 m (400 ft) small-UAS ceiling, and the reason is physical
+# rather than convenient. The Al-Hourani channel's radius-versus-altitude curve
+# peaks at an elevation angle theta_opt that depends only on the environment
+# (20.34 deg suburban), so the channel-optimal ground radius is z/tan(theta_opt).
+# Under a 20-120 m band that is 54-324 m: every configured R_comm above ~324 m
+# pins the optimum at the ceiling, the vertical decision goes degenerate, and
+# "3D placement" collapses back to a planar placement carrying a height column —
+# exactly the failure link.py was written to remove.
+#
+# It is worse than degenerate at the top of the old sweep grid. At z=120 m and a
+# 20 km radius the elevation angle is 0.34 deg, giving P(LoS) ~ 2.8%: the link is
+# 97% NLoS, so the line-of-sight advantage that motivates an aerial base station
+# is switched off entirely, and R_comm=20 km is only reachable because link.py
+# back-solves whatever path-loss budget makes the configured radius achievable.
+#
+# 100-1000 m is the band the UAV-base-station literature this benchmark compares
+# against actually assumes — Mozaffari 2016 and Alzenad 2017 both derive
+# altitudes of hundreds of metres to kilometres from r/tan(theta), and clamping
+# them to 120 m distorts the published methods rather than reproducing them.
+# Operationally it corresponds to a disaster-response waiver or a larger UAS
+# class, not routine small-UAS flight; state that assumption when reporting.
+#
+# The guard against silently re-introducing the degeneracy is
+# tests/sanity_checks/check_altitude_band.py, which requires the radius-
+# maximizing altitude to be strictly interior to the band at the configured
+# R_comm.
+Z_MIN_M_DEFAULT = 100.0
+Z_MAX_M_DEFAULT = 1000.0
+
+
 def _build_problem_instance(
     client_coords: dict[int, tuple[float, float]],
     K: int,
@@ -145,37 +177,6 @@ def _build_problem_instance(
         ref,
     )
 
-
-# Altitude band for UAV placement, metres AGL.
-#
-# This is NOT the 120 m (400 ft) small-UAS ceiling, and the reason is physical
-# rather than convenient. The Al-Hourani channel's radius-versus-altitude curve
-# peaks at an elevation angle theta_opt that depends only on the environment
-# (20.34 deg suburban), so the channel-optimal ground radius is z/tan(theta_opt).
-# Under a 20-120 m band that is 54-324 m: every configured R_comm above ~324 m
-# pins the optimum at the ceiling, the vertical decision goes degenerate, and
-# "3D placement" collapses back to a planar placement carrying a height column —
-# exactly the failure link.py was written to remove.
-#
-# It is worse than degenerate at the top of the old sweep grid. At z=120 m and a
-# 20 km radius the elevation angle is 0.34 deg, giving P(LoS) ~ 2.8%: the link is
-# 97% NLoS, so the line-of-sight advantage that motivates an aerial base station
-# is switched off entirely, and R_comm=20 km is only reachable because link.py
-# back-solves whatever path-loss budget makes the configured radius achievable.
-#
-# 100-1000 m is the band the UAV-base-station literature this benchmark compares
-# against actually assumes — Mozaffari 2016 and Alzenad 2017 both derive
-# altitudes of hundreds of metres to kilometres from r/tan(theta), and clamping
-# them to 120 m distorts the published methods rather than reproducing them.
-# Operationally it corresponds to a disaster-response waiver or a larger UAS
-# class, not routine small-UAS flight; state that assumption when reporting.
-#
-# The guard against silently re-introducing the degeneracy is
-# tests/sanity_checks/check_altitude_band.py, which requires the radius-
-# maximizing altitude to be strictly interior to the band at the configured
-# R_comm.
-Z_MIN_M_DEFAULT = 100.0
-Z_MAX_M_DEFAULT = 1000.0
 
 
 def _class_value_vector(
