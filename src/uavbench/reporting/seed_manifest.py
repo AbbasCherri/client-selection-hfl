@@ -32,6 +32,7 @@ HARNESSES = (
     "sweep",
     "paper_sweep",
     "coverage",
+    "uav",
     "selection_sweep",
     "stress_sweep",
 )
@@ -128,6 +129,31 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
                             "harness": harness,
                             "method": method,
                             "N": N,
+                            "seed_idx": seed_idx,
+                            "job_seed": job_seed,
+                            "seed": fullsim_method_seed(job_seed, method),
+                            "partition_seed": partition_seed_for(seed_idx),
+                        }
+                    )
+
+    elif harness == "uav":
+        # Fleet-size sweep at fixed N and R_comm: seed depends on (seed_idx, N)
+        # exactly as paper_sweep and coverage do. K and capacity are within-seed
+        # conditions, not seed inputs, so every fleet size sees the identical
+        # problem instance — which is what makes the cells paired.
+        opt_seed = cfg.get("optimizer_seed", 9876)
+        N = int(cfg["N"])
+        for entry in cfg["K_values"]:
+            for method in cfg["methods"]:
+                for seed_idx in range(cfg.get("n_seeds", 1)):
+                    job_seed = sweep_job_seed(opt_seed, seed_idx, N)
+                    rows.append(
+                        {
+                            "harness": harness,
+                            "method": method,
+                            "N": N,
+                            "K": int(entry["K"]),
+                            "capacity": int(entry["capacity"]),
                             "seed_idx": seed_idx,
                             "job_seed": job_seed,
                             "seed": fullsim_method_seed(job_seed, method),

@@ -23,6 +23,7 @@ from _fixture import build_synthetic_raw  # noqa: E402
 from _lib import check, finish  # noqa: E402
 
 from uavbench.fl.sweep import run_uav_sweep  # noqa: E402
+from uavbench.reporting import build_seed_manifest  # noqa: E402
 from uavbench.runner import load_config  # noqa: E402
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -95,6 +96,27 @@ def shipped_config_holds_slots_constant():
     assert "random_place" in cfg["methods"], "random_place is the placement floor"
 
 
+def seed_manifest_covers_the_uav_harness():
+    """The CLI writes a seed manifest before running — that path must work.
+
+    Caught late: the checks above call run_uav_sweep directly, so they skipped
+    _write_seed_manifest entirely and the sweep died on its first real CLI
+    invocation with `unknown harness 'uav'`. Testing the library function while
+    the entry point is broken is exactly the gap this closes.
+    """
+    cfg = load_config(_REPO / "configs" / "paper_uav_count.yaml")
+    man = build_seed_manifest(cfg, "uav")
+    expected = len(cfg["K_values"]) * len(cfg["methods"]) * cfg.get("n_seeds", 1)
+    assert len(man) == expected, f"manifest has {len(man)} rows, expected {expected}"
+    for col in ("K", "capacity", "seed", "partition_seed"):
+        assert col in man.columns, f"manifest missing {col}"
+    # Pairing across fleet sizes requires the same seed at each K.
+    per_k = man.groupby("K")["seed"].apply(lambda s: sorted(s.unique()))
+    first = per_k.iloc[0]
+    for k, seeds in per_k.items():
+        assert seeds == first, f"K={k} draws different seeds — cells would not be paired"
+
+
 def flat_fl_is_k_invariant():
     """flat_fl has no UAVs — if it moves with K, something other than placement is."""
     pairs = [{"K": 2, "capacity": 6}, {"K": 4, "capacity": 3}]
@@ -111,5 +133,6 @@ def flat_fl_is_k_invariant():
 check("K and capacity reach each job", k_and_capacity_reach_the_run)
 check("malformed K_values are rejected", malformed_pairs_are_rejected)
 check("shipped config holds K*C constant", shipped_config_holds_slots_constant)
+check("seed manifest covers the uav harness", seed_manifest_covers_the_uav_harness)
 check("flat_fl is invariant to K", flat_fl_is_k_invariant)
 finish()
