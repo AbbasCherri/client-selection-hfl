@@ -1,0 +1,2 @@
+method,coverage_pct,participation_pct,comm_mb_round,cumulative_energy_j,round_time_s,placement_fitness,jain_fairness,rounds_to_target
+proposed_hfl,94.3,31.7,53.2973,169999686.5175,6.3277,0.5089,0.8881,86.0
