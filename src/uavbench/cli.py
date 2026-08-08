@@ -12,7 +12,7 @@ import pandas as pd
 
 from .fl.federated import run_tier2
 from .fl.selection_isolation import run_selection_sweep
-from .fl.sweep import run_coverage_sweep, run_paper_sweep, run_sweep
+from .fl.sweep import run_coverage_sweep, run_paper_sweep, run_sweep, run_uav_sweep
 from .plotting import _last_round, analyze_dir, plot_dir, plot_sweep, plot_tier2
 from .reporting import build_seed_manifest, summarize_wall_clock
 from .runner import load_config, run_experiment
@@ -111,6 +111,7 @@ _SIG_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("runs.parquet", ("scenario",)),
     ("paper_sweep_rounds.parquet", ("N",)),
     ("coverage_sweep_rounds.parquet", ("R_comm",)),
+    ("uav_sweep_rounds.parquet", ("K",)),
     ("stress_rounds.parquet", ("dropout_rate", "snr_degradation_db", "black_chip_rate")),
     ("selection_sweep_rounds.parquet", ("N",)),
     ("sweep_rounds.parquet", ("N",)),
@@ -526,6 +527,26 @@ def cmd_run_coverage_sweep(args: argparse.Namespace) -> None:
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
 
+def cmd_run_uav_sweep(args: argparse.Namespace) -> None:
+    """Fleet-size sweep: (K, capacity) × placement-method × seed at fixed N, R_comm."""
+    cfg = load_config(_find_config(args.config))
+    _write_seed_manifest(cfg, "uav")
+    out = run_uav_sweep(cfg)
+    df = out["rounds"]
+    for metric in ("macro_f1", "coverage_pct"):
+        # coverage_pct alongside macro_f1 on purpose: it is what says whether a
+        # flat row means "placement does not matter here" or "every method is
+        # already covering everyone", which look identical in macro_f1 alone.
+        print(f"\n=== Fleet-size sweep (final-round {metric}, mean across seeds) ===")
+        summary = (
+            df.sort_values("round").groupby(["method", "K"]).last()[metric]
+            .reset_index().pivot_table(index="method", columns="K", values=metric)
+        )
+        with pd.option_context("display.max_rows", None, "display.width", 200):
+            print(summary.round(3).to_string())
+    print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
+
+
 def cmd_run_sweep(args: argparse.Namespace) -> None:
     cfg = load_config(_find_config(args.config))
     _write_seed_manifest(cfg, "sweep")
@@ -607,6 +628,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_cov.add_argument("--config", default="configs/paper_coverage.yaml")
     p_cov.set_defaults(func=cmd_run_coverage_sweep)
+
+    p_uav = sub.add_parser(
+        "run_uav_sweep",
+        help="fleet-size sweep ((K, capacity) × placement method × seed, fixed N and R_comm)",
+    )
+    p_uav.add_argument("--config", default="configs/paper_uav_count.yaml")
+    p_uav.set_defaults(func=cmd_run_uav_sweep)
 
     p_st = sub.add_parser(
         "run_stress_sweep",

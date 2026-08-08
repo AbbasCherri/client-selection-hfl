@@ -1,0 +1,140 @@
+# Fleet-size sweep — how much does the placement algorithm matter as K varies?
+#
+# The question
+# ------------
+# The coverage sweep (results/paper_coverage, 2026-08-07) found that placement
+# method does not move macro-F1: 6 of 105 placement-vs-placement comparisons
+# significant, and `mclp_place` never Holm-beats uniform-random placement at any
+# radius. But that sweep varied the radio range at a FIXED fleet of K=20 UAVs,
+# and K=20 is deep in the saturated regime — 99.95% coverage at 20 km. A method
+# cannot demonstrate better placement when every client is already covered.
+#
+# K is the more direct knob. At R_comm = 20 km one disc already covers a large
+# fraction of the Noto peninsula, so coverage saturates by K ~ 4-6 and every
+# placement rule converges above that. Below it, each UAV's position is load
+# bearing: with 2 or 3 aircraft, where you put them decides who trains at all.
+# If placement quality matters anywhere, it matters here — and if the spread
+# across methods stays flat even at K=2, the negative result is about as
+# strong as this benchmark can make it.
+#
+# Why capacity is swept WITH K (the design decision that makes this readable)
+# ---------------------------------------------------------------------------
+# Holding per-UAV capacity fixed at 6 would make total training slots K*C scale
+# with the fleet: K=2 would give 12 slots for 200 clients. The model would then
+# be starved of data at exactly the cells where placement is most stressed, and
+# a flat macro-F1 across methods would be uninterpretable — data starvation and
+# placement irrelevance look identical in that column.
+#
+# So each K is paired with a capacity holding K*C = 120 exactly, the same total
+# as paper_full. Per-round data volume is constant; only coverage geometry
+# changes. The per-UAV capacities at small K (60 clients on one aircraft) are
+# not operationally realistic — this is a controlled ablation isolating
+# placement, and that caveat must be stated wherever it is reported. The
+# realistic-but-confounded variant (fixed capacity=6) is a separate run if we
+# want it; do not silently mix the two.
+#
+# Built-in validity check: `flat_fl` has no UAVs, so its row MUST be flat across
+# every K. If it is not, the sweep is leaking something that is not placement.
+#
+# Read `coverage_pct` next to `macro_f1` in every cell. It is what distinguishes
+# "placement does not matter here" from "everyone already covers everyone" —
+# the exact trap that made the 20 km placement contrast in the class-realism
+# ablation powerless.
+#
+# Grid: 6 K-values x 17 methods x 10 seeds = 1020 jobs, ~10-12 h on 12 vCPU.
+# Checkpointed per (K, seed, method) — safe to interrupt and relaunch.
+calibrate_path_loss: false
+extends: tuned_weights.yaml
+
+name: paper_uav_count
+results_dir: results/paper_uav_count
+
+n_workers: 12
+n_seeds: 10
+optimizer_seed: 9876
+epicentre: [37.488, 137.272]
+
+N: 200                       # fixed client count; only the fleet sweeps
+
+# (K, capacity) pairs, K*C = 120 throughout. Explicit rather than derived so
+# the design is auditable from this file alone; run_uav_sweep warns if the
+# products drift by more than 2x.
+K_values:
+  - {K: 2,  capacity: 60}
+  - {K: 3,  capacity: 40}
+  - {K: 4,  capacity: 30}
+  - {K: 6,  capacity: 20}
+  - {K: 10, capacity: 12}
+  - {K: 20, capacity: 6}
+
+data:
+  source: real
+  subsample: 1.0
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  feature_num_workers: 8
+  N_clients: 200
+
+fl:
+  K: 20                      # overridden per job by run_uav_sweep
+  capacity: 6                # overridden per job by run_uav_sweep
+  R_comm: 20000.0            # FIXED at the paper operating point — K is the variable
+  link_model: path_loss
+  uniform_coverage_radius: true
+  n_rounds: 100
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  batch_size: 32
+  T_sel: 5
+  reselect_every: 1
+  lambda_min: 0.5
+  R_min: 0.3
+  placement_method: pso
+  balanced_sampling: false
+  local_optimizer:
+    name: sgd
+    momentum: 0.9
+  server_lr: 1.0
+  fusion_owner: uav
+  # Left ON to match paper_coverage and paper_full, so this sweep is directly
+  # comparable to both. Its contribution is measured separately by the
+  # class-realism arms, not here.
+  placement_class_aware: true
+  class_source: "true"
+  target_metric: macro_f1
+  target_value: 0.45
+
+budget:
+  P: 50
+  G_max: 30
+
+optimizer_params:
+  mozaffari2016:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+  alzenad2017:
+    environment: suburban
+    freq_ghz: 2.0
+    max_path_loss_db: 145.0
+
+# Same 17 methods as paper_coverage, so the two sweeps are directly comparable.
+methods:
+  - mclp_place        # PROPOSED: candidate-set placement (1D altitude + 2D covering)
+  - proposed_hfl      # PSO placement, repositioned every T_sel
+  - ga_place
+  - de_place
+  - gwo_place
+  - pso_cluster_place # Sawalmeh et al., Sensors 22(1):223, 2021
+  - spiral_place      # Lyu et al., IEEE Comm. Lett. 21(3), 2017
+  - mozaffari2016     # Mozaffari et al., IEEE Comm. Lett. 20(8), 2016
+  - alzenad2017       # Alzenad et al., IEEE WCL 6(4), 2017
+  - cap_kmeans_place
+  - ahc_place
+  - moon2022          # Moon, Dung & Kim, Electronics 11(7):1036, 2022
+  - mogoa             # Almaameri & Blazovics, Cluster Comput. 29:392, 2026
+  - centroid_place    # naive: k-means centroids
+  - random_place      # naive: uniform-random UAV positions (placement floor)
+  - hfl_static        # PSO placement ONCE (isolates repositioning cadence)
+  - flat_fl           # no UAVs — MUST be flat across K (validity check)

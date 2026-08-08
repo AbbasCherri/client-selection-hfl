@@ -553,6 +553,126 @@ def _coverage_job(r_comm: float, method: str, seed_idx: int, cfg: dict) -> pd.Da
     return df
 
 
+def _uav_job(k: int, capacity: int, method: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
+    """Single (K, capacity, method, seed) run at fixed N and R_comm.
+
+    Mirrors ``_coverage_job`` but sweeps the *fleet size* instead of the radio
+    range. Both make coverage bind; K is the more direct knob, because at the
+    paper's R_comm = 20 km a single disc already covers a large fraction of the
+    Noto peninsula, so coverage saturates by K ≈ 4-6 and every placement rule
+    looks alike above that (measured: 99.95% at K=20).
+
+    ``capacity`` is swept *with* K rather than held fixed, and that is the whole
+    point of the design. Holding per-UAV capacity constant would make total
+    training slots K·C scale with K, so a small-K cell would starve the model of
+    data at the same time as it stresses placement — and a flat macro_f1 across
+    methods would then be unreadable: data starvation and placement irrelevance
+    look identical. Pairing each K with a capacity that keeps K·C roughly
+    constant holds the per-round data volume fixed and leaves coverage geometry
+    as the only thing that changes. The per-UAV capacities at small K are
+    correspondingly unrealistic; that is the price of a controlled ablation and
+    must be stated when reporting it.
+    """
+    from .seeds import partition_seed_for, sweep_job_seed
+
+    N = int(cfg["N"])
+    job_cfg = copy.deepcopy(cfg)
+    job_cfg["data"]["N_clients"] = N
+    job_cfg["data"]["partition_seed"] = partition_seed_for(seed_idx)
+    job_cfg["methods"] = [method]
+    job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
+    job_cfg["fl"]["K"] = int(k)
+    job_cfg["fl"]["capacity"] = int(capacity)
+    job_cfg["_pipeline_version"] = PIPELINE_VERSION
+
+    k_tag = f"K{int(k)}"
+    job_results_dir = Path(cfg["results_dir"]) / k_tag / f"seed{seed_idx}" / method
+    job_cfg["results_dir"] = str(job_results_dir)
+
+    ckpt = job_results_dir / "config.fullsim.resolved.yaml"
+    if ckpt.exists() and _stale_checkpoint_reason(ckpt, job_cfg) is None:
+        logger.info("[%s method=%-20s seed=%d] checkpoint — skipping", k_tag, method, seed_idx)
+        df = read_table(job_results_dir / "fullsim_rounds.parquet")
+        df.insert(0, "seed", seed_idx)
+        df.insert(0, "capacity", int(capacity))
+        df.insert(0, "K", int(k))
+        return df
+
+    # Share the single-N feature cache (N is fixed across the K sweep).
+    if job_cfg["data"].get("source", "real") == "real":
+        job_cfg["data"]["feature_cache_path"] = str(Path(cfg["results_dir"]) / f"N{N}" / "img_features.npy")
+
+    import torch
+
+    torch.set_num_threads(1)
+    from .federated import run_full_hfl
+
+    logger.info("[%s cap=%d method=%-20s seed=%d] starting", k_tag, capacity, method, seed_idx)
+    df = run_full_hfl(job_cfg)["rounds"].copy()
+    df.insert(0, "seed", seed_idx)
+    df.insert(0, "capacity", int(capacity))
+    df.insert(0, "K", int(k))
+    return df
+
+
+def run_uav_sweep(cfg: dict) -> dict:
+    """Run the fleet-size sweep: (K, capacity) × method × seed at fixed N, R_comm.
+
+    ``K_values`` is a list of ``{K: <int>, capacity: <int>}`` mappings — the
+    pairing is explicit in the config rather than derived here, so the design is
+    auditable from the YAML alone.
+    """
+    N = int(cfg["N"])
+    raw: list = cfg["K_values"]
+    methods: list[str] = cfg["methods"]
+    n_seeds: int = cfg.get("n_seeds", 1)
+    n_workers: int = cfg.get("n_workers", 12)
+    results_dir = Path(cfg["results_dir"])
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    pairs: list[tuple[int, int]] = []
+    for entry in raw:
+        if not isinstance(entry, dict) or "K" not in entry or "capacity" not in entry:
+            raise ValueError(
+                f"K_values entries must be mappings with 'K' and 'capacity'; got {entry!r}. "
+                "Capacity is swept with K deliberately — see _uav_job's docstring."
+            )
+        pairs.append((int(entry["K"]), int(entry["capacity"])))
+
+    slots = [k * c for k, c in pairs]
+    logger.info(
+        "Fleet-size sweep: K=%s, capacity=%s -> total slots %s (N=%d)",
+        [k for k, _ in pairs], [c for _, c in pairs], slots, N,
+    )
+    if max(slots) > 2 * min(slots):
+        logger.warning(
+            "Total slots K*C vary by more than 2x across cells (%s). The sweep will "
+            "confound data volume with coverage geometry — a flat macro_f1 could mean "
+            "either. Re-pair the capacities unless this is intended.",
+            slots,
+        )
+
+    logger.info("Phase 1: pre-fetching data for N=%d …", N)
+    _prefetch_all_N({**cfg, "N_values": [N]})
+    logger.info("Phase 1 complete.")
+
+    jobs = [(k, c, m, s) for k, c in pairs for m in methods for s in range(n_seeds)]
+    logger.info(
+        "Phase 2: %d K-values × %d methods × %d seeds = %d jobs — %d workers",
+        len(pairs), len(methods), n_seeds, len(jobs), n_workers,
+    )
+    results = Parallel(n_jobs=n_workers, backend="loky", verbose=5)(
+        delayed(_isolated)(_uav_job, f"K{k}/seed{s}/{m}", k, c, m, s, cfg)
+        for k, c, m, s in jobs
+    )
+    full_df = _collect_or_raise(results)
+    write_table(full_df, results_dir / "uav_sweep_rounds.parquet")
+    _dump_resolved_cfg(cfg, results_dir / "config.uav.resolved.yaml")
+    size_mb = sum(p.stat().st_size for p in results_dir.rglob("*") if p.is_file()) / 1e6
+    logger.info("Fleet-size sweep complete — %.2f MB at %s", size_mb, results_dir)
+    return {"rounds": full_df, "results_dir": results_dir, "size_mb": size_mb}
+
+
 def run_coverage_sweep(cfg: dict) -> dict:
     """Run the coverage-constrained sweep: R_comm × method × seed at fixed N."""
     N = int(cfg["N"])
