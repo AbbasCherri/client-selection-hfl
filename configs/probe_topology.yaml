@@ -1,0 +1,62 @@
+# Why does the corrected regime unlearn? — K vs per-UAV capacity, 3 seeds.
+#
+# The observation this probe exists to explain
+# --------------------------------------------
+# At R_comm = 5 km, K = 60, capacity = 2 (88.7% coverage, ~113 clients selected
+# per round) the run does not fail to learn — it learns and then *unlearns*:
+#
+#     round     1     5    10    20    30    40    50   100
+#     macro_f1  .236  .274 .341  .297  .262  .241  .248  .256
+#     f1_missing .100 .225 .227  .047  .005  .003  .004  .001
+#
+# It peaks at round 10 and decays monotonically to near the constant-predictor
+# floor, ending with 99.7% of all predictions on the majority class. The 20 km
+# reference run climbs monotonically over the same 100 rounds to 0.526 with a
+# comparable cohort size (119 selected, falling to 64 — so the shrinking roster
+# is common to both and cannot be the difference).
+#
+# Participation is therefore NOT the explanation, which is what the earlier
+# "~120 clients per round" reading assumed. Two things changed together between
+# the run that learned and the ones that do not: coverage (100% -> 88%) and
+# per-UAV capacity (6 -> 2). This probe separates them.
+#
+# What is and is not controlled
+# -----------------------------
+# Participants per round are K*C capped by coverage, so with the slot budget
+# fixed at 120 it is impossible to vary capacity without varying K, and varying
+# K varies coverage. The five K*C = 120 cells hold per-round data volume fixed
+# and let capacity fall 6 -> 1 as coverage rises; that confound is inherent to
+# the ladder and is why the sixth cell exists.
+#
+# K=60/cap=6 is OFF the ladder deliberately: same K as the collapsed cell, so
+# the same fleet geometry and the same coverage, with capacity raised back to
+# the value the training recipe was tuned at. It costs 360 slots instead of 120
+# (selection stops binding, so it is not a paper cell) but it is the only
+# contrast that moves capacity with coverage held still. Read it as a positive
+# control: if even this unlearns, capacity is exonerated and the fault is in the
+# training recipe or the aggregation, not the topology.
+#
+# run_uav_sweep will warn that K*C drifts 3x across this grid. That is expected
+# here and is the reason the warning is a warning.
+#
+# 6 cells x 1 method x 3 seeds = 18 jobs, ~45 min on 12 vCPU. Diagnostic only —
+# 3 seeds is enough to tell 0.25 from 0.50 and far too few to report.
+extends: paper_uav_count.yaml
+
+name: probe_topology
+results_dir: results/probe_topology
+
+n_seeds: 3
+
+K_values:
+  - {K: 20,  capacity: 6}    # ladder: lowest coverage, capacity the recipe was tuned at
+  - {K: 30,  capacity: 4}
+  - {K: 40,  capacity: 3}
+  - {K: 60,  capacity: 2}    # ladder: the cell that collapsed — must reproduce
+  - {K: 120, capacity: 1}    # ladder: highest coverage, one client per aircraft
+  - {K: 60,  capacity: 6}    # OFF-LADDER positive control: K=60 coverage, cap=6
+
+# One placement rule only. The question is whether this regime can learn at all;
+# comparing placement methods inside a regime that unlearns is meaningless.
+methods:
+  - mclp_place
