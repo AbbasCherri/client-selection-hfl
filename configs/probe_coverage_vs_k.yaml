@@ -1,0 +1,86 @@
+# Coverage-vs-fleet probe — 1 round, 1 seed, no science, just geometry.
+#
+# At R_comm = 2 km (the coherent radius for the 100-1000 m altitude band) a
+# fleet of K=20 covers only 24.35% of 200 Noto clients, which starves the FL
+# task into majority-class collapse: f1_survived 0.90 but f1_missing 0.004,
+# macro-F1 0.287 against an 0.82 accuracy ceiling.
+#
+# So the operating point needs a bigger fleet, and the question is how much
+# bigger. Rather than guess the K grid a third time, this measures the
+# coverage-versus-K curve directly. One round and one seed: coverage is decided
+# by placement geometry at round 1 and does not depend on training, so a full
+# run would buy nothing. Two methods only — the proposed placement and the
+# random floor — to bracket what coverage a given fleet can and cannot reach.
+#
+# Read `coverage_pct`, ignore `macro_f1` entirely: one round of training is
+# meaningless and the column is noise here.
+#
+# ~12 short jobs, a few minutes. Not a result; do not cite it.
+calibrate_path_loss: false
+extends: tuned_weights.yaml
+
+name: probe_coverage_vs_k
+results_dir: results/probe_coverage_vs_k
+
+n_workers: 12
+n_seeds: 1
+optimizer_seed: 9876
+epicentre: [37.488, 137.272]
+
+N: 200
+
+# Capacity held at a value that cannot bind, so the probe measures reachability
+# alone: with cap=60 even K=20 offers 1200 slots against 200 clients, and any
+# shortfall in coverage is geometry, not capacity.
+K_values:
+  - {K: 20,  capacity: 60}
+  - {K: 40,  capacity: 60}
+  - {K: 60,  capacity: 60}
+  - {K: 100, capacity: 60}
+  - {K: 150, capacity: 60}
+  - {K: 200, capacity: 60}
+
+data:
+  source: real
+  subsample: 1.0
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  feature_num_workers: 8
+  N_clients: 200
+
+fl:
+  K: 20
+  capacity: 60
+  z_min_m: 100.0
+  z_max_m: 1000.0
+  R_comm: 2000.0
+  link_model: path_loss
+  uniform_coverage_radius: true
+  n_rounds: 1
+  n_local_epochs: 1
+  n_uav_epochs: 1
+  batch_size: 32
+  T_sel: 5
+  reselect_every: 1
+  lambda_min: 0.5
+  R_min: 0.3
+  placement_method: pso
+  balanced_sampling: false
+  local_optimizer:
+    name: sgd
+    momentum: 0.9
+  server_lr: 1.0
+  fusion_owner: uav
+  placement_class_aware: true
+  class_source: "true"
+  target_metric: macro_f1
+  target_value: 0.45
+
+budget:
+  P: 50
+  G_max: 30
+
+methods:
+  - mclp_place
+  - random_place
