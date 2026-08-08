@@ -46,11 +46,11 @@ def optimum_is_interior_in_the_default_band():
     """z_star must be strictly inside the band, or altitude is not a decision.
 
     Valid only inside the band's reach. The coherent ground-radius interval is
-    ``z/tan(theta_opt)`` = 270 m .. 2700 m for a 100-1000 m band; outside it the
+    ``z/tan(theta_opt)`` = 270 m .. 5400 m for a 100-2000 m band; outside it the
     optimum correctly sits on a bound, which is a property of the geometry, not
     a bug. `coherent_interval_edges_are_where_expected` pins those edges.
     """
-    for r_comm in (500.0, 1000.0, 2000.0, 2500.0):
+    for r_comm in (500.0, 1000.0, 2000.0, 5000.0):
         z = _z_star(r_comm)
         assert Z_MIN_M_DEFAULT < z < Z_MAX_M_DEFAULT, (
             f"R_comm={r_comm}: z*={z} is pinned at a bound of "
@@ -65,8 +65,8 @@ def coherent_interval_edges_are_where_expected():
     fails loudly here instead of quietly reproducing the degenerate regime this
     whole change was made to escape.
     """
-    assert _z_star(4000.0) >= Z_MAX_M_DEFAULT - 1e-6, (
-        "R_comm=4 km should exceed the band's reach and pin at the ceiling; "
+    assert _z_star(9000.0) >= Z_MAX_M_DEFAULT - 1e-6, (
+        "R_comm=9 km should exceed the band's reach and pin at the ceiling; "
         "if it no longer does, the coherent interval has moved and the shipped "
         "R_comm values need rechecking"
     )
@@ -104,7 +104,7 @@ def altitude_actually_changes_the_radius():
 def operating_point_is_los_dominated():
     """The UAV's whole advantage is LoS — the deployment must actually have it."""
     env = ENV_PRESETS["suburban"]
-    for r_comm in (1000.0, 2000.0):
+    for r_comm in (1000.0, 2000.0, 5000.0):
         z = _z_star(r_comm)
         theta_deg = np.degrees(np.arctan2(z, r_comm))
         p_los = los_probability(theta_deg, env["a"], env["b"])
