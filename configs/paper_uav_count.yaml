@@ -11,11 +11,30 @@
 # almost entirely outside the regime where the channel has an interior optimum.
 #
 # This sweep runs in the corrected regime (100-1000 m band, R_comm = 2 km, both
-# inside the coherent interval) and varies the fleet instead of the radio. K is
-# the sharper knob for coverage: with 2 or 3 aircraft, where you put them decides
-# who trains at all. If the spread across methods stays flat even at K=2 *here*,
-# the negative result is as strong as this benchmark can make it — and unlike
-# the old sweep, it will have been measured somewhere the physics is live.
+# inside the coherent interval) and varies the fleet instead of the radio.
+#
+# The grid GROWS rather than shrinks, which is the opposite of this file's first
+# version. A 1-round probe (results/probe_coverage_vs_k) measured coverage at
+# R_comm = 2 km:
+#
+#     K      mclp_place   random_place
+#     20        42.5%          8.0%
+#     40        68.0%         18.5%
+#     60        89.0%         25.5%
+#    100        99.0%         37.0%
+#    200        99.5%         54.0%
+#
+# Two things follow. Placement is *decisive* here — 5.3x at K=20 — so the
+# earlier "placement does not move macro-F1" null was an artifact of measuring
+# in the saturated, physically degenerate 20 km regime. And shrinking the fleet
+# below 20 would only have produced more majority-class collapse: K=20 with PSO
+# placement already covers just 24%, which drove f1_missing to 0.004.
+#
+# So the question the sweep asks is the operational one: how large a fleet does
+# a given placement rule need to reach usable coverage? Good placement reaching
+# 89% at K=60 where random needs several hundred aircraft is a far stronger
+# claim than a macro-F1 delta, and it is the honest framing for a method whose
+# value showed up in coverage rather than in end-task accuracy.
 #
 # Why capacity is swept WITH K (the design decision that makes this readable)
 # ---------------------------------------------------------------------------
@@ -26,12 +45,15 @@
 # placement irrelevance look identical in that column.
 #
 # So each K is paired with a capacity holding K*C = 120 exactly, the same total
-# as paper_full. Per-round data volume is constant; only coverage geometry
-# changes. The per-UAV capacities at small K (60 clients on one aircraft) are
-# not operationally realistic — this is a controlled ablation isolating
-# placement, and that caveat must be stated wherever it is reported. The
-# realistic-but-confounded variant (fixed capacity=6) is a separate run if we
-# want it; do not silently mix the two.
+# as paper_full. Per-round data volume is capped identically in every cell, so a
+# larger fleet buys coverage rather than throughput and the comparison stays
+# about placement. Capacities run 6 down to 1 across the grid, all operationally
+# plausible for an aerial base station — unlike the first version of this file,
+# which needed 60 clients on one aircraft to hold the product fixed at K=2.
+#
+# Note the slot budget still binds at the top of the grid: at K=120 the fleet
+# covers ~99% (198 clients) against 120 slots, so selection remains exercised
+# throughout rather than going slack as coverage saturates.
 #
 # Built-in validity check: `flat_fl` has no UAVs, so its row MUST be flat across
 # every K. If it is not, the sweep is leaking something that is not placement.
@@ -41,7 +63,7 @@
 # the exact trap that made the 20 km placement contrast in the class-realism
 # ablation powerless, and it must be checked here before any cell is believed.
 #
-# Grid: 6 K-values x 17 methods x 10 seeds = 1020 jobs, ~10-12 h on 12 vCPU.
+# Grid: 5 K-values x 17 methods x 10 seeds = 850 jobs, ~10-14 h on 12 vCPU.
 # Checkpointed per (K, seed, method) — safe to interrupt and relaunch.
 calibrate_path_loss: false
 extends: tuned_weights.yaml
@@ -60,12 +82,11 @@ N: 200                       # fixed client count; only the fleet sweeps
 # the design is auditable from this file alone; run_uav_sweep warns if the
 # products drift by more than 2x.
 K_values:
-  - {K: 2,  capacity: 60}
-  - {K: 3,  capacity: 40}
-  - {K: 4,  capacity: 30}
-  - {K: 6,  capacity: 20}
-  - {K: 10, capacity: 12}
-  - {K: 20, capacity: 6}
+  - {K: 20,  capacity: 6}
+  - {K: 30,  capacity: 4}
+  - {K: 40,  capacity: 3}
+  - {K: 60,  capacity: 2}
+  - {K: 120, capacity: 1}
 
 data:
   source: real

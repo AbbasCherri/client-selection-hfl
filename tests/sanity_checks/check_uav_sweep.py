@@ -89,9 +89,17 @@ def shipped_config_holds_slots_constant():
     slots = [k * c for k, c in pairs]
     assert len(set(slots)) == 1, f"total slots K*C must be constant, got {slots} for {pairs}"
     assert slots[0] == 120, f"expected 120 slots (matching paper_full), got {slots[0]}"
-    # The point of the sweep is the small-K regime; without it there is no
-    # unsaturated cell and the whole run repeats the coverage sweep's blind spot.
-    assert min(k for k, _ in pairs) <= 3, f"no small-K cell: {pairs}"
+    # The sweep needs an UNSATURATED cell and a near-saturated one, or it cannot
+    # show a fleet-size difference between placement rules. At R_comm=2 km the
+    # probe puts mclp_place at 42.5% coverage for K=20 and ~99% by K=100, so the
+    # grid must straddle that. (This replaced an assertion that the grid reached
+    # K<=3: the original design shrank the fleet, which at the coherent radius
+    # only produces majority-class collapse.)
+    ks = sorted(k for k, _ in pairs)
+    assert ks[0] <= 20, f"no unsaturated cell — smallest K is {ks[0]}"
+    assert ks[-1] >= 100, f"no near-saturated cell — largest K is {ks[-1]}"
+    caps = [c for _, c in pairs]
+    assert max(caps) <= 6, f"per-UAV capacity {max(caps)} is not operationally plausible"
     assert "flat_fl" in cfg["methods"], "flat_fl is the K-invariance validity check"
     assert "random_place" in cfg["methods"], "random_place is the placement floor"
 
