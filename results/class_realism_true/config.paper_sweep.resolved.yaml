@@ -41,11 +41,11 @@ fl:
       logit_adjust_tau: 0.7344
       server_momentum: 0.3558
       ema_decay: 0.5346
-  K: 20
+  K: 60
   z_min_m: 100.0
   z_max_m: 1000.0
   R_comm: 2000.0
-  capacity: 6
+  capacity: 2
   n_rounds: 100
   n_local_epochs: 2
   n_uav_epochs: 2
