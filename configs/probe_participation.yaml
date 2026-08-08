@@ -62,8 +62,8 @@ fl:
   K: 20
   capacity: 60
   z_min_m: 100.0
-  z_max_m: 1000.0
-  R_comm: 2000.0
+  z_max_m: 2000.0
+  R_comm: 5000.0
   link_model: path_loss
   uniform_coverage_radius: true
   n_rounds: 1

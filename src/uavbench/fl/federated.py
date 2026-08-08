@@ -110,7 +110,14 @@ _ENERGY_MODEL = EnergyModel()
 # is switched off entirely, and R_comm=20 km is only reachable because link.py
 # back-solves whatever path-loss budget makes the configured radius achievable.
 #
-# 100-1000 m is the band the UAV-base-station literature this benchmark compares
+# The ceiling IS the reach: the coherent ground radius is z/tan(theta_opt), so
+# 1000 m caps it at 2.70 km and 2000 m raises it to 5.40 km — 6x the area per
+# aircraft (78.5 vs 12.6 km^2). That difference decides whether a modest fleet
+# can serve a peninsula at all. At R_comm=2 km a 60-UAV fleet reached only 64.9%
+# coverage and 41.8 participating clients per round, and the FL task collapsed
+# onto the majority class (f1_missing 0.0016) for want of training data.
+#
+# 100-2000 m is the band the UAV-base-station literature this benchmark compares
 # against actually assumes — Mozaffari 2016 and Alzenad 2017 both derive
 # altitudes of hundreds of metres to kilometres from r/tan(theta), and clamping
 # them to 120 m distorts the published methods rather than reproducing them.
@@ -122,7 +129,7 @@ _ENERGY_MODEL = EnergyModel()
 # maximizing altitude to be strictly interior to the band at the configured
 # R_comm.
 Z_MIN_M_DEFAULT = 100.0
-Z_MAX_M_DEFAULT = 1000.0
+Z_MAX_M_DEFAULT = 2000.0
 
 
 def _build_problem_instance(

@@ -103,8 +103,8 @@ fl:
   # Altitude band + R_comm chosen together — see paper_full.yaml and
   # tests/sanity_checks/check_altitude_band.py. z*(2000 m) ~= 740 m, interior.
   z_min_m: 100.0
-  z_max_m: 1000.0
-  R_comm: 2000.0             # FIXED at the paper operating point — K is the variable
+  z_max_m: 2000.0
+  R_comm: 5000.0             # FIXED at the paper operating point — K is the variable
   link_model: path_loss
   uniform_coverage_radius: true
   n_rounds: 100

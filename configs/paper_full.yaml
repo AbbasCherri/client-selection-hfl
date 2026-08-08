@@ -62,25 +62,39 @@ data:
   N_clients: 50
 
 fl:
-  # K=60, capacity=2 — both changed together with R_comm (2026-08-08 probe,
-  # results/probe_coverage_vs_k). At the coherent R_comm=2 km the old K=20 fleet
-  # reaches only 42.5% coverage even with the proposed placement (24.4% with PSO),
-  # which starved the task into majority-class collapse: f1_missing 0.004,
-  # macro-F1 0.287 against an 0.82 accuracy ceiling. K=60 reaches 89%.
+  # K and capacity are set from measured PARTICIPATION, not coverage — the two
+  # come apart badly and that cost two failed launches on 2026-08-08.
   #
-  # Capacity drops 6 -> 2 so selection still binds: 60x2 = 120 slots against
-  # ~178 covered clients. Left at 6 the fleet would offer 360 slots for 200
-  # clients and the selection rule — the paper's main contribution — would never
-  # be exercised. Total slots stay at 120, exactly as before.
+  # What the task needs: ~120 clients training per round. The 20 km run that
+  # learned properly (macro-F1 0.526) had exactly that. Every configuration that
+  # fell short collapsed onto the majority class:
+  #
+  #     2 km, K=20, cap=6, PSO       24.4% cov            macro-F1 0.287
+  #     2 km, K=60, cap=2, PSO       51.9% cov, 53/round  macro-F1 0.266
+  #     2 km, K=60, cap=2, mclp_ls   64.9% cov, 42/round  macro-F1 0.262
+  #
+  # Coverage does not predict participation. The placement objective is
+  # capacity-aware, so a low cap gives the optimizer no reason to spread (a probe
+  # at cap=60 reported 89% for K=60; at cap=2 the same fleet reached 64.9%), and
+  # the SNR eligibility gate cuts further — 64.9% coverage still yielded only
+  # 41.8 selected against 120 slots.
+  #
+  # Set from results/probe_participation at the R_comm below; do not infer either
+  # value from a coverage curve.
   K: 60
   # Altitude band and R_comm are chosen TOGETHER; changing one without the other
   # breaks the placement physics (2026-08-08).
   #
   # The Al-Hourani radius-vs-altitude curve peaks at a fixed elevation angle
   # (theta_opt = 20.34 deg, suburban), so the coherent ground radius is
-  # z/tan(theta_opt): 270 m at z=100, 2700 m at z=1000. R_comm must sit inside
+  # z/tan(theta_opt): 270 m at z=100, 5400 m at z=2000. R_comm must sit inside
   # that interval or the optimum pins at a bound and the vertical decision goes
-  # degenerate. At R_comm=2000 m the optimum is ~740 m — interior, as required.
+  # degenerate. At R_comm=5000 m the optimum is ~1850 m — interior, as required.
+  #
+  # The ceiling is the reach, which is why it is 2000 m and not 1000 m: raising
+  # it takes the coherent radius from 2.70 km to 5.40 km, i.e. 78.5 km^2 of
+  # ground per aircraft instead of 12.6 — 6x. At 2 km even a 60-UAV fleet could
+  # not put enough clients in range to keep the task learnable.
   #
   # This replaces R_comm=20000 with a 20-120 m band, which was incoherent on two
   # counts: z* was pinned at the 120 m ceiling for any radius above ~324 m, and
@@ -89,12 +103,13 @@ fl:
   # LinkModel never objected because it back-solves the budget the configured
   # R_comm needs. Guarded by tests/sanity_checks/check_altitude_band.py.
   #
-  # Consequence to state in the paper: at 2 km, K=20 no longer blankets the
-  # peninsula, so coverage is PARTIAL and placement decides who participates.
-  # That is the regime the method is actually for.
+  # Consequence to state in the paper: coverage is PARTIAL at a coherent radius,
+  # so placement decides who participates. That is the regime the method is
+  # actually for — and it is why placement turned out to matter here after
+  # appearing irrelevant at the saturated 20 km point.
   z_min_m: 100.0     # disaster-response waiver / larger UAS class, not 400 ft small-UAS
-  z_max_m: 1000.0
-  R_comm: 2000.0     # coherent with the band above; was 20000.0
+  z_max_m: 2000.0
+  R_comm: 5000.0     # coherent with the band above (z* ~= 1850 m, interior)
   capacity: 2        # see the K note above: 60 x 2 = 120 slots, still below the
                      # ~178 clients a K=60 fleet covers, so selection binds
   n_rounds: 100
@@ -108,8 +123,8 @@ fl:
   R_min: 0.3         # UAV clusters below this trimmed-mean reputation are excluded (§IV-D)
   # mclp_ls, not pso. This was `pso` as a leftover from before the candidate-set
   # placement existed, and it was actively costing coverage: at the coherent
-  # R_comm = 2 km with K=60, PSO reaches 51.9% of clients while mclp_ls reaches
-  # 89% (results/probe_coverage_vs_k). Running the "proposed system" on the
+  # R_comm = 2 km with K=60, PSO reached 51.9% of clients while mclp_ls reached
+  # 64.9% at the same capacity (results/probe_coverage_vs_k, probe_participation). Running the "proposed system" on the
   # superseded placement rule understated it AND starved the FL task — the K=60
   # run at 51.9% still collapsed onto the majority class (f1_missing 0.0062,
   # macro-F1 0.266). mclp_ls wins 649/650 head-to-head and reaches 97-99% of the
