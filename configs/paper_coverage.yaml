@@ -32,7 +32,11 @@ calibrate_path_loss: false
 extends: tuned_weights.yaml
 
 name: paper_coverage
-results_dir: results/paper_coverage
+# v5 dir: the radius grid changed with the altitude-band fix (2026-08-08), so
+# reusing results/paper_coverage would leave R250/R4000/R8000/R20000 behind as
+# orphans from the retired grid — directories that look like results and are not.
+# The v4 data stays put, unmixed and still readable, at results/paper_coverage.
+results_dir: results/paper_coverage_v5
 
 n_workers: 12
 n_seeds: 10
