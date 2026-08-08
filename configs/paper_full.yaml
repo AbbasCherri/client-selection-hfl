@@ -62,7 +62,17 @@ data:
   N_clients: 50
 
 fl:
-  K: 20              # UAVs — midpoint of 10-30 range; covers N=30-100 clients well
+  # K=60, capacity=2 — both changed together with R_comm (2026-08-08 probe,
+  # results/probe_coverage_vs_k). At the coherent R_comm=2 km the old K=20 fleet
+  # reaches only 42.5% coverage with the proposed placement (24.4% with PSO),
+  # which starved the task into majority-class collapse: f1_missing 0.004,
+  # macro-F1 0.287 against an 0.82 accuracy ceiling. K=60 reaches 89%.
+  #
+  # Capacity drops 6 -> 2 so selection still binds: 60x2 = 120 slots against
+  # ~178 covered clients. Left at 6 the fleet would offer 360 slots for 200
+  # clients and the selection rule — the paper's main contribution — would never
+  # be exercised. Total slots stay at 120, exactly as before.
+  K: 60
   # Altitude band and R_comm are chosen TOGETHER; changing one without the other
   # breaks the placement physics (2026-08-08).
   #
@@ -85,10 +95,8 @@ fl:
   z_min_m: 100.0     # disaster-response waiver / larger UAS class, not 400 ft small-UAS
   z_max_m: 1000.0
   R_comm: 2000.0     # coherent with the band above; was 20000.0
-  capacity: 6        # C_u clients per UAV; K=20 × cap=6 → 120 slots, below
-                     # N=200 so the selection rule actually binds at the top
-                     # of the N grid (the old cap=10 gave 200 slots ≥ every N,
-                     # removing all selection pressure from this harness)
+  capacity: 2        # see the K note above: 60 x 2 = 120 slots, still below the
+                     # ~178 clients a K=60 fleet covers, so selection binds
   n_rounds: 100
   n_local_epochs: 2
   n_uav_epochs: 2      # UAV image-branch training epochs per round (paper §IV-A Step 3)
