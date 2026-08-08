@@ -1,0 +1,2 @@
+N,method_a,method_b,n_pairs,statistic,p_value,mean_diff,effect_size,ci_low,ci_high,significant,correction_scope,reference,metric,test,correction
+200,bind_placeaware,bind_placeblind,10,22.0,0.625,-0.008762578366623827,-0.2,-0.0445992890431415,0.02655442608962057,False,group,bind_placeaware,f1_collapsed,wilcoxon,holm
