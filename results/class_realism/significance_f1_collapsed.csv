@@ -1,0 +1,4 @@
+N,method_a,method_b,n_pairs,statistic,p_value,mean_diff,effect_size,ci_low,ci_high,significant,correction_scope,reference,metric,test,correction
+200,true_placeaware,none_placeblind,10,7.0,0.037109375,0.028086817114374107,0.7454545454545455,0.0074279754877295615,0.04721340036461207,False,group,true_placeaware,f1_collapsed,wilcoxon,holm
+200,true_placeaware,true_placeblind,10,24.0,0.76953125,-0.007410342557814869,-0.12727272727272726,-0.031114347189322364,0.014274049936501373,False,group,true_placeaware,f1_collapsed,wilcoxon,holm
+200,true_placeaware,pseudo_placeaware,10,27.0,1.0,-0.0005963380057373013,0.01818181818181818,-0.016381249348964556,0.01475629352848328,False,group,true_placeaware,f1_collapsed,wilcoxon,holm
