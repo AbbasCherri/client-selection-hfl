@@ -28,12 +28,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from uavbench.reporting.tables import write_table  # noqa: E402
 
-# arm directory -> the name it gets in the merged `method` column
-ARMS = {
-    "results/class_realism_true": "true_placeaware",
-    "results/class_realism_pseudo": "pseudo_placeaware",
-    "results/class_realism_noplace": "true_placeblind",
-    "results/class_realism_none": "none_placeblind",
+# arm directory -> the name it gets in the merged `method` column.
+#
+# Two groups, merged SEPARATELY and never pooled: they sit at different R_comm,
+# and `_SIG_TABLES` groups paper_sweep_rounds by N alone (200 for every arm), so
+# concatenating them would silently pair 20 km runs against 8 km runs as though
+# they were the same condition.
+#
+#   main — R_comm 20 km, the paper operating point. Valid for the SELECTION
+#          contrasts. Its placement contrast (true_placeaware vs
+#          true_placeblind) is powerless: proposed_hfl already covers 99.95%
+#          there, so class-aware placement has nothing left to steer.
+#   bind — R_comm 8 km, where coverage is partial. This is the arm pair that
+#          actually tests class-aware placement.
+GROUPS = {
+    "main": {
+        "results/class_realism_true": "true_placeaware",
+        "results/class_realism_pseudo": "pseudo_placeaware",
+        "results/class_realism_noplace": "true_placeblind",
+        "results/class_realism_none": "none_placeblind",
+    },
+    "bind": {
+        "results/class_realism_bind": "bind_placeaware",
+        "results/class_realism_bind_noplace": "bind_placeblind",
+    },
 }
 
 
@@ -48,12 +66,16 @@ def _read_arm(d: Path) -> pd.DataFrame:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="results/class_realism")
+    ap.add_argument("--group", default="main", choices=sorted(GROUPS))
+    ap.add_argument("--out", default=None, help="default: results/class_realism_<group>_merged")
     args = ap.parse_args()
+
+    arms = GROUPS[args.group]
+    out_rel = args.out or f"results/class_realism_{args.group}_merged"
 
     root = Path(__file__).resolve().parents[1]
     frames = []
-    for rel, arm in ARMS.items():
+    for rel, arm in arms.items():
         df = _read_arm(root / rel)
         got = set(df["method"].unique())
         if got != {"proposed_hfl"}:
@@ -67,10 +89,10 @@ def main() -> int:
         frames.append(df)
 
     merged = pd.concat(frames, ignore_index=True)
-    out = root / args.out
+    out = root / out_rel
     out.mkdir(parents=True, exist_ok=True)
     path = write_table(merged, out / "paper_sweep_rounds.parquet")
-    print(f"merged {len(frames)} arms, {len(merged)} rows -> {path}")
+    print(f"[{args.group}] merged {len(frames)} arms, {len(merged)} rows -> {path}")
     return 0
 
 
