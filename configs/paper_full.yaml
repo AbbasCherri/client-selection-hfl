@@ -64,7 +64,7 @@ data:
 fl:
   # K=60, capacity=2 — both changed together with R_comm (2026-08-08 probe,
   # results/probe_coverage_vs_k). At the coherent R_comm=2 km the old K=20 fleet
-  # reaches only 42.5% coverage with the proposed placement (24.4% with PSO),
+  # reaches only 42.5% coverage even with the proposed placement (24.4% with PSO),
   # which starved the task into majority-class collapse: f1_missing 0.004,
   # macro-F1 0.287 against an 0.82 accuracy ceiling. K=60 reaches 89%.
   #
@@ -106,7 +106,19 @@ fl:
   reselect_every: 1  # client selection cadence — decoupled from placement (Tier C)
   lambda_min: 0.5    # early-reselection trigger: eligible < λ_min·min(ΣC_u, N) (§IV-E6)
   R_min: 0.3         # UAV clusters below this trimmed-mean reputation are excluded (§IV-D)
-  placement_method: pso   # authoritative placement optimizer ("ga" for the ablation)
+  # mclp_ls, not pso. This was `pso` as a leftover from before the candidate-set
+  # placement existed, and it was actively costing coverage: at the coherent
+  # R_comm = 2 km with K=60, PSO reaches 51.9% of clients while mclp_ls reaches
+  # 89% (results/probe_coverage_vs_k). Running the "proposed system" on the
+  # superseded placement rule understated it AND starved the FL task — the K=60
+  # run at 51.9% still collapsed onto the majority class (f1_missing 0.0062,
+  # macro-F1 0.266). mclp_ls wins 649/650 head-to-head and reaches 97-99% of the
+  # exact capacitated-MCLP optimum, so it is the proposed rule by every measure.
+  #
+  # The placement SWEEPS keep placement_method: pso on purpose — there
+  # `proposed_hfl` is the PSO comparison arm and `mclp_place` is the proposed
+  # one, so the two rules can be compared side by side.
+  placement_method: mclp_ls
 
   # ── Training recipe (Tier A) ──────────────────────────────────────────
   # The ENTIRE recipe — lr, uav_lr, lr_decay, logit_adjust_tau,
