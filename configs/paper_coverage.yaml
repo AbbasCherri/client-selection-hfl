@@ -44,14 +44,19 @@ N: 200                       # fixed client count; only R_comm sweeps
 # method already covers most clients, so placement could not separate; and the
 # 20 km end is the saturated regime where coverage is unfalsifiable. These
 # values are the achievable radius at the channel-optimal altitude.
+# Rebuilt 2026-08-08 for the 100-1000 m altitude band. The coherent radius
+# interval is z/tan(theta_opt) = 270 m .. 2700 m: outside it the radius-
+# maximizing altitude pins at a band edge and the vertical decision is
+# degenerate, so radii of 4/8/20 km were measuring a 97%-NLoS grazing link with
+# every UAV parked at the ceiling. The grid now spans the interval where the
+# channel actually has an interior optimum.
 R_comm_values:               # metres
-  - 250
+  - 300
   - 500
-  - 1000
-  - 2000
-  - 4000
-  - 8000
-  - 20000
+  - 800
+  - 1200
+  - 1800
+  - 2500
 
 data:
   source: real
@@ -64,7 +69,9 @@ data:
 
 fl:
   K: 20
-  R_comm: 20000.0            # overridden per job by run_coverage_sweep
+  z_min_m: 100.0
+  z_max_m: 1000.0
+  R_comm: 2000.0             # overridden per job by run_coverage_sweep
   # Air-to-ground link model: each UAV's coverage radius is derived from its own
   # altitude through the shared Al-Hourani channel, calibrated per job so the
   # best achievable radius equals the swept R_comm. This is what makes altitude

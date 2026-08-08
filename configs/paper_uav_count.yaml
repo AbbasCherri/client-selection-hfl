@@ -2,20 +2,20 @@
 #
 # The question
 # ------------
-# The coverage sweep (results/paper_coverage, 2026-08-07) found that placement
-# method does not move macro-F1: 6 of 105 placement-vs-placement comparisons
-# significant, and `mclp_place` never Holm-beats uniform-random placement at any
-# radius. But that sweep varied the radio range at a FIXED fleet of K=20 UAVs,
-# and K=20 is deep in the saturated regime — 99.95% coverage at 20 km. A method
-# cannot demonstrate better placement when every client is already covered.
+# The 2026-08-07 coverage sweep found that placement method does not move
+# macro-F1: 6 of 105 placement-vs-placement comparisons significant, and
+# `mclp_place` never Holm-beats uniform-random placement at any radius. That
+# sweep is now void — it ran under the 20-120 m altitude band, where the
+# radius-maximizing altitude pinned at the ceiling for any radius above ~324 m
+# and the 20 km cells were a 97% NLoS grazing link. Placement was being measured
+# almost entirely outside the regime where the channel has an interior optimum.
 #
-# K is the more direct knob. At R_comm = 20 km one disc already covers a large
-# fraction of the Noto peninsula, so coverage saturates by K ~ 4-6 and every
-# placement rule converges above that. Below it, each UAV's position is load
-# bearing: with 2 or 3 aircraft, where you put them decides who trains at all.
-# If placement quality matters anywhere, it matters here — and if the spread
-# across methods stays flat even at K=2, the negative result is about as
-# strong as this benchmark can make it.
+# This sweep runs in the corrected regime (100-1000 m band, R_comm = 2 km, both
+# inside the coherent interval) and varies the fleet instead of the radio. K is
+# the sharper knob for coverage: with 2 or 3 aircraft, where you put them decides
+# who trains at all. If the spread across methods stays flat even at K=2 *here*,
+# the negative result is as strong as this benchmark can make it — and unlike
+# the old sweep, it will have been measured somewhere the physics is live.
 #
 # Why capacity is swept WITH K (the design decision that makes this readable)
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@
 # Read `coverage_pct` next to `macro_f1` in every cell. It is what distinguishes
 # "placement does not matter here" from "everyone already covers everyone" —
 # the exact trap that made the 20 km placement contrast in the class-realism
-# ablation powerless.
+# ablation powerless, and it must be checked here before any cell is believed.
 #
 # Grid: 6 K-values x 17 methods x 10 seeds = 1020 jobs, ~10-12 h on 12 vCPU.
 # Checkpointed per (K, seed, method) — safe to interrupt and relaunch.
@@ -79,7 +79,11 @@ data:
 fl:
   K: 20                      # overridden per job by run_uav_sweep
   capacity: 6                # overridden per job by run_uav_sweep
-  R_comm: 20000.0            # FIXED at the paper operating point — K is the variable
+  # Altitude band + R_comm chosen together — see paper_full.yaml and
+  # tests/sanity_checks/check_altitude_band.py. z*(2000 m) ~= 740 m, interior.
+  z_min_m: 100.0
+  z_max_m: 1000.0
+  R_comm: 2000.0             # FIXED at the paper operating point — K is the variable
   link_model: path_loss
   uniform_coverage_radius: true
   n_rounds: 100

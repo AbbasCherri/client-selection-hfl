@@ -1,27 +1,37 @@
-# Class-awareness realism ablation — arm 5/6: placement contrast at a BINDING radius.
+# Class-awareness realism ablation — arm 5/6: placement contrast at a tighter radius.
 #
-# Why this arm exists (a correction to arms 1/3)
-# ----------------------------------------------
-# Arms 1-4 inherit R_comm = 20 km from paper_full, where proposed_hfl already
-# covers 99.95% of clients (measured, arm 1). Class-aware placement works by
-# steering *which* clients fall inside coverage — at 99.95% there is nothing
-# left to steer, so `true_placeaware` vs `true_placeblind` at 20 km is null by
-# construction and carries no information about whether class-aware placement
-# helps. Reading that null as evidence would be a mistake.
+# History, because this file's purpose changed twice
+# --------------------------------------------------
+# It was created to fix a powerless contrast: arms 1-4 ran at R_comm = 20 km
+# where proposed_hfl covered 99.95% of clients, so class-aware placement had
+# nothing left to steer and `true_placeaware` vs `true_placeblind` was null by
+# construction (measured +0.0035, p=0.77). A first attempt at 8 km moved
+# coverage only to 94.6% and returned another null (-0.0075, p=0.77) — better
+# powered, still weak.
 #
-# Note the coverage sweep *does* separate placement methods at 20 km (macro-F1
-# spread 0.412-0.538). That is bad placement rules failing to cover at all —
-# it does not give proposed_hfl any headroom against itself.
+# Both of those runs are now void. On 2026-08-08 the altitude band moved from
+# 20-120 m to 100-1000 m and R_comm from 20 km to 2 km, because the old pairing
+# was physically incoherent: the radius-maximizing altitude pinned at the 120 m
+# ceiling for any radius above ~324 m, and at 20 km the elevation angle of
+# 0.34 deg gave P(LoS) ~ 3% — a 97% NLoS link, i.e. an aerial base station with
+# its line-of-sight advantage switched off. See paper_full.yaml and
+# tests/sanity_checks/check_altitude_band.py.
 #
-# R_comm = 8 km is the operating point for the placement question: coverage is
-# partial so placement decides who participates, while enough clients remain
-# reachable that selection still binds (120 slots vs 200 clients) and macro-F1
-# is well clear of the floor (0.409 for proposed_hfl in the coverage sweep, vs
-# 0.317 at 4 km where the task starts to starve).
+# What this arm is now
+# --------------------
+# The R_comm correction alone should largely fix the powerlessness: at 2 km with
+# K=20 coverage is partial rather than saturated, so arms 1-4 finally have
+# headroom for placement to act. This pair adds a *second, tighter* operating
+# point at 800 m — still inside the coherent interval (270-2700 m) — to test
+# whether class-aware placement earns its information assumption when coverage
+# binds harder.
 #
-# Paired against class_realism_bind_noplace, this is the test arms 1/3 were
-# supposed to be. Everything else — seeds, N, method, rounds — is unchanged, so
-# the pairing is valid and the only variable is placement_class_aware.
+# Check `coverage_pct` in both before trusting either contrast. If coverage at
+# 2 km is already well below saturation, arms 1/3 carry the result and this pair
+# is a robustness point; if 2 km still saturates, this pair carries it.
+#
+# Paired against class_realism_bind_noplace: same seeds, N, method and rounds,
+# so placement_class_aware is the only variable.
 
 extends: class_realism.yaml
 
@@ -29,6 +39,6 @@ name: class_realism_bind
 results_dir: results/class_realism_bind
 
 fl:
-  R_comm: 8000.0
+  R_comm: 800.0
   class_source: "true"
   placement_class_aware: true

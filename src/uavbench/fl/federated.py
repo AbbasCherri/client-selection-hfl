@@ -100,6 +100,8 @@ def _build_problem_instance(
     capacity: int,
     prev_positions_m: np.ndarray | None,
     value: np.ndarray | None = None,
+    z_min_m: float = Z_MIN_M_DEFAULT,
+    z_max_m: float = Z_MAX_M_DEFAULT,
 ) -> ProblemInstance:
     """Construct a ProblemInstance from client geographic coordinates.
 
@@ -107,20 +109,26 @@ def _build_problem_instance(
     placement fitness weights coverage by device value (paper §IV-E1). Callers
     without utility/reputation state (e.g. the Tier-2 placement benchmark) may
     omit it, in which case coverage is unweighted.
+
+    ``z_min_m``/``z_max_m`` bound the altitude search — see the module constants
+    for why the band is not the 120 m small-UAS ceiling.
     """
     latlon = np.array(list(client_coords.values()), dtype=np.float64)
     xy_m, ref = latlon_to_meters(latlon)
     N = len(xy_m)
     device_coords = np.column_stack([xy_m, np.zeros(N)])
 
-    lower = np.array([xy_m[:, 0].min(), xy_m[:, 1].min(), 20.0])
-    upper = np.array([xy_m[:, 0].max(), xy_m[:, 1].max(), 120.0])
+    if not 0.0 < z_min_m < z_max_m:
+        raise ValueError(f"need 0 < z_min_m < z_max_m; got {z_min_m}, {z_max_m}")
+    lower = np.array([xy_m[:, 0].min(), xy_m[:, 1].min(), float(z_min_m)])
+    upper = np.array([xy_m[:, 0].max(), xy_m[:, 1].max(), float(z_max_m)])
 
     if prev_positions_m is None:
         # Spread initial positions evenly across the bounding box.
         xs = np.linspace(lower[0], upper[0], K)
         ys = np.linspace(lower[1], upper[1], K)
-        prev_positions_m = np.column_stack([xs, ys, np.full(K, 70.0)])
+        z0 = 0.5 * (float(z_min_m) + float(z_max_m))
+        prev_positions_m = np.column_stack([xs, ys, np.full(K, z0)])
 
     return (
         ProblemInstance(
@@ -136,6 +144,38 @@ def _build_problem_instance(
         ),
         ref,
     )
+
+
+# Altitude band for UAV placement, metres AGL.
+#
+# This is NOT the 120 m (400 ft) small-UAS ceiling, and the reason is physical
+# rather than convenient. The Al-Hourani channel's radius-versus-altitude curve
+# peaks at an elevation angle theta_opt that depends only on the environment
+# (20.34 deg suburban), so the channel-optimal ground radius is z/tan(theta_opt).
+# Under a 20-120 m band that is 54-324 m: every configured R_comm above ~324 m
+# pins the optimum at the ceiling, the vertical decision goes degenerate, and
+# "3D placement" collapses back to a planar placement carrying a height column —
+# exactly the failure link.py was written to remove.
+#
+# It is worse than degenerate at the top of the old sweep grid. At z=120 m and a
+# 20 km radius the elevation angle is 0.34 deg, giving P(LoS) ~ 2.8%: the link is
+# 97% NLoS, so the line-of-sight advantage that motivates an aerial base station
+# is switched off entirely, and R_comm=20 km is only reachable because link.py
+# back-solves whatever path-loss budget makes the configured radius achievable.
+#
+# 100-1000 m is the band the UAV-base-station literature this benchmark compares
+# against actually assumes — Mozaffari 2016 and Alzenad 2017 both derive
+# altitudes of hundreds of metres to kilometres from r/tan(theta), and clamping
+# them to 120 m distorts the published methods rather than reproducing them.
+# Operationally it corresponds to a disaster-response waiver or a larger UAS
+# class, not routine small-UAS flight; state that assumption when reporting.
+#
+# The guard against silently re-introducing the degeneracy is
+# tests/sanity_checks/check_altitude_band.py, which requires the radius-
+# maximizing altitude to be strictly interior to the band at the configured
+# R_comm.
+Z_MIN_M_DEFAULT = 100.0
+Z_MAX_M_DEFAULT = 1000.0
 
 
 def _class_value_vector(
@@ -171,6 +211,8 @@ def _place_uavs(
     value: np.ndarray | None = None,
     method_params: dict | None = None,
     link_model: str = "path_loss",
+    z_min_m: float = Z_MIN_M_DEFAULT,
+    z_max_m: float = Z_MAX_M_DEFAULT,
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray | None]:
     """Run a placement optimizer and return UAV positions in metres.
 
@@ -184,7 +226,8 @@ def _place_uavs(
                       path-loss-based optimizers via ``result.meta["radii"]``)
     """
     instance, ref = _build_problem_instance(
-        client_coords, K, R_comm, capacity, prev_positions_m, value=value
+        client_coords, K, R_comm, capacity, prev_positions_m, value=value,
+        z_min_m=z_min_m, z_max_m=z_max_m,
     )
     link = None
     if link_model == "path_loss":
@@ -581,6 +624,8 @@ def run_tier2(cfg: dict) -> dict:
     # override — every method is already on the same model, so the override is
     # forced off. "range_gate" is the legacy flat R_comm behaviour.
     link_model: str = str(cfg["fl"].get("link_model", "path_loss"))
+    z_min_m: float = float(cfg["fl"].get("z_min_m", Z_MIN_M_DEFAULT))
+    z_max_m: float = float(cfg["fl"].get("z_max_m", Z_MAX_M_DEFAULT))
     uniform_coverage_radius: bool = bool(cfg["fl"].get("uniform_coverage_radius", False))
     if link_model == "path_loss":
         uniform_coverage_radius = False
@@ -677,6 +722,8 @@ def run_tier2(cfg: dict) -> dict:
                         prev_positions_m=prev_uav_positions_m,
                         method_params=optimizer_params.get(method, {}),
                         link_model=link_model,
+                        z_min_m=z_min_m,
+                        z_max_m=z_max_m,
                     )
                     # cumulative_energy_j counts repositioning (movement) energy
                     # only — hover/communication energy has no simulated-time
@@ -1109,6 +1156,12 @@ def run_full_hfl(cfg: dict) -> dict:
     # override — every method is already on the same model, so the override is
     # forced off. "range_gate" is the legacy flat R_comm behaviour.
     link_model = str(fl.get("link_model", "path_loss"))
+    # Altitude band — see Z_MIN_M_DEFAULT for why it is not the 120 m ceiling.
+    # Lives in fl.* so it enters the resume signature: changing the band must
+    # invalidate checkpoints, or a rerun would silently reuse placements
+    # computed under different physics.
+    z_min_m = float(fl.get("z_min_m", Z_MIN_M_DEFAULT))
+    z_max_m = float(fl.get("z_max_m", Z_MAX_M_DEFAULT))
     uniform_coverage_radius = bool(fl.get("uniform_coverage_radius", False))
     if link_model == "path_loss":
         uniform_coverage_radius = False
@@ -1466,6 +1519,8 @@ def run_full_hfl(cfg: dict) -> dict:
                         value=device_values,
                         method_params=optimizer_params.get(placement_method, {}),
                         link_model=link_model,
+                        z_min_m=z_min_m,
+                        z_max_m=z_max_m,
                     )
                     # Movement (repositioning) energy only — see run_tier2 note.
                     if prev_uav_pos_m is not None:

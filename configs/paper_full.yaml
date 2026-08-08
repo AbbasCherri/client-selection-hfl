@@ -63,7 +63,28 @@ data:
 
 fl:
   K: 20              # UAVs — midpoint of 10-30 range; covers N=30-100 clients well
-  R_comm: 20000.0    # 20 km — Noto Peninsula scale
+  # Altitude band and R_comm are chosen TOGETHER; changing one without the other
+  # breaks the placement physics (2026-08-08).
+  #
+  # The Al-Hourani radius-vs-altitude curve peaks at a fixed elevation angle
+  # (theta_opt = 20.34 deg, suburban), so the coherent ground radius is
+  # z/tan(theta_opt): 270 m at z=100, 2700 m at z=1000. R_comm must sit inside
+  # that interval or the optimum pins at a bound and the vertical decision goes
+  # degenerate. At R_comm=2000 m the optimum is ~740 m — interior, as required.
+  #
+  # This replaces R_comm=20000 with a 20-120 m band, which was incoherent on two
+  # counts: z* was pinned at the 120 m ceiling for any radius above ~324 m, and
+  # at 20 km the elevation angle of 0.34 deg gave P(LoS) ~ 3%, i.e. a 97% NLoS
+  # link — an aerial base station with its line-of-sight advantage switched off.
+  # LinkModel never objected because it back-solves the budget the configured
+  # R_comm needs. Guarded by tests/sanity_checks/check_altitude_band.py.
+  #
+  # Consequence to state in the paper: at 2 km, K=20 no longer blankets the
+  # peninsula, so coverage is PARTIAL and placement decides who participates.
+  # That is the regime the method is actually for.
+  z_min_m: 100.0     # disaster-response waiver / larger UAS class, not 400 ft small-UAS
+  z_max_m: 1000.0
+  R_comm: 2000.0     # coherent with the band above; was 20000.0
   capacity: 6        # C_u clients per UAV; K=20 × cap=6 → 120 slots, below
                      # N=200 so the selection rule actually binds at the top
                      # of the N grid (the old cap=10 gave 200 slots ≥ every N,
