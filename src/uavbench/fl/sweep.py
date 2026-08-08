@@ -43,7 +43,17 @@ logger = logging.getLogger("uavbench.fl.sweep")
 # self-reported best_fitness (see _place_uavs in federated.py). FL numerics are
 # untouched, but resuming a v3 checkpoint would splice old-convention rounds
 # onto new-convention rounds inside one column, so v3 checkpoints are refused.
-PIPELINE_VERSION = 4
+#
+# v5 (2026-08-08): the UAV altitude band moved from 20-120 m to 100-1000 m
+# (federated.py Z_MIN_M_DEFAULT). Under the old ceiling the Al-Hourani channel's
+# radius-maximizing altitude sat at the 120 m bound for every R_comm above
+# ~324 m, so the vertical decision was degenerate and, at R_comm = 20 km, the
+# link was 97% NLoS — the placement layer was being evaluated where its own
+# physics had no content. Every placement in a v4 checkpoint was computed under
+# that regime, so all of them are refused. `fl.z_min_m`/`fl.z_max_m` are in the
+# resume signature as well, so a later change to the band invalidates on its own
+# without needing another version bump.
+PIPELINE_VERSION = 5
 
 # Checkpoint-resume config comparison: sections that define what a job
 # computes. Keys in _RESUME_VOLATILE_DATA_KEYS are locations/credentials, not
