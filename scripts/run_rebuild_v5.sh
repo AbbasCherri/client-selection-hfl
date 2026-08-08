@@ -18,9 +18,19 @@
 #     budget the configured R_comm needs.
 #
 # So placement was being evaluated almost entirely outside the regime where the
-# model has physics, and the null results it produced cannot be trusted. The
-# band is now 100-1000 m and R_comm 2 km, both inside the coherent interval
-# (270-2700 m), guarded by tests/sanity_checks/check_altitude_band.py.
+# model has physics, and the null results it produced cannot be trusted.
+#
+# The band is now 100-2000 m with R_comm = 5 km, inside the coherent interval
+# (270 m - 5.4 km), guarded by tests/sanity_checks/check_altitude_band.py. The
+# ceiling is the reach — z/tan(theta_opt) — so 2000 m rather than 1000 m is what
+# makes a modest fleet viable: 78.5 km^2 of ground per aircraft against 12.6.
+# At 2 km even 60 UAVs put too few clients in range and the task collapsed onto
+# the majority class in three successive attempts.
+#
+# Operating point K=60 / capacity=2, set from measured participation
+# (results/probe_participation): 110 clients selected per round against the 120
+# of the last configuration that learned properly, 82.5% coverage, and 120 slots
+# against ~165 covered so the selection rule still binds.
 #
 # Order and why
 # -------------
@@ -68,10 +78,18 @@ commit_block() {
         say "  committed $(git rev-parse --short HEAD)"
     fi
 }
-run_block() {                     # run_block <name> <cmd...>
-    local name="$1"; shift
+run_block() {                     # run_block <name> <results_dir> <cmd...>
+    local name="$1"; local rdir="$2"; shift 2
     say "--- $name ---"
     if "$@"; then
+        # A block that finishes is not a block that worked. Three configurations
+        # on 2026-08-08 produced complete, well-formed results in which the model
+        # had learned only the majority class, and the pipeline was perfectly
+        # happy with all of them. Gate on the outcome before banking it.
+        if [[ -n "$rdir" ]] && ! python scripts/gate_collapse.py "$rdir"; then
+            say "  !! $name COLLAPSED — results are degenerate, not a usable result"
+            FAILED="$FAILED $name(collapsed)"
+        fi
         commit_block "$name"
     else
         say "  !! $name FAILED (exit $?) — continuing to the next block"
@@ -80,20 +98,31 @@ run_block() {                     # run_block <name> <cmd...>
     fi
 }
 
-say "===== v5 rebuild: corrected altitude band (100-1000 m), R_comm 2 km ====="
+say "===== v5 rebuild: altitude 100-2000 m, R_comm 5 km, K=60/cap=2 ====="
 
 # The altitude gate is the whole reason this rebuild exists: if the band and the
 # configured radii ever drift back out of the coherent interval, three days of
 # compute would reproduce the degenerate regime and look entirely normal doing it.
-for chk in check_altitude_band check_placement_methods check_uav_sweep \
-           check_class_histograms check_mclp; do
+for chk in check_altitude_band check_collapse_guard check_placement_methods \
+           check_uav_sweep check_class_histograms check_mclp; do
     python "tests/sanity_checks/${chk}.py" || { say "${chk} FAILED — aborting"; exit 1; }
 done
 
 # ---- 1. class realism (6 arms) -------------------------------------------
 for arm in class_realism class_realism_pseudo class_realism_noplace \
            class_realism_none class_realism_bind class_realism_bind_noplace; do
-    run_block "$arm" python -m uavbench run_paper_sim --config "configs/${arm}.yaml"
+    rdir=$(python -c "import sys,yaml;sys.path.insert(0,'src');from uavbench.runner import load_config;print(load_config('configs/${arm}.yaml')['results_dir'])")
+    run_block "$arm" "$rdir" python -m uavbench run_paper_sim --config "configs/${arm}.yaml"
+    # Every arm shares K, capacity and R_comm — they differ only in class_source
+    # and placement_class_aware. So if the first one collapses, all six will, and
+    # the two sweeps after them will too. Stop here rather than spend three days
+    # confirming it six more times.
+    if [[ "$FAILED" == *"(collapsed)"* ]]; then
+        say "FIRST ARM COLLAPSED at the current operating point — aborting the"
+        say "whole rebuild. Re-measure participation before relaunching; do not"
+        say "just rerun this script."
+        exit 1
+    fi
 done
 for grp in main bind; do
     python scripts/merge_class_realism.py --group "$grp" || FAILED="$FAILED merge-$grp"
@@ -107,7 +136,7 @@ done
 commit_block "class-realism-v5-significance"
 
 # ---- 2. fleet-size sweep --------------------------------------------------
-run_block "uav-count" python -m uavbench run_uav_sweep --config configs/paper_uav_count.yaml
+run_block "uav-count" results/paper_uav_count python -m uavbench run_uav_sweep --config configs/paper_uav_count.yaml
 for metric in macro_f1 coverage_pct accuracy; do
     python -m uavbench significance --config results/paper_uav_count \
         --metric "$metric" --reference mclp_place --correction-scope group || true
@@ -115,7 +144,7 @@ done
 commit_block "uav-count-significance"
 
 # ---- 3. coverage sweep (rebuilt grid, new dir) ----------------------------
-run_block "coverage-v5" python -m uavbench run_coverage_sweep --config configs/paper_coverage.yaml
+run_block "coverage-v5" results/paper_coverage_v5 python -m uavbench run_coverage_sweep --config configs/paper_coverage.yaml
 for metric in macro_f1 coverage_pct accuracy; do
     python -m uavbench significance --config results/paper_coverage_v5 \
         --metric "$metric" --reference mclp_place --correction-scope group || true
@@ -123,7 +152,7 @@ done
 commit_block "coverage-v5-significance"
 
 # ---- 4. paper_full (headline FL table) ------------------------------------
-run_block "paper-full-v5" python -m uavbench run_paper_sim --config configs/paper_full.yaml
+run_block "paper-full-v5" results/paper_full python -m uavbench run_paper_sim --config configs/paper_full.yaml
 for metric in macro_f1 accuracy f1_collapsed f1_missing f1_obstructed f1_survived; do
     python -m uavbench significance --config results/paper_full \
         --metric "$metric" --reference proposed_hfl --correction-scope group || true
