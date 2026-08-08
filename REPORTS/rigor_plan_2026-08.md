@@ -192,6 +192,32 @@ information assumption and comes out of the headline claim, leaving the
 placement contribution to stand on its optimality guarantee and operational
 metrics, which assume no class information at all.
 
+**OUTCOME (ran 2026-08-08, `results/class_realism_*`).** Means 0.5262 / 0.5166 /
+0.5250 / 0.4538. Paired Wilcoxon vs the oracle arm, Holm-corrected:
+
+* `(3 vs 4)` **class-awareness is worth +0.0653 macro-F1, p=0.0059**,
+  rank-biserial 0.93, CI [0.034, 0.097]. It is doing real work.
+* `(1 vs 2)` removing the oracle costs +0.0100, **p=0.131, not significant**.
+  Pseudo retains ≈87% of the benefit with zero label disclosure. Report
+  `pseudo` as the operating point and `true` as an upper bound; the realism
+  objection to class-aware *selection* is answered, not argued around.
+* `(1 vs 3)` +0.0035, p=0.77.
+
+**The pre-registered reading of `(1 vs 3)` was wrong and must not be used.**
+That contrast is *powerless*, not null: `proposed_hfl` already covers 99.95% of
+clients at R_comm=20 km, so class-aware placement has nothing left to steer. The
+error was inheriting `paper_full`'s R_comm without checking `coverage_pct`, and
+it was caught only because arm 1 printed it. The valid test is the binding-radius
+pair (`configs/class_realism_bind{,_noplace}.yaml`, R_comm=8 km, coverage 94.6%),
+run separately and merged separately — pooling the two radii would pair 20 km
+runs against 8 km runs, since `_SIG_TABLES` groups `paper_sweep_rounds` by `N`
+alone and `N`=200 in both.
+
+Independent of that, one operational finding already stands: at saturated
+coverage class-aware placement burns **41% more movement energy** (1.129e8 vs
+7.997e7 J) for +0.0012 macro-F1 and slightly *worse* accuracy — it chases
+rare-class clients that were already inside coverage.
+
 **0.6 Reporting.** `reporting/tables.py`: emit accuracy, macro-F1 and all four
 per-class F1s side by side in every headline table; run `significance` over
 `accuracy`, `macro_f1`, `f1_collapsed`, `f1_missing`, `f1_obstructed`,
