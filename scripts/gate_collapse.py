@@ -84,29 +84,52 @@ def main() -> int:
         print(f"[gate] {d}: no per-class F1 columns — cannot assess collapse")
         return 1
 
-    # Final round per (method, seed), then averaged: a single seed's last round
-    # is noisy enough to flip a borderline verdict either way.
-    keys = [k for k in ("method", "seed") if k in df.columns]
+    # Sweep dimensions present in this table. Gating per (method, cell) rather
+    # than per method is load-bearing on a sweep: averaging a method's macro-F1
+    # across every radius or fleet size lets healthy cells carry collapsed ones,
+    # and the sweeps are exactly where collapse is expected at one end of the
+    # grid. A 6-radius sweep whose bottom two cells sit on the floor would
+    # otherwise pass while a third of its cells are unusable.
+    cell_cols = [c for c in ("N", "K", "capacity", "R_comm") if c in df.columns]
+
+    # Final round per (method, cell, seed), then averaged over seeds: a single
+    # seed's last round is noisy enough to flip a borderline verdict.
+    keys = [k for k in ["method", *cell_cols, "seed"] if k in df.columns]
     last = df.sort_values("round").groupby(keys, as_index=False).last()
 
-    failed = []
-    for method, sub in last.groupby("method"):
+    group_cols = ["method", *cell_cols]
+    failed: list[str] = []
+    total = 0
+    for cell, sub in last.groupby(group_cols):
+        cell = cell if isinstance(cell, tuple) else (cell,)
+        method = cell[0]
         if args.method and method != args.method:
             continue
+        total += 1
         macro = float(sub["macro_f1"].mean())
         per_class = {c: float(sub[c].mean()) for c in f1_cols}
         v = check_not_collapsed(
             macro, per_class, counts.to_numpy(),
             min_margin=args.min_margin, min_class_f1=args.min_class_f1,
         )
-        print(f"[gate] {method:<22} {v}")
+        label = method if len(cell) == 1 else (
+            f"{method} [" + ", ".join(f"{k}={val}" for k, val in zip(cell_cols, cell[1:])) + "]"
+        )
+        # On a single-cell run print everything; on a sweep print only what
+        # fails, or 100+ passing lines bury the verdict.
         if not v.ok:
-            failed.append(method)
+            failed.append(label)
+            print(f"[gate] {label:<44} {v}")
+        elif total <= 1 or not cell_cols:
+            print(f"[gate] {label:<44} {v}")
 
     if failed:
-        print(f"[gate] DEGENERATE: {', '.join(failed)} — this is not a usable result")
+        print(
+            f"[gate] DEGENERATE in {len(failed)}/{total} cells: {', '.join(failed[:12])}"
+            + (" …" if len(failed) > 12 else "")
+        )
         return 1
-    print("[gate] all methods cleared the collapse gate")
+    print(f"[gate] all {total} method/cell combinations cleared the collapse gate")
     return 0
 
 
