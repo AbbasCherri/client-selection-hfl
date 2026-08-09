@@ -54,6 +54,26 @@ N: 200                       # fixed client count; only R_comm sweeps
 # degenerate, so radii of 4/8/20 km were measuring a 97%-NLoS grazing link with
 # every UAV parked at the ceiling. The grid now spans the interval where the
 # channel actually has an interior optimum.
+#
+# EXPECT THE BOTTOM OF THIS GRID TO COLLAPSE, and read it as a result rather
+# than a failure. At the K=20 operating point the fleet covers ~82% of clients
+# at 5 km and coverage falls roughly with the square of the radius, so the
+# 500 m and 1000 m cells put almost nobody in range. The class-realism arm at
+# 800 m measured this directly: macro-F1 0.207, BELOW the 0.2245
+# constant-predictor floor.
+#
+# They are kept deliberately. The sweep's job is to relate coverage to end-task
+# accuracy, and truncating it at 2 km would leave only the flat, healthy part of
+# the curve — which is how the previous version of this experiment produced an
+# uninformative null. The low cells locate the radius at which a 20-UAV fleet
+# stops being able to learn at all, which is an operational finding worth
+# stating in a disaster-response paper.
+#
+# scripts/gate_collapse.py grades each (method, R_comm) cell SEPARATELY, so the
+# collapsed cells are named rather than averaged into the healthy ones. Expect
+# the block to be reported as failed on their account; the cells that clear the
+# gate are still usable, and the gate output says which those are. Do not quote
+# a cell the gate flagged.
 R_comm_values:               # metres
   - 500
   - 1000
