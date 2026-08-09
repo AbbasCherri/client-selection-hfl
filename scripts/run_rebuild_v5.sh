@@ -120,21 +120,40 @@ for chk in check_altitude_band check_collapse_guard check_placement_methods \
 done
 
 # ---- 1. class realism (6 arms) -------------------------------------------
+# Only the FIRST arm's collapse aborts the rebuild, and the distinction matters
+# — it cost a run on 2026-08-09.
+#
+# Arms 1-4 share K, capacity and R_comm, differing only in class_source and
+# placement_class_aware. A collapse in arm 1 therefore condemns the shared
+# operating point: all four would collapse, and so would the three blocks after
+# them. Stopping is right.
+#
+# Arms 5-6 (the bind pair) carry their OWN R_comm. Their collapse says the bind
+# radius is wrong, nothing more. The original guard aborted on any arm, on the
+# stated assumption that all six shared a radius; that assumption was false as
+# soon as the bind pair existed, and when the main point moved 2 km -> 5 km
+# without the bind pair's 800 m being rescaled with it, arm 5 collapsed
+# (macro-F1 0.207, below the 0.2245 floor) and took the fleet sweep, coverage
+# sweep and paper_full down with it.
+FIRST_ARM=1
 for arm in class_realism class_realism_pseudo class_realism_noplace \
            class_realism_none class_realism_bind class_realism_bind_noplace; do
     rdir=$(python -c "import sys,yaml;sys.path.insert(0,'src');from uavbench.runner import load_config;print(load_config('configs/${arm}.yaml')['results_dir'])")
     run_block "$arm" "$rdir" python -m uavbench run_paper_sim --config "configs/${arm}.yaml"
-    # Every arm shares K, capacity and R_comm — they differ only in class_source
-    # and placement_class_aware. So if the first one collapses, all six will, and
-    # the two sweeps after them will too. Stop here rather than spend three days
-    # confirming it six more times.
-    if [[ "$FAILED" == *"(collapsed)"* ]]; then
-        say "FIRST ARM COLLAPSED at the current operating point — aborting the"
-        say "whole rebuild. Re-measure participation before relaunching; do not"
-        say "just rerun this script."
+    if [[ $FIRST_ARM -eq 1 && "$FAILED" == *"(collapsed)"* ]]; then
+        say "THE FIRST ARM COLLAPSED — that condemns the shared operating point"
+        say "(K, capacity, R_comm), not one ablation. Aborting the whole rebuild."
+        say "Re-measure the operating point before relaunching; do not just rerun"
+        say "this script. See results/probe_topology for how it was set."
         exit 1
     fi
+    FIRST_ARM=0
 done
+if [[ "$FAILED" == *"(collapsed)"* ]]; then
+    say "NOTE: a non-first class-realism arm collapsed —$FAILED"
+    say "Continuing: the remaining blocks do not depend on it. That arm's own"
+    say "config is what needs fixing, most likely its R_comm."
+fi
 for grp in main bind; do
     python scripts/merge_class_realism.py --group "$grp" || FAILED="$FAILED merge-$grp"
 done
