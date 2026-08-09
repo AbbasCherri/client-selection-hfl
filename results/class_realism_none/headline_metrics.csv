@@ -1,2 +1,2 @@
 method,N,accuracy_mean,accuracy_std,macro_f1_mean,macro_f1_std,f1_survived_mean,f1_survived_std,f1_collapsed_mean,f1_collapsed_std,f1_obstructed_mean,f1_obstructed_std,f1_missing_mean,f1_missing_std,n_seeds
-proposed_hfl,200,0.7064,0.0621,0.4538,0.0627,0.8218,0.0434,0.2819,0.0545,0.4548,0.1673,0.2567,0.0898,10
+proposed_hfl,200,0.7575,0.0949,0.3185,0.0604,0.8607,0.0615,0.1755,0.1004,0.1418,0.109,0.0959,0.1056,10
