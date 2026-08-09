@@ -24,13 +24,24 @@
 # (270 m - 5.4 km), guarded by tests/sanity_checks/check_altitude_band.py. The
 # ceiling is the reach — z/tan(theta_opt) — so 2000 m rather than 1000 m is what
 # makes a modest fleet viable: 78.5 km^2 of ground per aircraft against 12.6.
-# At 2 km even 60 UAVs put too few clients in range and the task collapsed onto
-# the majority class in three successive attempts.
+# At 2 km a 20-UAV fleet reached only ~42% coverage, so the wider radius is what
+# makes the paper's fleet size operationally sensible. (The three majority-class
+# collapses at 2 km were NOT caused by that coverage shortfall — see the
+# operating point below — but the radius was independently too tight.)
 #
-# Operating point K=60 / capacity=2, set from measured participation
-# (results/probe_participation): 110 clients selected per round against the 120
-# of the last configuration that learned properly, 82.5% coverage, and 120 slots
-# against ~165 covered so the selection rule still binds.
+# Operating point K=20 / capacity=6, set from results/probe_topology, which
+# measured six (K, capacity) cells at this radius for 100 rounds. Per-UAV
+# capacity — not coverage, not participation — decides whether the pipeline
+# learns: cap<=3 rises to ~0.34 macro-F1 by round 10 and then forgets it
+# (cap=1 ends at 0.199, below the constant-predictor floor), while cap>=4
+# recovers and climbs. The chosen cell has the LOWEST coverage in that grid
+# (82.3%) and the best macro-F1 (0.395), which is what rules coverage out.
+#
+# 20 x 6 = 120 slots against the ~165 clients covered, so selection still binds.
+#
+# The earlier note here — that the task needs ~120 clients training per round —
+# was wrong and is retired: the cap=1 cell selects 120 per round and is the
+# worst configuration measured.
 #
 # Order and why
 # -------------

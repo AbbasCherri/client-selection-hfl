@@ -62,26 +62,45 @@ data:
   N_clients: 50
 
 fl:
-  # K and capacity are set from measured PARTICIPATION, not coverage — the two
-  # come apart badly and that cost two failed launches on 2026-08-08.
+  # K and capacity are set from PER-UAV CAPACITY, which is what governs whether
+  # this pipeline learns at all. Neither coverage nor participation predicts it,
+  # and assuming they did cost three failed launches on 2026-08-08.
   #
-  # What the task needs: ~120 clients training per round. The 20 km run that
-  # learned properly (macro-F1 0.526) had exactly that. Every configuration that
-  # fell short collapsed onto the majority class:
+  # The controlled measurement (results/probe_topology, 6 cells x 3 seeds, all at
+  # R_comm = 5 km, 100 rounds, mclp_place):
   #
-  #     2 km, K=20, cap=6, PSO       24.4% cov            macro-F1 0.287
-  #     2 km, K=60, cap=2, PSO       51.9% cov, 53/round  macro-F1 0.266
-  #     2 km, K=60, cap=2, mclp_ls   64.9% cov, 42/round  macro-F1 0.262
+  #     K    cap  slots  cover%  final macro-F1
+  #    120    1    120    85.0      0.199    unlearns (BELOW the 0.2245 floor)
+  #     60    2    120    88.7      0.274    unlearns
+  #     40    3    120    86.0      0.286    unlearns
+  #     30    4    120    84.8      0.379    learns
+  #     20    6    120    82.3      0.395    learns   <- chosen
+  #     60    6    360    98.2      0.367    learns   (off-ladder control)
   #
-  # Coverage does not predict participation. The placement objective is
-  # capacity-aware, so a low cap gives the optimizer no reason to spread (a probe
-  # at cap=60 reported 89% for K=60; at cap=2 the same fleet reached 64.9%), and
-  # the SNR eligibility gate cuts further — 64.9% coverage still yielded only
-  # 41.8 selected against 120 slots.
+  # Capacity orders the outcome exactly; coverage does not order it at all. The
+  # chosen cell has the LOWEST coverage in the grid and the best macro-F1, and
+  # the worst cell (cap=1) sits at 85% coverage while selecting 120 clients per
+  # round. So neither "not enough coverage" nor "not enough participants" is the
+  # mechanism, and the earlier note here claiming a ~120-participants requirement
+  # was wrong — cap=1 meets it and is the worst configuration measured.
   #
-  # Set from results/probe_participation at the R_comm below; do not infer either
-  # value from a coverage curve.
-  K: 60
+  # Why capacity and not the others: the UAV tier trains img_proj+fusion on the
+  # POOLED SHARD of its assigned clients (fusion_owner: uav, below). Capacity is
+  # exactly how many clients that shard pools. Noto damage classes are strongly
+  # geographically clustered, so a 2-client shard inside one 5 km disc is close
+  # to single-class; averaging K such heads cannot recover a class none of them
+  # saw. Every cell rises to ~0.34 by round 10 and dips; only cap>=4 recovers,
+  # which is the signature of forgetting rather than of starvation.
+  #
+  # Recorded per round as shard_minority_share / shard_class_entropy so this is
+  # observable in future runs rather than needing another probe.
+  #
+  # NOT encoded as a cap>=4 guard anywhere. That threshold is one measurement at
+  # one N and one radius, and turning a single observation into a hard rule is
+  # the mistake this file already made once. The standing protection is the
+  # outcome-based collapse gate (scripts/gate_collapse.py), which needs no
+  # guessed threshold.
+  K: 20
   # Altitude band and R_comm are chosen TOGETHER; changing one without the other
   # breaks the placement physics (2026-08-08).
   #
@@ -110,8 +129,9 @@ fl:
   z_min_m: 100.0     # disaster-response waiver / larger UAS class, not 400 ft small-UAS
   z_max_m: 2000.0
   R_comm: 5000.0     # coherent with the band above (z* ~= 1850 m, interior)
-  capacity: 2        # see the K note above: 60 x 2 = 120 slots, still below the
-                     # ~178 clients a K=60 fleet covers, so selection binds
+  capacity: 6        # see the K note above: 20 x 6 = 120 slots against the ~165
+                     # clients a K=20 fleet covers at 5 km, so selection binds;
+                     # and 6 is above the capacity floor where learning survives
   n_rounds: 100
   n_local_epochs: 2
   n_uav_epochs: 2      # UAV image-branch training epochs per round (paper §IV-A Step 3)

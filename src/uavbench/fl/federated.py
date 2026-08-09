@@ -186,6 +186,54 @@ def _build_problem_instance(
 
 
 
+def _shard_class_diversity(
+    uav_groups: dict[int, list],
+    labels,
+    n_classes: int = 4,
+) -> tuple[float, float]:
+    """Mean minority share and mean normalised class entropy of the UAV shards.
+
+    Recorded every round because it is the quantity that distinguishes the two
+    ways this pipeline can fail, which look identical in ``macro_f1``.
+
+    The UAV tier trains the vision and fusion blocks on the *pooled shard of its
+    assigned clients* (see the Tier-B block below), so a shard that is nearly
+    single-class trains a nearly single-class fusion head, and averaging K such
+    heads cannot recover a class none of them saw. Both per-UAV ``capacity`` and
+    ``R_comm`` control how wide a slice each aircraft pools, and Noto damage
+    classes are strongly geographically clustered — so a tight disc holding few
+    clients is skewed almost by construction, independently of how many clients
+    take part overall.
+
+    That is why "how many clients participated" was the wrong diagnostic on
+    2026-08-08: K=60/cap=2 and K=20/cap=6 select ~115 clients each, and only one
+    of them learns. Read these columns next to ``n_selected``, not instead of it.
+
+    Returns ``(nan, nan)`` when no shard holds data (e.g. ``flat_fl``, which has
+    no UAV tier at all).
+    """
+    import numpy as _np
+
+    shares: list[float] = []
+    entropies: list[float] = []
+    lab = _np.asarray(labels)
+    for group in uav_groups.values():
+        idx = [i for c in group for i in c.train_indices]
+        if not idx:
+            continue
+        hist = _np.bincount(lab[idx].astype(int), minlength=n_classes).astype(_np.float64)
+        total = hist.sum()
+        if total <= 0:
+            continue
+        p = hist / total
+        shares.append(float(1.0 - p.max()))
+        nz = p[p > 0]
+        entropies.append(float(-(nz * _np.log(nz)).sum() / _np.log(n_classes)) if n_classes > 1 else 0.0)
+    if not shares:
+        return float("nan"), float("nan")
+    return float(_np.mean(shares)), float(_np.mean(entropies))
+
+
 def _class_value_vector(
     clients: list[ClientData],
     counts: dict[int, np.ndarray] | None,
@@ -1582,6 +1630,10 @@ def run_full_hfl(cfg: dict) -> dict:
                 if cid in client_by_id:
                     uav_groups[uav_idx].append(client_by_id[cid])
 
+            _shard_minority, _shard_entropy = _shard_class_diversity(
+                uav_groups, cached_dataset.labels
+            )
+
             # Per-round learning-rate decay (A3).
             lr_r = lr * _lr_scale(rnd, n_rounds, lr_decay)
             uav_lr_r = uav_lr * _lr_scale(rnd, n_rounds, lr_decay)
@@ -1802,6 +1854,12 @@ def run_full_hfl(cfg: dict) -> dict:
                     "round_time_s": elapsed,
                     "jain_fairness": jain_index(counts_arr),
                     "n_unique_selected": int((counts_arr > 0).sum()),
+                    # Class breadth of what each aircraft actually pools — the
+                    # column that separates "too few clients" from "each
+                    # aircraft sees too narrow a slice". See
+                    # _shard_class_diversity for why n_selected cannot.
+                    "shard_minority_share": _shard_minority,
+                    "shard_class_entropy": _shard_entropy,
                     **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
                     # val_* mirrors the reported metrics on the validation
                     # split (NaN when no val split is configured). Anything
