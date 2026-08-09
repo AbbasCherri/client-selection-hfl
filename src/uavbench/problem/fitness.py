@@ -67,9 +67,34 @@ class Fitness:
         w2: float = 0.03,
         w3: float = 0.159,
         link: "LinkModel | None" = None,
+        coverage_mode: str = "assigned",
     ) -> None:
         self.instance = instance
         self.w1, self.w2, self.w3 = w1, w2, w3
+        # Which coverage the objective rewards.
+        #
+        # "assigned"  — value summed over devices actually assigned this round,
+        #               capped at K*capacity. The historical behaviour; every
+        #               result before 2026-08-09 used it.
+        # "reachable" — value summed over devices in range of some live UAV,
+        #               ignoring capacity. This is the classic max-covering
+        #               objective, and it is what the multi-round task actually
+        #               wants: selection re-runs every round and the roster
+        #               rotates, so the reachable population bounds the data the
+        #               system can ever train on, while the per-round assignment
+        #               does not.
+        #
+        # The two coincide whenever coverage <= K*capacity, so "reachable" is a
+        # strict generalisation rather than a different objective. Above that
+        # point "assigned" is flat and stops rewarding extra coverage, which is
+        # why v5's fitness-optimising placements all halted within a few clients
+        # of the slot budget while a non-optimising baseline covered twice as
+        # many and beat them downstream (REPORTS/preregistration_v6_method.md).
+        if coverage_mode not in ("assigned", "reachable"):
+            raise ValueError(
+                f"coverage_mode must be 'assigned' or 'reachable', got {coverage_mode!r}"
+            )
+        self.coverage_mode = coverage_mode
         # When present, coverage is gated on the radius each UAV's own altitude
         # earns under the shared air-to-ground channel instead of a flat R_comm.
         # This is what makes altitude a real decision (see uavbench.problem.link);
@@ -100,7 +125,8 @@ class Fitness:
         mean_load = res.n_assigned / inst.K
         l_imb = float(np.sum((res.loads - mean_load) ** 2))
 
-        f_cover_norm = res.f_cover / self.f_max
+        cover = res.f_cover if self.coverage_mode == "assigned" else res.f_cover_reachable
+        f_cover_norm = cover / self.f_max
         d_move_norm = d_move / self.d_max
         l_imb_norm = l_imb / self.l_max
 
@@ -146,13 +172,28 @@ class Fitness:
             # (P, K): candidates in a batch fly at different altitudes, so each
             # gets its own radius vector rather than one shared across the batch.
             radii = self.link.slant_radius(pos[:, :, 2])
-        assignment, loads = greedy_assignment_batch(inst, pos, radii=radii)
+        # The reachable reduction is requested only when the objective uses it,
+        # so the default path keeps its measured 5-7x and stays bit-identical.
+        want_reach = self.coverage_mode == "reachable"
+        if want_reach:
+            assignment, loads, f_reach = greedy_assignment_batch(
+                inst, pos, radii=radii, return_reachable=True
+            )
+        else:
+            assignment, loads = greedy_assignment_batch(inst, pos, radii=radii)
+            f_reach = None
 
         out = np.empty(P, dtype=np.float64)
         for p in range(P):
             assigned_mask = assignment[p] >= 0
-            f_cover = float(inst.value[assigned_mask].sum())
             n_assigned = int(assigned_mask.sum())
+            # `l_imb` below is always the ASSIGNED load spread — the imbalance
+            # penalty is about serving pressure per aircraft, which capacity
+            # still governs regardless of how coverage is scored.
+            f_cover = (
+                float(f_reach[p]) if want_reach
+                else float(inst.value[assigned_mask].sum())
+            )
             d_move = float(
                 np.sum(np.sqrt(np.sum((pos[p] - inst.prev_positions) ** 2, axis=1)))
             )

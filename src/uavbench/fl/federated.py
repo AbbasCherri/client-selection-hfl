@@ -269,6 +269,7 @@ def _place_uavs(
     link_model: str = "path_loss",
     z_min_m: float = Z_MIN_M_DEFAULT,
     z_max_m: float = Z_MAX_M_DEFAULT,
+    coverage_mode: str = "assigned",
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray | None]:
     """Run a placement optimizer and return UAV positions in metres.
 
@@ -294,7 +295,7 @@ def _place_uavs(
         )
     elif link_model != "range_gate":
         raise ValueError(f"link_model must be 'path_loss' or 'range_gate'; got {link_model!r}")
-    fitness = Fitness(instance, link=link)
+    fitness = Fitness(instance, link=link, coverage_mode=coverage_mode)
 
     optimizer = build_optimizer(method, params=method_params, budget={"P": P, "G_max": G_max})
     result = optimizer.optimize(instance, fitness, rng)
@@ -314,7 +315,9 @@ def _place_uavs(
     # Re-scoring the returned layout once on a fresh Fitness at the shared
     # R_comm puts every method on one ruler. Fresh so the optimizer's own
     # eval_count (already read back by Optimizer.optimize) stays untouched.
-    placement_score = float(Fitness(instance, link=link)(uav_pos.reshape(-1)))
+    placement_score = float(
+        Fitness(instance, link=link, coverage_mode=coverage_mode)(uav_pos.reshape(-1))
+    )
     radii = result.meta.get("radii")
     if link is not None and radii is None:
         # The coverage gate the placement was scored under, handed to the system
@@ -682,6 +685,11 @@ def run_tier2(cfg: dict) -> dict:
     link_model: str = str(cfg["fl"].get("link_model", "path_loss"))
     z_min_m: float = float(cfg["fl"].get("z_min_m", Z_MIN_M_DEFAULT))
     z_max_m: float = float(cfg["fl"].get("z_max_m", Z_MAX_M_DEFAULT))
+    # Placement objective: "assigned" (capacity-capped, historical) or
+    # "reachable" (capacity-free max-covering). See Fitness.coverage_mode and
+    # REPORTS/preregistration_v6_method.md. In fl.* so it enters the resume
+    # signature — changing the objective must invalidate checkpointed placements.
+    coverage_mode: str = str(cfg["fl"].get("coverage_mode", "assigned"))
     uniform_coverage_radius: bool = bool(cfg["fl"].get("uniform_coverage_radius", False))
     if link_model == "path_loss":
         uniform_coverage_radius = False
@@ -780,6 +788,7 @@ def run_tier2(cfg: dict) -> dict:
                         link_model=link_model,
                         z_min_m=z_min_m,
                         z_max_m=z_max_m,
+                        coverage_mode=coverage_mode,
                     )
                     # cumulative_energy_j counts repositioning (movement) energy
                     # only — hover/communication energy has no simulated-time
@@ -1218,6 +1227,11 @@ def run_full_hfl(cfg: dict) -> dict:
     # computed under different physics.
     z_min_m = float(fl.get("z_min_m", Z_MIN_M_DEFAULT))
     z_max_m = float(fl.get("z_max_m", Z_MAX_M_DEFAULT))
+    # Placement objective: "assigned" (capacity-capped, historical) or
+    # "reachable" (capacity-free max-covering). See Fitness.coverage_mode and
+    # REPORTS/preregistration_v6_method.md. In fl.* so it enters the resume
+    # signature — changing the objective must invalidate checkpointed placements.
+    coverage_mode = str(fl.get("coverage_mode", "assigned"))
     uniform_coverage_radius = bool(fl.get("uniform_coverage_radius", False))
     if link_model == "path_loss":
         uniform_coverage_radius = False
@@ -1577,6 +1591,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         link_model=link_model,
                         z_min_m=z_min_m,
                         z_max_m=z_max_m,
+                        coverage_mode=coverage_mode,
                     )
                     # Movement (repositioning) energy only — see run_tier2 note.
                     if prev_uav_pos_m is not None:

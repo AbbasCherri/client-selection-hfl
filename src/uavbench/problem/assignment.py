@@ -33,12 +33,30 @@ class AssignmentResult:
         Sum of ``V_i`` over assigned devices.
     n_assigned:
         Total number of devices assigned.
+    f_cover_reachable:
+        Sum of ``V_i`` over devices some UAV could serve — i.e. in range and on
+        a live battery — **ignoring capacity**. Always ``>= f_cover``.
+
+        Recorded because the two diverge in a way that matters. ``f_cover``
+        saturates once ``K * capacity`` devices are assigned, so a placement
+        objective built on it has no reason to reach a device it cannot serve
+        this round. But selection re-runs every round and the roster rotates, so
+        across a 100-round run the *reachable* population is what bounds the
+        data the system can ever train on. Optimising the one-round quantity for
+        a many-round objective is why the v5 placement stopped within a few
+        clients of the slot budget while a literature baseline that ignored the
+        objective covered 2x as many and won downstream — see
+        REPORTS/preregistration_v6_method.md §2.
+    n_reachable:
+        Count of those devices.
     """
 
     assignment: np.ndarray
     loads: np.ndarray
     f_cover: float
     n_assigned: int
+    f_cover_reachable: float = 0.0
+    n_reachable: int = 0
 
 
 def _feasible_static(
@@ -76,11 +94,20 @@ def greedy_assignment_batch(
     instance: ProblemInstance,
     positions: np.ndarray,
     radii: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+    return_reachable: bool = False,
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Greedy-assign a whole ``(P, K, 3)`` population at once.
 
     Returns ``(assignment, loads)`` of shapes ``(P, N)`` and ``(P, K)``, each row
     exactly what :func:`greedy_assignment` produces for that candidate.
+
+    ``return_reachable`` appends a ``(P,)`` array of capacity-free reachable
+    value — the batch counterpart of ``AssignmentResult.f_cover_reachable``.
+    It is computed from the same feasibility mask the assignment uses, so the
+    two cannot disagree, and it is **off by default** because the reduction is
+    pure overhead for callers scoring the assigned-coverage objective. It does
+    not touch ``assignment`` or ``loads``, so enabling it cannot perturb a
+    result (the bit-identical guarantee in this module's history still holds).
 
     The device sweep cannot vectorize over *devices* — each one's feasible set
     depends on the loads left by every higher-value device before it. It can
@@ -127,6 +154,10 @@ def greedy_assignment_batch(
         loads_f[pm, jm] += 1.0
         not_full[pm, jm] = loads[pm, jm] < capacity[jm]
 
+    if return_reachable:
+        # (P, N) reachable mask -> (P,) value. Same mask the sweep consumed.
+        f_reach = feasible_static.any(axis=2).astype(np.float64) @ instance.value
+        return assignment, loads, f_reach
     return assignment, loads
 
 
@@ -186,9 +217,14 @@ def greedy_assignment(
     assigned_mask = assignment >= 0
     f_cover = float(instance.value[assigned_mask].sum())
     n_assigned = int(assigned_mask.sum())
+    # Capacity-free reachability, from the same feasibility mask the assignment
+    # used, so the two cannot drift apart. See AssignmentResult.f_cover_reachable.
+    reachable_mask = feasible_static.any(axis=1)
     return AssignmentResult(
         assignment=assignment,
         loads=loads,
         f_cover=f_cover,
         n_assigned=n_assigned,
+        f_cover_reachable=float(instance.value[reachable_mask].sum()),
+        n_reachable=int(reachable_mask.sum()),
     )
