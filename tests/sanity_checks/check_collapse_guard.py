@@ -113,10 +113,71 @@ def degenerate_inputs_raise():
     raise AssertionError("accepted empty per_class_f1")
 
 
+def sweep_gate_catches_a_single_collapsed_cell():
+    """A collapsed cell must fail the sweep even when the method's mean is fine.
+
+    This is the property that matters on a sweep and the one a per-method gate
+    does not have. The coverage sweep spans radii whose bottom end is expected
+    to collapse (the 800 m class-realism arm ended at macro-F1 0.207, below the
+    floor); averaging that cell together with the healthy 5 km cell yields a
+    comfortable mean and a green gate over a third of the grid being unusable.
+
+    Exercised through the CLI rather than the library, because the averaging bug
+    lived in the CLI's groupby, not in check_not_collapsed.
+    """
+    import subprocess
+    import tempfile
+
+    import pandas as pd
+
+    repo = Path(__file__).resolve().parents[2]
+    rows, conf = [], []
+    # Two radii, same method: 5000 m healthy, 500 m on the floor.
+    for r_comm, macro, minority in ((5000, 0.38, 0.15), (500, 0.21, 0.002)):
+        for seed in range(3):
+            rows.append({
+                "method": "mclp_place", "R_comm": r_comm, "seed": seed, "round": 100,
+                "macro_f1": macro, "accuracy": 0.80,
+                "f1_survived": 0.90, "f1_collapsed": 0.20,
+                "f1_obstructed": 0.15, "f1_missing": minority,
+            })
+    for true_label, n in zip(("survived", "collapsed", "obstructed", "missing"),
+                             (10570, 1180, 640, 480)):
+        conf.append({"round": 100, "true_label": true_label,
+                     "pred_label": true_label, "count": n})
+
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        pd.DataFrame(rows).to_parquet(d / "coverage_sweep_rounds.parquet")
+        pd.DataFrame(conf).to_parquet(d / "confusion.parquet")
+
+        mean_macro = sum(r["macro_f1"] for r in rows) / len(rows)
+        assert mean_macro - constant_predictor_macro_f1(NOTO_COUNTS) > 0.05, (
+            f"fixture is not adversarial: the pooled mean {mean_macro:.3f} already "
+            "fails the margin test, so this would pass even with per-method gating"
+        )
+
+        out = subprocess.run(
+            [sys.executable, str(repo / "scripts" / "gate_collapse.py"), str(d)],
+            capture_output=True, text=True,
+        )
+        assert out.returncode == 1, (
+            "gate PASSED a sweep with a collapsed cell — per-cell gating is not "
+            f"in effect.\nstdout: {out.stdout}\nstderr: {out.stderr}"
+        )
+        assert "R_comm=500" in out.stdout, (
+            f"gate failed but did not name the collapsed cell:\n{out.stdout}"
+        )
+        assert "R_comm=5000" not in out.stdout.split("DEGENERATE")[-1], (
+            f"the healthy 5000 m cell was reported as degenerate:\n{out.stdout}"
+        )
+
+
 check("closed-form baseline matches brute force", closed_form_baseline_matches_brute_force)
 check("Noto constant-predictor baseline is ~0.225", noto_baseline_is_where_we_think)
 check("every known collapsed run is caught", every_known_collapsed_run_is_caught)
 check("the working run is not flagged", the_working_run_is_not_flagged)
 check("macro-F1 alone would not have caught them", macro_f1_alone_would_not_have_caught_them)
 check("degenerate inputs raise", degenerate_inputs_raise)
+check("sweep gate catches a single collapsed cell", sweep_gate_catches_a_single_collapsed_cell)
 finish()
