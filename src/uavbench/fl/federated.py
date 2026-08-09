@@ -186,6 +186,66 @@ def _build_problem_instance(
 
 
 
+def _shard_class_stats(
+    uav_groups: dict[int, list],
+    labels,
+    n_classes: int = 4,
+) -> dict[int, tuple[float, float]]:
+    """Per-UAV ``(minority_share, normalised_class_entropy)`` for non-empty shards.
+
+    Empty shards are omitted rather than scored zero: an idle aircraft is not a
+    single-class one, and averaging it in as such would understate a healthy
+    fleet.
+    """
+    import numpy as _np
+
+    lab = _np.asarray(labels)
+    out: dict[int, tuple[float, float]] = {}
+    log_c = _np.log(n_classes) if n_classes > 1 else 1.0
+    for uav_idx, group in uav_groups.items():
+        idx = [i for c in group for i in c.train_indices]
+        if not idx:
+            continue
+        hist = _np.bincount(lab[idx].astype(int), minlength=n_classes).astype(_np.float64)
+        total = hist.sum()
+        if total <= 0:
+            continue
+        p = hist / total
+        nz = p[p > 0]
+        entropy = float(-(nz * _np.log(nz)).sum() / log_c) if n_classes > 1 else 0.0
+        out[uav_idx] = (float(1.0 - p.max()), entropy)
+    return out
+
+
+def _shard_effective_class_fraction(
+    uav_groups: dict[int, list],
+    labels,
+    n_classes: int = 4,
+) -> dict[int, float]:
+    """Per-UAV ``exp(H) / C`` — the effective class count, normalised to (0, 1].
+
+    This is the C2 aggregation weight (REPORTS/preregistration_v6_method.md).
+    A shard holding one class scores ``1/C``; a class-balanced one scores 1, so
+    a healthy fleet is unaffected and only narrow shards are pulled down.
+
+    Why weight edge models this way at all: the UAV tier trains the fusion head
+    on its pooled shard, and `results/probe_topology` showed that averaging
+    near-single-class fusion heads is what makes the run *unlearn* — capacity
+    only mattered because it set shard width. Weighting by sample count (the
+    default) cannot see this: a 2-client single-class shard and a 2-client
+    balanced one carry identical weight. Weighting by effective class count
+    reads the quantity that actually predicts the damage, and needs no
+    threshold — which matters, because the capacity floor that motivated it was
+    one measurement at one N and one radius and must not be hard-coded.
+    """
+    import numpy as _np
+
+    stats = _shard_class_stats(uav_groups, labels, n_classes)
+    log_c = _np.log(n_classes) if n_classes > 1 else 1.0
+    # entropy is stored normalised by log C, so exp(H_nats) = exp(entropy*logC).
+    return {j: float(_np.exp(ent * log_c) / n_classes) for j, (_m, ent) in stats.items()}
+
+
 def _shard_class_diversity(
     uav_groups: dict[int, list],
     labels,
@@ -1232,6 +1292,14 @@ def run_full_hfl(cfg: dict) -> dict:
     # REPORTS/preregistration_v6_method.md. In fl.* so it enters the resume
     # signature — changing the objective must invalidate checkpointed placements.
     coverage_mode = str(fl.get("coverage_mode", "assigned"))
+    # Edge-aggregation weighting: "samples" (data-size FedAvg, historical) or
+    # "diversity" (samples x effective class count). See
+    # _shard_effective_class_fraction. In fl.* so it enters the resume signature.
+    uav_weight_mode = str(fl.get("uav_weight_mode", "samples"))
+    if uav_weight_mode not in ("samples", "diversity"):
+        raise ValueError(
+            f"fl.uav_weight_mode must be 'samples' or 'diversity', got {uav_weight_mode!r}"
+        )
     uniform_coverage_radius = bool(fl.get("uniform_coverage_radius", False))
     if link_model == "path_loss":
         uniform_coverage_radius = False
@@ -1648,6 +1716,11 @@ def run_full_hfl(cfg: dict) -> dict:
             _shard_minority, _shard_entropy = _shard_class_diversity(
                 uav_groups, cached_dataset.labels
             )
+            _shard_div_frac = (
+                _shard_effective_class_fraction(uav_groups, cached_dataset.labels)
+                if uav_weight_mode == "diversity"
+                else {}
+            )
             # Shard WIDTH, recorded separately from shard class diversity because
             # the two selection families construct rosters differently and the
             # difference is invisible in n_selected.
@@ -1790,7 +1863,13 @@ def run_full_hfl(cfg: dict) -> dict:
                 # cluster's IoT reputations (paper §IV-C7).
                 cluster_reps = [rep_scores.get(c.client_id, 0.5) for c in uav_groups[uav_idx]]
                 uav_rep = trimmed_mean(cluster_reps) if cluster_reps else 1.0
-                uav_updates.append((parts, total_n, uav_rep))
+                # C2: weight the edge model by the effective number of classes
+                # its shard saw, not by sample count alone. No-op at
+                # uav_weight_mode="samples" (the default and every pre-v6 run).
+                w_n = total_n
+                if uav_weight_mode == "diversity":
+                    w_n = total_n * _shard_div_frac.get(uav_idx, 1.0)
+                uav_updates.append((parts, w_n, uav_rep))
 
             # ── Server-level aggregation + momentum (A3) ──────────────────
             # Reputation-weighted FedAvg; UAVs whose cluster trimmed-mean
