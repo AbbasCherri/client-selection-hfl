@@ -1,0 +1,31 @@
+# v6 arm C1+C2 — both changes together. The candidate method.
+#
+# Criteria and rationale are fixed in REPORTS/preregistration_v6_method.md,
+# committed (9729a1ce) before any v6 code existed. Read that first; this file
+# only says how the arm is run.
+#
+# What changes vs v5: `fl.coverage_mode: reachable` AND `fl.uav_weight_mode: diversity`.
+# Everything else — fleet grid, N, seeds, tuned recipe, 100 rounds — is
+# inherited unchanged, so any difference is attributable to the switch.
+#
+# Why this should help, stated in advance so it can be wrong:
+# The two attack different failures and are expected to compose: C1 widens
+# the reachable pool selection draws from, C2 stops the extra edge models
+# that come with a wider fleet from diluting the fusion head with
+# single-class updates. If the combination beats both singles, that
+# interaction is the result; if it does not, the 2x2 says which one carries
+# the effect and the paper claims only that.
+#
+# Baselines are reused from results/paper_uav_count at identical N/seeds/rounds
+# rather than recomputed, which is also what keeps the comparison paired.
+extends: paper_uav_count.yaml
+
+name: v6_both
+results_dir: results/v6_both
+
+fl:
+  coverage_mode: reachable
+  uav_weight_mode: diversity
+
+methods:
+  - mclp_place

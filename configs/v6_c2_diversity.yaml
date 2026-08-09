@@ -1,0 +1,37 @@
+# v6 arm C2 — diversity-weighted edge aggregation, alone.
+#
+# Criteria and rationale are fixed in REPORTS/preregistration_v6_method.md,
+# committed (9729a1ce) before any v6 code existed. Read that first; this file
+# only says how the arm is run.
+#
+# What changes vs v5: `fl.uav_weight_mode: diversity`. Each UAV's contribution to the server
+# aggregate is scaled by exp(H)/C, the effective number of classes its pooled
+# shard saw. Placement objective stays at v5's capacity-capped `assigned`.
+# Everything else — fleet grid, N, seeds, tuned recipe, 100 rounds — is
+# inherited unchanged, so any difference is attributable to the switch.
+#
+# Why this should help, stated in advance so it can be wrong:
+# results/probe_topology showed the run does not fail to learn at narrow
+# shards — it learns to ~0.34 macro-F1 by round 10 and then UNLEARNS to the
+# constant-predictor floor. The mechanism is single-class fusion heads
+# entering the average, and sample-count weighting is blind to it: a
+# 2-client single-class shard and a 2-client balanced shard carry identical
+# weight. This reads the quantity that predicts the damage.
+#
+# Threshold-free on purpose. The cap>=4 floor that motivated it was one
+# measurement at one N and one radius; hard-coding it would repeat the
+# mistake the retired '~120 participants' rule already made once.
+#
+# Baselines are reused from results/paper_uav_count at identical N/seeds/rounds
+# rather than recomputed, which is also what keeps the comparison paired.
+extends: paper_uav_count.yaml
+
+name: v6_c2_diversity
+results_dir: results/v6_c2_diversity
+
+fl:
+  coverage_mode: assigned
+  uav_weight_mode: diversity
+
+methods:
+  - mclp_place

@@ -1,0 +1,38 @@
+# v6 CONTROL — both switches OFF. Must reproduce v5 exactly.
+#
+# Criteria and rationale are fixed in REPORTS/preregistration_v6_method.md,
+# committed (9729a1ce) before any v6 code existed. Read that first; this file
+# only says how the arm is run.
+#
+# What changes vs v5: Nothing. `assigned` + `samples` are the v5 defaults.
+# Everything else — fleet grid, N, seeds, tuned recipe, 100 rounds — is
+# inherited unchanged, so any difference is attributable to the switch.
+#
+# Why this should help, stated in advance so it can be wrong:
+# This arm exists to falsify a specific worry rather than to produce a
+# result: the C1/C2 edits touched greedy_assignment, AssignmentResult and
+# both of Fitness's scoring paths, and this repository has a documented
+# history of bit-identical refactors that had to be verified rather than
+# assumed. If this arm does not match results/paper_uav_count's mclp_place
+# cells, the v6 comparison is measuring my refactor and not the method.
+#
+# Run at K=20 only, 3 seeds — enough to detect a changed number, and there
+# is no reason to spend a full grid confirming a no-op.
+#
+# Baselines are reused from results/paper_uav_count at identical N/seeds/rounds
+# rather than recomputed, which is also what keeps the comparison paired.
+extends: paper_uav_count.yaml
+
+name: v6_control
+results_dir: results/v6_control
+
+n_seeds: 3
+K_values:
+  - {K: 20, capacity: 6}
+
+fl:
+  coverage_mode: assigned
+  uav_weight_mode: samples
+
+methods:
+  - mclp_place
