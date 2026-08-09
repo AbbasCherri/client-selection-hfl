@@ -10,13 +10,58 @@ quoting anything from a new run. (Per-run ground truth lives next to the
 outputs: every harness writes its resolved config YAML and a
 `seed_manifest.csv` before the run starts.)
 
-Note on the current state (2026-07-31): **the paper's data is the
-2026-07-29 final run, code commit `9aa933ed`, results commit `e1894dc7`**
-— every row dated 2026-07-29 below. Everything dated before 2026-07-24 is
-smoke-scale or predates the literature baselines / current configs and is
-**not** paper material; the 2026-07-24 Tier-1 rows are superseded by the
-2026-07-29 Tier-1 row (which adds the `real` scenario) except for the
-three ablation/supplement configs, which were not re-run.
+## Current state (2026-08-09): everything below is VOID pending the v5 rebuild
+
+**No row in the table below is paper material right now.** Two independent
+defects, both discovered 2026-08-08/09, invalidate every run that precedes
+them. Neither is visible in any output file, which is why they survived so
+long — every affected run produced complete, well-formed, plausible-looking
+results.
+
+**Defect 1 — incoherent flight geometry (affects every run).** The UAV altitude
+band was 20-120 m while `R_comm` ran to 20 km. Under the Al-Hourani channel the
+radius-vs-altitude curve peaks at a fixed elevation angle (20.34° suburban), so
+the coherent ground radius is `z/tan(θ_opt)` = 54-324 m for that band. Every
+configured radius above ~324 m pinned the vertical optimum at a bound, and at
+20 km the elevation angle is 0.34°, giving P(LoS) ≈ 3% — a 97% NLoS link, i.e.
+an aerial base station with its defining advantage switched off. `LinkModel`
+never objected because it back-solves whatever path-loss budget the configured
+`R_comm` requires. Corrected to a 100-2000 m band at `R_comm` = 5 km (FL) and
+100-400 m at 500 m (Tier-1), both interior to the coherent interval, guarded by
+`tests/sanity_checks/check_altitude_band.py`.
+
+**Defect 2 — per-UAV capacity below the level at which the model can learn
+(affects the FL runs).** Measured 2026-08-09 in `results/probe_topology`
+(6 cells × 3 seeds, R = 5 km, 100 rounds): capacity ≤ 3 rises to ~0.34 macro-F1
+by round 10 and then *unlearns* monotonically to the constant-predictor floor
+(cap=1 ends at 0.199, below it), while capacity ≥ 4 recovers and climbs.
+Capacity orders the outcome exactly; coverage does not order it at all — the
+best cell has the lowest coverage in the grid (82.3%) and the worst has 85%.
+Cause: with `fusion_owner: uav` each UAV trains img_proj+fusion on the pooled
+shard of its assigned clients, so capacity is that shard's width, and Noto
+damage classes are geographically clustered enough that a 2-client shard inside
+one 5 km disc is near single-class. Now observable per round as
+`shard_minority_share` / `shard_class_entropy`.
+
+**A retired claim, recorded so it is not reintroduced.** An earlier diagnosis
+held that the task needs ~120 clients training per round. It came from a single
+observation, confounded participation with radius, and is falsified: the cap=1
+cell selects 120 per round and is the worst configuration measured. No
+participation threshold is encoded anywhere. The standing protection is the
+outcome-based gate `scripts/gate_collapse.py` (macro-F1 must clear the
+closed-form constant-predictor baseline by 0.05 **and** every per-class F1 must
+clear 0.05), which needs no guessed threshold.
+
+Rebuild in progress at operating point **K=20 / capacity=6 / R_comm=5 km /
+band 100-2000 m**, PIPELINE_VERSION 5. Rows will be added as blocks land; until
+then, quote nothing.
+
+### Historical note (superseded, kept for the audit trail)
+
+Before 2026-08-08 the paper's data was the 2026-07-29 final run, code commit
+`9aa933ed`, results commit `e1894dc7` — every row dated 2026-07-29 below.
+Everything dated before 2026-07-24 is smoke-scale or predates the literature
+baselines / current configs. All of it is now void under Defect 1.
 
 | Date | Command / config | Output file(s) | Git commit | Paper table/figure | Notes |
 |---|---|---|---|---|---|
@@ -45,4 +90,8 @@ three ablation/supplement configs, which were not re-run.
 | 2026-07-29 | `uavbench run_stress_sweep --config configs/stress_test.yaml` and `configs/stress_selection.yaml` (checkpoint-resumed from the 2026-07-23 grid) | `results/stress_test/*`, `results/stress_selection/*`, `significance_macro_f1.csv` | `e1894dc7` | robustness/stress table | Resumed, not recomputed — the underlying cells date from the 2026-07-23/24 runs at the same pipeline version. Weights come from `configs/tuned_weights.yaml` via `extends:` (never copied inline — a copied `lr` previously drifted 17x and wrecked the 2026-07-22 stress grid). |
 | 2026-07-29 | artifact staging step of `reproduce_paper.sh` | `results/paper_artifact/*` (resolved configs, seed manifests, significance CSVs) | `e1894dc7` | provenance bundle | Derived copies, no new data. |
 | 2026-08-07 | `uavbench run_coverage_sweep --config configs/paper_coverage.yaml` (**COVERAGE SWEEP v2** — supersedes the 2026-07-29 row above: **17 methods** x R_comm ∈ {250, 500, 1k, 2k, 4k, 8k, 20k} m x 10 seeds at N=200; shared Al-Hourani path-loss link model calibrated per job so the best achievable radius equals the swept R_comm; equal-radius re-scoring on a fresh canonical Fitness; PIPELINE_VERSION 4) | `results/paper_coverage/coverage_sweep_rounds.parquet`, `R{250..20000}/seed*/<method>/`, `significance_macro_f1.csv` | `60d20565` (results) on code `4e366c3f` | coverage-constrained figure + honest-limitation text | **NEGATIVE RESULT, re-confirmed at much higher resolution.** Paired Wilcoxon vs `mclp_place`, Holm within radius: **6 of 105 placement-vs-placement comparisons significant.** vs `random_place`: positive at all 7 radii (+0.006…+0.067) but **none survives Holm** — consistent sign (7/7) suggests a small real effect, magnitude does not clear multiplicity at 10 seeds; do **not** claim a significant win over random. vs `hfl_static` (placed once, never repositioned): \|diff\| ≤ 0.03, all p > 0.6 — **repositioning buys no accuracy.** vs `proposed_hfl` (PSO): \|diff\| ≤ 0.027, all ns. The 6 wins that land are `alzenad2017`/`moon2022` at 20 km (+0.20) and `ga_place` at 500 m — methods whose own altitude rule mismatches the link budget, i.e. coverage *failures*, not placement-quality differences. `flat_fl` significantly **beats** every placement at R ≤ 2 km (−0.19…−0.10) and loses at 20 km (+0.138). Why the 2026-07-29 row does not carry over: that sweep scored each optimizer at its own path-loss radius (618 m for mozaffari/alzenad vs R_comm for everyone else), so its `placement_fitness` column was not comparable across methods. |
-| 2026-08-08 | `scripts/run_class_realism.sh` → `uavbench run_paper_sim` x 4 arms (**ORACLE-DEGRADATION ABLATION**, rigor plan item 0.5: `proposed_hfl` at N=200, R_comm=20 km, 10 seeds, 100 rounds; arms vary `fl.class_source` ∈ {true, pseudo, none} x `fl.placement_class_aware` ∈ {on, off}; all arms share `optimizer_seed`/`data.seed`/method so pairing is exact) | `results/class_realism_{true,pseudo,noplace,none}/paper_sweep_rounds.parquet`, merged `results/class_realism/paper_sweep_rounds.parquet`, `significance_{macro_f1,accuracy,f1_*}.csv` | pending bundle, on code `4e366c3f` | class-awareness realism table | Means: `true_placeaware` 0.5262, `pseudo_placeaware` 0.5166, `true_placeblind` 0.5250, `none_placeblind` 0.4538. Paired Wilcoxon vs the oracle arm (Holm): **vs `none_placeblind` +0.0653, p=0.0059, rank-biserial 0.93, CI [0.034, 0.097] — class-awareness is doing real work.** vs `pseudo_placeaware` +0.0100, p=0.131, CI [−0.001, 0.022] — **not significant**; pseudo retains ≈87% of the benefit with **zero label disclosure**, so report `pseudo` as the operating point and `true` as an upper bound. vs `true_placeblind` +0.0035, p=0.77 — null, **but this contrast is powerless and must not be cited as evidence**: coverage is 99.95% at 20 km, so class-aware placement has nothing left to steer (see the 8 km row). Side finding: at saturated coverage class-aware placement burns **41% more movement energy** (1.129e8 vs 7.997e7 J) for +0.0012 macro-F1 and slightly worse accuracy. Prerequisite fix: `class_source: pseudo` was **unreachable** from `run_full_hfl` before this run (it called `build_class_info` without a model and raised on every invocation); it now refreshes from the current global model on the reselection cadence, ahead of placement. |
+| 2026-08-08 | `scripts/run_class_realism.sh` → `uavbench run_paper_sim` x 4 arms (**ORACLE-DEGRADATION ABLATION**, rigor plan item 0.5: `proposed_hfl` at N=200, R_comm=20 km, 10 seeds, 100 rounds; arms vary `fl.class_source` ∈ {true, pseudo, none} x `fl.placement_class_aware` ∈ {on, off}; all arms share `optimizer_seed`/`data.seed`/method so pairing is exact) | `results/class_realism_{true,pseudo,noplace,none}/paper_sweep_rounds.parquet`, merged `results/class_realism/paper_sweep_rounds.parquet`, `significance_{macro_f1,accuracy,f1_*}.csv` | pending bundle, on code `4e366c3f` | class-awareness realism table | Means: `true_placeaware` 0.5262, `pseudo_placeaware` 0.5166, `true_placeblind` 0.5250, `none_placeblind` 0.4538. Paired Wilcoxon vs the oracle arm (Holm): **vs `none_placeblind` +0.0653, p=0.0059, rank-biserial 0.93, CI [0.034, 0.097] — class-awareness is doing real work.** vs `pseudo_placeaware` +0.0100, p=0.131, CI [−0.001, 0.022] — **not significant**; pseudo retains ≈87% of the benefit with **zero label disclosure**, so report `pseudo` as the operating point and `true` as an upper bound. vs `true_placeblind` +0.0035, p=0.77 — null, **but this contrast is powerless and must not be cited as evidence**: coverage is 99.95% at 20 km, so class-aware placement has nothing left to steer (see the 8 km row). Side finding: at saturated coverage class-aware placement burns **41% more movement energy** (1.129e8 vs 7.997e7 J) for +0.0012 macro-F1 and slightly worse accuracy. Prerequisite fix: `class_source: pseudo` was **unreachable** from `run_full_hfl` before this run (it called `build_class_info` without a model and raised on every invocation); it now refreshes from the current global model on the reselection cadence, ahead of placement. **VOID under Defect 1** (ran at 20 km / 120 m). The ablation *design* is sound and is being re-run at the corrected operating point; the numbers are not. Note the absolute level drops from 0.526 to ~0.38 in the corrected regime, so whether the +0.065 selection effect survives is an open question. |
+| 2026-08-08 | `uavbench run_paper_sim` × 3 attempts at 2 km (K=20/cap=6 PSO; K=60/cap=2 PSO; K=60/cap=2 mclp_ls) | overwritten by later runs; numbers preserved in `src/uavbench/analysis/collapse.py` and `tests/sanity_checks/check_collapse_guard.py` | `16a52ddd`…`b19cf292` | **none — failed runs** | Kept in the record because they are the calibration set for the collapse gate. macro-F1 0.287 / 0.266 / 0.262 against a 0.2245 constant-predictor floor, with `f1_missing` 0.0040 / 0.0062 / 0.0016. All three produced complete, fully-checkpointed, plausible output; every sanity check passed. Caught only by reading `f1_missing` by hand, which is why the gate now exists. |
+| 2026-08-09 | `uavbench run_uav_sweep --config configs/probe_topology.yaml` (**CAPACITY DIAGNOSTIC**, 6 (K,capacity) cells × 1 method (`mclp_place`) × 3 seeds, N=200, R_comm=5 km, band 100-2000 m, 100 rounds) | `results/probe_topology/uav_sweep_rounds.parquet`, `K*/seed*/mclp_place/` | `9349f274` | **diagnostic — not paper material at 3 seeds** | Established Defect 2. Final macro-F1 by cell: K=120/cap=1 **0.199** (below the 0.2245 floor), K=60/cap=2 0.274, K=40/cap=3 0.286, K=30/cap=4 0.379, **K=20/cap=6 0.395**, K=60/cap=6 0.367 (off-ladder control, 360 slots). Coverage across the grid 82.3-98.2% and does **not** order the outcome; capacity does, exactly. Failure mode is unlearning, not starvation — read the trajectory, not the final row. Fixes the operating point at K=20/cap=6 and forced the fleet sweep's K·C=120 invariant to be **inverted** (capacity now fixed at 6, slots vary), because the old grid's entire high-K half sat in the unlearning regime and would have reported capacity collapse as a fleet-size effect on placement. |
+| 2026-08-09 | `scripts/run_rebuild_v5.sh` (**V5 REBUILD**, in progress; 4 blocks: class realism ×6 arms → fleet sweep → coverage sweep → paper_full; every block gated by `scripts/gate_collapse.py`, first-arm collapse aborts the whole run) | `results/class_realism_*`, `results/paper_uav_count`, `results/paper_coverage_v5`, `results/paper_full`, log `results/rebuild_v5.log` | code `eaef0174`+ | **pending** | Operating point K=20/cap=6, R_comm 5 km, band 100-2000 m, PIPELINE_VERSION 5 (refuses v4 checkpoints; all 10 class-realism seeds correctly invalidated on `K: 60→20, capacity: 2→6`). Arms cleared so far: `class_realism_true` macro-F1 0.3837 (margin +0.159, min per-class F1 0.155), `class_realism_pseudo` 0.3385 (min 0.065), `class_realism_noplace` 0.3432 (min 0.143). Do not quote until the block completes and its significance tables are written. |
+| 2026-08-09 | `scripts/run_tier1_v5.sh` (**TIER-1 REBUILD**, queued — not yet run) | `results/tier1_{core,equal_radius,regime_hetero,warmprev}` | code `5bc189fd` | **pending** | Tier-1 ran on a flat `slant_distance <= R_comm` gate until 2026-08-09, under which altitude is a pure penalty and every optimizer drives z to the floor: the advertised 3D search had a closed-form third dimension. Now scored through the shared Al-Hourani channel (`problem.link_model: path_loss`), band 100-400 m, R_comm 500 m. Two silent hazards closed in the same change: `compute_metrics` built its own link-less `Fitness` (so reported coverage would have used the flat gate for channel-chosen positions), and an explicit `radii` argument overrides the link (so forwarding a baseline's `meta["radii"]` would have rebuilt the 618-vs-500 m unequal-radius comparison). Under a shared channel no method carries a private radius — this is the structural fix for that fairness problem, not a patch. New `mean_altitude_m`/`std_altitude_m` columns; `scripts/gate_altitude.py` fails a run in which *every* method pins to the same bound. Held back deliberately: bash reads scripts lazily, so this could not be appended to the running rebuild. |
