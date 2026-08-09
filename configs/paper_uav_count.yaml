@@ -10,50 +10,75 @@
 # and the 20 km cells were a 97% NLoS grazing link. Placement was being measured
 # almost entirely outside the regime where the channel has an interior optimum.
 #
-# This sweep runs in the corrected regime (100-1000 m band, R_comm = 2 km, both
+# This sweep runs in the corrected regime (100-2000 m band, R_comm = 5 km, both
 # inside the coherent interval) and varies the fleet instead of the radio.
 #
-# The grid GROWS rather than shrinks, which is the opposite of this file's first
-# version. A 1-round probe (results/probe_coverage_vs_k) measured coverage at
-# R_comm = 2 km:
+# The grid SHRINKS rather than grows, which reverses this file's second version
+# as well as its first. The 2 km probe that motivated growing it
+# (results/probe_coverage_vs_k: mclp_place covering 42.5% at K=20, 89% at K=60)
+# was measured at a radius that has since been retired, and the reach scales
+# with the square of it. At the 5 km operating point the same fleet sizes are
+# far from starved — measured at 100 rounds in results/probe_topology:
 #
-#     K      mclp_place   random_place
-#     20        42.5%          8.0%
-#     40        68.0%         18.5%
-#     60        89.0%         25.5%
-#    100        99.0%         37.0%
-#    200        99.5%         54.0%
+#     K=20  82.3%      K=40  86.0%      K=120  85.0%
+#     K=30  84.8%      K=60  88.7%
 #
-# Two things follow. Placement is *decisive* here — 5.3x at K=20 — so the
-# earlier "placement does not move macro-F1" null was an artifact of measuring
-# in the saturated, physically degenerate 20 km regime. And shrinking the fleet
-# below 20 would only have produced more majority-class collapse: K=20 with PSO
-# placement already covers just 24%, which drove f1_missing to 0.004.
+# Coverage is essentially FLAT from K=20 upward: twenty aircraft with 5 km discs
+# (20 x 78.5 km^2 against a ~1500 km^2 peninsula) already blanket most of the
+# region, and further aircraft mostly overlap. Sweeping K upward therefore
+# measures nothing — every cell above 20 is the same coverage with a different
+# aircraft count. The interesting range is BELOW 20, where discs stop tiling the
+# region and placement quality decides what is reachable.
 #
-# So the question the sweep asks is the operational one: how large a fleet does
-# a given placement rule need to reach usable coverage? Good placement reaching
-# 89% at K=60 where random needs several hundred aircraft is a far stronger
-# claim than a macro-F1 delta, and it is the honest framing for a method whose
-# value showed up in coverage rather than in end-task accuracy.
+# So the question the sweep asks is the operational one: how small a fleet can a
+# given placement rule get away with? A method holding coverage at K=10 where
+# uniform-random needs three times the aircraft is a far stronger claim than a
+# macro-F1 delta, and it is the honest framing for a method whose value shows up
+# in coverage rather than in end-task accuracy.
 #
-# Why capacity is swept WITH K (the design decision that makes this readable)
-# ---------------------------------------------------------------------------
-# Holding per-UAV capacity fixed at 6 would make total training slots K*C scale
-# with the fleet: K=2 would give 12 slots for 200 clients. The model would then
-# be starved of data at exactly the cells where placement is most stressed, and
-# a flat macro-F1 across methods would be uninterpretable — data starvation and
-# placement irrelevance look identical in that column.
+# Why capacity is FIXED and the slot budget is allowed to vary
+# ------------------------------------------------------------
+# This is the reverse of this file's previous design, and the reversal is
+# forced by measurement rather than taste.
 #
-# So each K is paired with a capacity holding K*C = 120 exactly, the same total
-# as paper_full. Per-round data volume is capped identically in every cell, so a
-# larger fleet buys coverage rather than throughput and the comparison stays
-# about placement. Capacities run 6 down to 1 across the grid, all operationally
-# plausible for an aerial base station — unlike the first version of this file,
-# which needed 60 clients on one aircraft to hold the product fixed at K=2.
+# The old design paired each K with a capacity holding K*C = 120, so that
+# per-round data volume stayed constant and a larger fleet bought coverage
+# rather than throughput. That is a sound instinct and it is unusable here:
+# results/probe_topology measured the K*C = 120 ladder directly and found that
+# per-UAV capacity, not coverage and not participation, decides whether the
+# pipeline learns at all —
 #
-# Note the slot budget still binds at the top of the grid: at K=120 the fleet
-# covers ~99% (198 clients) against 120 slots, so selection remains exercised
-# throughout rather than going slack as coverage saturates.
+#     K=120/cap=1  0.199 (below the constant-predictor floor)   unlearns
+#     K=60 /cap=2  0.274                                        unlearns
+#     K=40 /cap=3  0.286                                        unlearns
+#     K=30 /cap=4  0.379                                        learns
+#     K=20 /cap=6  0.395                                        learns
+#
+# so the old grid's entire high-K half sits in a regime that forgets what it
+# learned by round 10. It would have reported capacity-induced collapse as a
+# fleet-size effect on placement, with coverage flat at 82-89% across every cell
+# to make it look benign.
+#
+# The cause is structural, not incidental: the UAV tier trains img_proj+fusion
+# on the pooled shard of its assigned clients, so capacity IS the width of that
+# shard, and Noto damage classes are geographically clustered enough that a
+# 2-client shard inside one 5 km disc is near single-class.
+#
+# So capacity is pinned at 6 — paper_full's operating point, above the floor —
+# and total slots K*C scale with the fleet. run_uav_sweep will warn that the
+# product drifts 6x across the grid; that is intended here.
+#
+# What this costs, stated plainly: fleet size and per-round data volume are now
+# confounded, so the TREND across K mixes "more aircraft reach more clients"
+# with "more aircraft train on more data". The per-K contrasts are unaffected —
+# every method within a cell shares that cell's K and capacity — so the
+# placement comparison this sweep exists for stays internally controlled, and it
+# is only the cross-K reading that carries the confound. Report coverage_pct
+# beside macro_f1 at every K so a reader can separate them.
+#
+# The grid stops at K=30 (180 slots against ~185 covered) because beyond that
+# the slot budget exceeds the covered population and the selection rule stops
+# binding, which would silently change what is being compared.
 #
 # Built-in validity check: `flat_fl` has no UAVs, so its row MUST be flat across
 # every K. If it is not, the sweep is leaking something that is not placement.
@@ -82,11 +107,11 @@ N: 200                       # fixed client count; only the fleet sweeps
 # the design is auditable from this file alone; run_uav_sweep warns if the
 # products drift by more than 2x.
 K_values:
-  - {K: 20,  capacity: 6}
-  - {K: 30,  capacity: 4}
-  - {K: 40,  capacity: 3}
-  - {K: 60,  capacity: 2}
-  - {K: 120, capacity: 1}
+  - {K: 5,  capacity: 6}     #  30 slots — placement most stressed
+  - {K: 10, capacity: 6}     #  60 slots
+  - {K: 15, capacity: 6}     #  90 slots
+  - {K: 20, capacity: 6}     # 120 slots — paper_full's operating point
+  - {K: 30, capacity: 6}     # 180 slots — top of the binding range
 
 data:
   source: real

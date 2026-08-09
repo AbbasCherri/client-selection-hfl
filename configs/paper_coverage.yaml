@@ -72,7 +72,8 @@ data:
   N_clients: 200
 
 fl:
-  K: 60              # see paper_full.yaml: K=20 starves at the coherent radius
+  K: 20              # matches paper_full's operating point — see the capacity
+                     # table there; K=60/cap=2 unlearns and must not be used
   z_min_m: 100.0
   z_max_m: 2000.0
   R_comm: 2000.0             # overridden per job by run_coverage_sweep
@@ -83,7 +84,8 @@ fl:
   # uniform-radius override — nobody has a private radius left to be gated for.
   link_model: path_loss
   uniform_coverage_radius: true   # inert under path_loss; kept for range_gate runs
-  capacity: 2        # 60 x 2 = 120 slots, selection still binds
+  capacity: 6        # 20 x 6 = 120 slots, selection still binds, and capacity
+                     # is above the floor where the UAV shards go single-class
   n_rounds: 100
   n_local_epochs: 2
   n_uav_epochs: 2
