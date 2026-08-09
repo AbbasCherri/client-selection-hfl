@@ -107,6 +107,7 @@ def compute_metrics(
     w1, w2, w3 = fitness_weights
     scorer = Fitness(instance, w1, w2, w3, link=link)
     b = scorer.components(result.best_position, radii=radii)
+    _positions = instance.positions_from_vector(result.best_position)
 
     # Energy is per-UAV: charging the fleet-summed distance b.d_move to a single
     # battery (as this once did) reported movement_battery_frac > 2 — ten drones'
@@ -126,6 +127,14 @@ def compute_metrics(
         "f_cover_norm": b.f_cover_norm,
         "coverage_pct": 100.0 * b.n_assigned / instance.N,
         "n_assigned": b.n_assigned,
+        # Chosen altitude. Reported because it is the one dimension whose
+        # optimum is analytically known under the channel (z/tan(theta_opt)), so
+        # it doubles as a correctness read-out: a fleet mean sitting on a bound
+        # means the vertical search has gone degenerate and the benchmark is
+        # effectively 2D, which is how the flat range gate behaved until
+        # 2026-08-09. Also what a reader needs to judge operational plausibility.
+        "mean_altitude_m": float(np.mean(_positions[:, 2])),
+        "std_altitude_m": float(np.std(_positions[:, 2])),
         "d_move_m": b.d_move,
         "movement_joules": joules,
         "movement_battery_frac": batt_frac,

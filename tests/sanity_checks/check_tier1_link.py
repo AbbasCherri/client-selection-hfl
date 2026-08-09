@@ -94,8 +94,9 @@ def the_runner_scores_the_two_link_models_differently():
     """End-to-end: the config switch must reach the reported metrics."""
     a = _run_one(_tiny_cfg("path_loss"), "pso", 0, 0, 0)["metrics"]
     b = _run_one(_tiny_cfg("range_gate"), "pso", 0, 0, 0)["metrics"]
-    assert a["coverage_pct"] != b["coverage_pct"] or a["fitness"] != b["fitness"], (
-        "path_loss and range_gate produced identical Tier-1 metrics — the "
+    assert a["coverage_pct"] != b["coverage_pct"] or a["final_fitness"] != b["final_fitness"], (
+        f"path_loss and range_gate produced identical Tier-1 metrics "
+        f"(coverage {a['coverage_pct']}%, fitness {a['final_fitness']}) — the "
         "link_model setting is not reaching the runner"
     )
 
@@ -121,13 +122,36 @@ def altitude_is_not_pinned_to_a_bound_under_the_channel():
     cfg = _tiny_cfg("path_loss")
     z_lo, z_hi = (float(v) for v in cfg["area"]["z"])
     out = _run_one(cfg, "pso", 0, 0, 0)["metrics"]
-    z_mean = out.get("mean_altitude_m")
-    if z_mean is None:  # metric not exported; fall back to the analytic optimum
-        link = LinkModel(r_comm_m=float(cfg["problem"]["R_comm"]), z_min_m=z_lo, z_max_m=z_hi)
-        z_mean = link.z_star_m
+    # Must come from the run. An earlier version of this check fell back to
+    # LinkModel.z_star_m when the metric was missing, which tested the channel's
+    # analytic optimum rather than what the optimizer actually did — it passed
+    # while the runner was still on the flat gate.
+    assert "mean_altitude_m" in out, (
+        "mean_altitude_m is not reported — without it this check cannot see "
+        "where the optimizer put the fleet"
+    )
+    z_mean = out["mean_altitude_m"]
     assert z_lo + 1.0 < z_mean < z_hi - 1.0, (
         f"mean altitude {z_mean:.1f} m is pinned at a bound of [{z_lo}, {z_hi}] — "
         "the vertical decision is degenerate"
+    )
+
+
+def the_flat_gate_still_pins_altitude_low():
+    """Guard the guard: the interior-altitude check must be able to fail.
+
+    Under the range gate altitude is a pure penalty, so the fleet should sit
+    markedly lower than under the channel. If this stops holding, the check
+    above proves nothing.
+    """
+    cfg = _tiny_cfg("range_gate")
+    z_lo, z_hi = (float(v) for v in cfg["area"]["z"])
+    flat = _run_one(cfg, "pso", 0, 0, 0)["metrics"]["mean_altitude_m"]
+    chan = _run_one(_tiny_cfg("path_loss"), "pso", 0, 0, 0)["metrics"]["mean_altitude_m"]
+    assert flat < chan, (
+        f"flat-gate mean altitude {flat:.1f} m is not below the channel's {chan:.1f} m — "
+        "the two link models are not producing different vertical behaviour, so "
+        "'altitude is interior' is not evidence the channel is being applied"
     )
 
 
@@ -138,4 +162,5 @@ check("the runner scores the two link models differently",
 check("an unknown link_model is rejected", an_unknown_link_model_is_rejected)
 check("altitude is not pinned to a bound under the channel",
       altitude_is_not_pinned_to_a_bound_under_the_channel)
+check("the flat gate still pins altitude low", the_flat_gate_still_pins_altitude_low)
 finish()
