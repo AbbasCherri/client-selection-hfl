@@ -45,11 +45,11 @@ def _tiny_cfg(link_model: str) -> dict:
     return cfg
 
 
-def _instance():
+def _instance(n: int = 400, k: int = 4):
     cfg = load_config(_REPO / "configs" / "tier1_core.yaml")
     inst = generate_instance(
-        distribution="uniform", N=40, K=4, area=cfg["area"], seed=7,
-        capacity=15, uav_battery=1.0, R_comm=float(cfg["problem"]["R_comm"]),
+        distribution="uniform", N=n, K=k, area=cfg["area"], seed=7,
+        capacity=n, uav_battery=1.0, R_comm=float(cfg["problem"]["R_comm"]),
         B_min_uav=0.2, beta_mode="pinned", t=0, T_decay=20,
     )
     return cfg, inst
@@ -67,27 +67,33 @@ def reported_coverage_is_computed_through_the_link():
     z_lo, z_hi = (float(v) for v in cfg["area"]["z"])
     link = LinkModel(r_comm_m=float(cfg["problem"]["R_comm"]), z_min_m=z_lo, z_max_m=z_hi)
 
-    # Park every UAV at the ceiling, where the channel radius is well below the
-    # flat gate's R_comm — so the two coverage models must disagree.
+    # Park every UAV at the FLOOR. The channel's ground radius there is roughly
+    # z_lo/tan(theta_opt) ~ 270 m against the flat gate's 500 m, a ~3x area gap
+    # — the largest disagreement available inside the band. (The ceiling is the
+    # wrong probe: sqrt(r^2 + z^2) at 400 m actually exceeds the flat 500 m
+    # gate, so the two models nearly agree there and the test would pass
+    # vacuously.) Capacity is set to N so assignment limits cannot mask the
+    # radius difference.
     K = inst.K
-    pos = np.column_stack([inst.device_coords[:K, :2], np.full(K, z_hi)])
+    pos = np.column_stack([inst.device_coords[:K, :2], np.full(K, z_lo)])
     res = Result(method="probe", best_position=pos.ravel(), best_fitness=0.0,
                  convergence=[0.0], meta={})
 
     fw = (cfg["fitness"]["w1"], cfg["fitness"]["w2"], cfg["fitness"]["w3"])
     flat = compute_metrics(inst, res, fitness_weights=fw, link=None)
     chan = compute_metrics(inst, res, fitness_weights=fw, link=link)
-    assert flat["coverage_pct"] != chan["coverage_pct"], (
-        f"coverage identical with and without the link ({flat['coverage_pct']}%) — "
-        "compute_metrics is not applying it, so Tier-1 would report flat-gate "
-        "coverage for positions chosen under the channel"
+    assert chan["coverage_pct"] < flat["coverage_pct"], (
+        f"channel coverage {chan['coverage_pct']:.2f}% is not below flat-gate "
+        f"{flat['coverage_pct']:.2f}% at the altitude floor — compute_metrics is not "
+        "applying the link, so Tier-1 would report flat-gate coverage for "
+        "positions chosen under the channel"
     )
 
 
 def the_runner_scores_the_two_link_models_differently():
     """End-to-end: the config switch must reach the reported metrics."""
-    a = _run_one(_tiny_cfg("path_loss"), "pso", 0, 0, 0)
-    b = _run_one(_tiny_cfg("range_gate"), "pso", 0, 0, 0)
+    a = _run_one(_tiny_cfg("path_loss"), "pso", 0, 0, 0)["metrics"]
+    b = _run_one(_tiny_cfg("range_gate"), "pso", 0, 0, 0)["metrics"]
     assert a["coverage_pct"] != b["coverage_pct"] or a["fitness"] != b["fitness"], (
         "path_loss and range_gate produced identical Tier-1 metrics — the "
         "link_model setting is not reaching the runner"
@@ -114,7 +120,7 @@ def altitude_is_not_pinned_to_a_bound_under_the_channel():
     """
     cfg = _tiny_cfg("path_loss")
     z_lo, z_hi = (float(v) for v in cfg["area"]["z"])
-    out = _run_one(cfg, "pso", 0, 0, 0)
+    out = _run_one(cfg, "pso", 0, 0, 0)["metrics"]
     z_mean = out.get("mean_altitude_m")
     if z_mean is None:  # metric not exported; fall back to the analytic optimum
         link = LinkModel(r_comm_m=float(cfg["problem"]["R_comm"]), z_min_m=z_lo, z_max_m=z_hi)
