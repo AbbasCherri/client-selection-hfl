@@ -1,2 +1,2 @@
 N,method_a,method_b,n_pairs,statistic,p_value,mean_diff,effect_size,ci_low,ci_high,significant,correction_scope,reference,metric,test,correction
-200,bind_placeaware,bind_placeblind,10,26.0,0.921875,-0.0013166799979768052,0.05454545454545454,-0.04407882157540538,0.03937932014926447,False,group,bind_placeaware,f1_obstructed,wilcoxon,holm
+200,bind_placeaware,bind_placeblind,10,16.0,0.275390625,0.020022970870344985,0.41818181818181815,-0.0184495115716326,0.053189834740866034,False,group,bind_placeaware,f1_obstructed,wilcoxon,holm
