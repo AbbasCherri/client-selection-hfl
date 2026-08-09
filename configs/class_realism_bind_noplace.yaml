@@ -1,12 +1,17 @@
 # Class-awareness realism ablation — arm 6/6: class-blind placement at a binding radius.
 #
-# The comparator for class_realism_bind. Same R_comm = 800 m, same oracle
-# histogram for selection, class-aware placement OFF. This pair is the actual
-# test of whether class-aware placement earns its information assumption at a
-# radius where coverage binds harder than the 2 km main arms.
+# The comparator for class_realism_bind. Same R_comm = 3000 m, same oracle
+# histogram for selection, class-aware placement OFF — so placement class
+# awareness is the only variable between the two.
 #
-# See configs/class_realism_bind.yaml for why 800 m, and for why the earlier
-# 20 km and 8 km runs of this contrast are void.
+# This pair asks whether the placement effect GROWS as coverage tightens below
+# the 5 km main point. It is no longer the existence proof it was written to be:
+# arms 1-4 now run at ~82% coverage rather than 99.95%, and the contrast is
+# already live there (+0.041). A dose-response, not the load-bearing test.
+#
+# See configs/class_realism_bind.yaml for why the radius is 3000 m rather than
+# the 800 m this pair originally used, and for why the earlier 20 km and 8 km
+# runs of this contrast are void.
 
 extends: class_realism.yaml
 
@@ -14,6 +19,6 @@ name: class_realism_bind_noplace
 results_dir: results/class_realism_bind_noplace
 
 fl:
-  R_comm: 800.0
+  R_comm: 3000.0   # must track class_realism_bind exactly — see its header
   class_source: "true"
   placement_class_aware: false
