@@ -1633,6 +1633,27 @@ def run_full_hfl(cfg: dict) -> dict:
             _shard_minority, _shard_entropy = _shard_class_diversity(
                 uav_groups, cached_dataset.labels
             )
+            # Shard WIDTH, recorded separately from shard class diversity because
+            # the two selection families construct rosters differently and the
+            # difference is invisible in n_selected.
+            #
+            # `_class_coverage_assign` (proposed `ucb`, and `class_greedy`) walks
+            # UAV by UAV filling each to capacity; `_greedy_assign` (fedcs, oort,
+            # power_of_choice, rep_cap, fair_mab) sends each client to the
+            # feasible UAV with the LOWEST current load. When the slot budget
+            # binds, both end at capacity and they agree. When it does not —
+            # every paper_full cell where K*capacity exceeds the covered
+            # population — the proposed family concentrates clients into fewer,
+            # fuller shards while the baselines spread them thin across the whole
+            # fleet. Since per-UAV shard width is what decides whether the edge
+            # fusion heads learn at all (results/probe_topology), that is a
+            # difference in aggregation conditions, not in selection quality.
+            # Record it so the comparison can be checked rather than assumed.
+            _active = [g for g in uav_groups.values() if g]
+            _n_active_uavs = len(_active)
+            _mean_shard_clients = (
+                float(np.mean([len(g) for g in _active])) if _active else float("nan")
+            )
 
             # Per-round learning-rate decay (A3).
             lr_r = lr * _lr_scale(rnd, n_rounds, lr_decay)
@@ -1860,6 +1881,8 @@ def run_full_hfl(cfg: dict) -> dict:
                     # _shard_class_diversity for why n_selected cannot.
                     "shard_minority_share": _shard_minority,
                     "shard_class_entropy": _shard_entropy,
+                    "mean_shard_clients": _mean_shard_clients,
+                    "n_active_uavs": _n_active_uavs,
                     **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
                     # val_* mirrors the reported metrics on the validation
                     # split (NaN when no val split is configured). Anything
