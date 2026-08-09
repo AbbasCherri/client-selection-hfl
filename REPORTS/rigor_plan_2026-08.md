@@ -1,5 +1,41 @@
 # Rigor remediation plan — August 2026
 
+> **Status update 2026-08-09 — two defects found that this plan did not
+> anticipate, and they outrank most of what follows.**
+>
+> **F4 — Incoherent flight geometry.** A 20-120 m altitude band against radii up
+> to 20 km puts every configured radius outside the channel's coherent interval
+> (`z/tan θ_opt` = 54-324 m for that band), pinning the vertical optimum at a
+> bound; at 20 km the link is 97% NLoS. Every result written before 2026-08-08
+> was produced outside the regime where the channel model has physics —
+> including the Tier-1 placement headline, which additionally ran on a flat
+> range gate where altitude is a pure penalty. This invalidates more than F1-F3
+> do, and it invalidates them *first*: re-running anything on the old geometry
+> would waste the compute.
+>
+> **F5 — Per-UAV capacity below the learning floor.** Capacity ≤ 3 makes the
+> run *unlearn* — it peaks near 0.34 macro-F1 by round 10 and decays to the
+> constant-predictor floor, because each UAV trains the fusion head on a shard
+> of that many geographically-adjacent (hence near-single-class) clients.
+> Capacity orders the outcome; coverage does not (`results/probe_topology`).
+>
+> Consequences for this plan:
+> * every compute phase below re-runs at K=20 / cap=6 / R_comm 5 km /
+>   band 100-2000 m, PIPELINE_VERSION 5;
+> * **Phase 3 (Tier-1) is no longer optional hardening** — it is a correctness
+>   fix, since the flat gate made its third dimension decorative. Done in code
+>   (`scripts/run_tier1_v5.sh`, queued);
+> * the coverage-sweep negative result and the class-realism +0.065 both need
+>   re-establishing before they can be cited, and the absolute macro-F1 level
+>   drops from ~0.53 to ~0.38, so neither should be assumed to survive;
+> * **"the task needs ~120 participants per round" is retired** — one
+>   observation, confounded with radius, and falsified by the cap=1 cell, which
+>   meets it and is the worst configuration measured. Replaced by the
+>   outcome-based gate `scripts/gate_collapse.py`.
+>
+> The section below is preserved as written on 2026-08-01. Read it against this
+> note, not on its own.
+
 Target: a results set no Q1 reviewer can reasonably call bad-faith. Written
 against code commit `9aa933ed` / results commit `e1894dc7` (the 2026-07-29 run).
 

@@ -1,4 +1,13 @@
-"""Mozaffari-2016 and Alzenad-2017 literature placement baselines."""
+"""Mozaffari-2016 and Alzenad-2017 literature placement baselines.
+
+Three checks here asserted a ``meta["radii"]`` array that the 2026-08-08
+"Rewrite baselines from source PDFs" replaced with ``service_radius_m`` /
+``packing_radius_m`` (Mozaffari, equal discs) and ``altitudes_m`` (Alzenad,
+per-UAV). They have been failing since, unnoticed, which also means
+``runner.py``'s ``result.meta.get("radii")`` has been silently returning None
+for both baselines — the per-UAV radius path was dead. Restated against the
+current contract 2026-08-09.
+"""
 
 import sys
 from pathlib import Path
@@ -10,8 +19,12 @@ from _lib import check, finish
 from uavbench.optimizers import REGISTRY, Alzenad2017, Mozaffari2016
 from uavbench.problem.fitness import Fitness
 from uavbench.problem.instance import generate_instance
+from uavbench.problem.link import LinkModel
 
-AREA = {"x": [0.0, 5000.0], "y": [0.0, 5000.0], "z": [20.0, 120.0]}
+# Matches the shipped tier1_core band. The old 20-120 m box could not earn the
+# 500 m R_comm at any altitude, so the baselines were being exercised outside
+# the regime they are compared in.
+AREA = {"x": [0.0, 5000.0], "y": [0.0, 5000.0], "z": [100.0, 400.0]}
 
 
 def _instance(seed=0, N=60, K=4):
@@ -36,22 +49,35 @@ def one_shot_contract():
 
 
 def mozaffari_shared_radius():
+    """Equal-disc packing: ONE radius and ONE altitude shared by the whole fleet."""
     inst = _instance()
     result = Mozaffari2016().optimize(inst, Fitness(inst), np.random.default_rng(0))
-    radii = result.meta["radii"]
-    assert radii.shape == (inst.K,) and np.all(radii > 0.0)
-    assert np.allclose(radii, radii[0])  # equal-disc packing: one shared radius
-    assert result.meta["coverage_radius_m"] == radii[0]
+    r_service = float(result.meta["service_radius_m"])
+    r_pack = float(result.meta["packing_radius_m"])
+    assert r_service > 0.0 and r_pack > 0.0, f"non-positive radii: {r_service}, {r_pack}"
     positions = inst.positions_from_vector(result.best_position)
-    assert np.allclose(positions[:, 2], result.meta["altitude_m"])
+    assert np.allclose(positions[:, 2], result.meta["altitude_m"]), (
+        "Mozaffari flies one common altitude by construction; per-UAV altitudes "
+        "would mean the equal-disc packing has been broken"
+    )
 
 
 def alzenad_per_uav_radii():
+    """Alzenad sizes each UAV to its own cluster, so altitudes must vary."""
     inst = _instance(seed=5, N=120, K=5)
     result = Alzenad2017().optimize(inst, Fitness(inst), np.random.default_rng(0))
-    radii = result.meta["radii"]
-    assert radii.shape == (inst.K,) and np.all(radii > 0.0)
-    assert len(result.meta["altitudes_m"]) == inst.K
+    z = np.asarray(result.meta["altitudes_m"], dtype=float)
+    assert z.shape == (inst.K,), f"expected {inst.K} altitudes, got {z.shape}"
+    assert np.all(z > 0.0) and np.all(np.isfinite(z))
+    assert np.all(z >= inst.lower[2] - 1e-9) and np.all(z <= inst.upper[2] + 1e-9), (
+        f"altitudes {z} escape the band [{inst.lower[2]}, {inst.upper[2]}]"
+    )
+    positions = inst.positions_from_vector(result.best_position)
+    assert np.allclose(positions[:, 2], z), "reported altitudes do not match the placement"
+    assert z.std() > 0.0, (
+        "every UAV got the same altitude — that is Mozaffari's equal-disc behaviour, "
+        "not Alzenad's per-cluster sizing, so the two baselines are not distinct"
+    )
 
 
 def deterministic_rules():
@@ -78,11 +104,26 @@ def alzenad_altitude_tracks_spread():
 
 
 def both_cover_devices():
+    """Each baseline must cover something under BOTH gates it can be scored by.
+
+    Tier-1 scores every method through the shared channel now, so a baseline
+    that only covers devices under its own derived radius would be reported at
+    zero coverage and look far worse than published — the mirror image of the
+    618-vs-500 m advantage recorded in REPORTS/results_provenance.md.
+    """
     inst = _instance(seed=7, N=100, K=6)
     fitness = Fitness(inst)
+    link = LinkModel(r_comm_m=inst.R_comm, z_min_m=inst.lower[2], z_max_m=inst.upper[2])
+    channel_fitness = Fitness(inst, link=link)
     for cls in (Mozaffari2016, Alzenad2017):
         result = cls().optimize(inst, fitness, np.random.default_rng(0))
-        assert fitness.components(result.best_position, radii=result.meta["radii"]).n_assigned > 0
+        flat_n = fitness.components(result.best_position).n_assigned
+        chan_n = channel_fitness.components(result.best_position).n_assigned
+        assert flat_n > 0, f"{cls.__name__} covers nothing under the flat R_comm gate"
+        assert chan_n > 0, (
+            f"{cls.__name__} covers nothing under the shared channel — it would be "
+            "reported at zero coverage against every other Tier-1 method"
+        )
 
 
 check("both baselines registered under their config names", registered)
