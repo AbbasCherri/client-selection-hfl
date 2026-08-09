@@ -36,12 +36,20 @@ _REPO = Path(__file__).resolve().parents[2]
 
 
 def _tiny_cfg(link_model: str) -> dict:
-    """tier1_core with one small scenario and a token budget."""
+    """tier1_core with one scenario and a small but non-token budget.
+
+    Sized deliberately. An earlier version used N=40 with P=8/G_max=5 — 40
+    evaluations over a 12-dimensional space — and PSO simply returned its best
+    initial particle, which was the *same* particle under both link models. The
+    checks then reported identical altitude and coverage and looked like a wiring
+    bug. The search needs enough budget to actually move, and enough devices that
+    coverage resolves more finely than the 2.5% steps N=40 allows.
+    """
     cfg = copy.deepcopy(load_config(_REPO / "configs" / "tier1_core.yaml"))
-    cfg["scenarios"] = [{"distribution": "uniform", "N": 40, "K": 4}]
-    cfg["budget"] = {"P": 8, "G_max": 5}
+    cfg["scenarios"] = [{"distribution": "uniform", "N": 300, "K": 6}]
+    cfg["budget"] = {"P": 20, "G_max": 25}
     cfg["problem"]["link_model"] = link_model
-    cfg["problem"]["capacity"] = 15
+    cfg["problem"]["capacity"] = 300  # non-binding: isolate the radius
     return cfg
 
 
