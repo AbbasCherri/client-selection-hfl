@@ -8,7 +8,7 @@ fl:
   K: 20
   z_min_m: 100.0
   z_max_m: 2000.0
-  R_comm: 800.0
+  R_comm: 3000.0
   capacity: 6
   n_rounds: 100
   n_local_epochs: 2
