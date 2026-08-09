@@ -375,7 +375,7 @@ class ClientSelector:
             )
             return self._record_selection(selected, round_num)
 
-        if mode not in ("ucb", "ucb_noclass"):
+        if mode not in ("ucb", "ucb_noclass", "ucb_balanced"):
             raise ValueError(f"unknown selection mode: {mode!r}")
 
         # ── UCB pipeline ────────────────────────────────────────────────
@@ -404,6 +404,33 @@ class ClientSelector:
         t = max(round_num, 1)
         sel_cnts = np.array([self._counts[cid] for cid in eligible_ids], dtype=float)
         static = priority + UCB_C * np.sqrt(math.log(t) / (sel_cnts + 1.0))
+
+        if mode == "ucb_balanced":
+            # The SAME scores as `ucb`, handed to the load-balanced roster
+            # builder the literature selectors use instead of the proposed
+            # fill-to-capacity one.
+            #
+            # This arm exists to separate two things the headline comparison
+            # otherwise confounds. `_class_coverage_assign` walks UAV by UAV
+            # filling each to capacity; `_greedy_assign` sends each client to
+            # the least-loaded feasible UAV. When K*capacity binds, both
+            # saturate and agree — but when slots are slack (N=30/50/100 at the
+            # operating point) the first concentrates clients into few full
+            # shards and the second spreads them thin, and per-UAV shard width
+            # is what decides whether the edge fusion heads learn at all
+            # (results/probe_topology). So a proposed-vs-baseline gap in that
+            # regime may be a difference in aggregation conditions rather than
+            # in selection quality.
+            #
+            # Comparing `ucb` against `ucb_balanced` holds the scoring rule
+            # fixed and varies only the roster construction, which is the one
+            # contrast that answers it. See the roster-construction confound in
+            # REPORTS/results_provenance.md.
+            selected = self._greedy_assign(
+                eligible_ids, eligible, static, uav_capacity,
+                client_coords, uav_coords_latlon, R_comm,
+            )
+            return self._record_selection(selected, round_num)
 
         selected = self._class_coverage_assign(
             eligible_ids,

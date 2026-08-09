@@ -988,7 +988,7 @@ _MODEL_SIZE_MB: float = _IOT_MODEL_SIZE_MB  # kept for run_tier2 back-compat
 # Method configuration: (placement_method, selection_mode, reputation_weighted, dynamic)
 # placement_method: "pso" (authoritative placement optimizer) or None (flat/centralized);
 #                   override per run via cfg["fl"]["placement_method"]
-# selection_mode:   "ucb" | "random" | "all" | "fedcs" | "rep_cap" | "fair_mab"
+# selection_mode:   "ucb" | "ucb_balanced" | "random" | "all" | "fedcs" | "rep_cap" | "fair_mab"
 # reputation_weighted: True → reputation_fedavg; False → uniform sample-weight fedavg
 # dynamic:          True → reposition every T_sel rounds; False → place once at round 1
 _METHOD_CFG: dict[str, tuple] = {
@@ -998,6 +998,14 @@ _METHOD_CFG: dict[str, tuple] = {
     "hfl_no_selection": ("pso", "random", True, True),
     "hfl_static": ("pso", "ucb", True, False),
     "hfl_no_reputation": ("pso", "ucb", False, True),
+    # Roster-construction control. Identical scoring to proposed_hfl — same
+    # utility, reputation, beta blend, UCB bonus and class histogram — handed to
+    # the LOAD-BALANCED roster builder the literature selectors use instead of
+    # the proposed fill-to-capacity one. Isolates "our scores are better" from
+    # "our rosters make wider UAV shards", which the headline comparison
+    # otherwise confounds wherever K*capacity exceeds the covered population
+    # (N=30/50/100 at the operating point; not N=200, where slots bind).
+    "hfl_balanced_roster": ("pso", "ucb_balanced", True, True),
     # Literature baselines (Algorithms B1-B3, REPORTS/master_implementation_reference.md Appendix C):
     # identical PSO placement, reputation FedAvg, and T_sel cadence as
     # proposed_hfl — only the client-selection rule differs, isolating it as
