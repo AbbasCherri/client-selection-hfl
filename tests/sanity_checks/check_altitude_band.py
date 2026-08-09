@@ -143,6 +143,33 @@ def shipped_configs_stay_in_the_coherent_band():
             )
 
 
+def tier1_config_stays_in_the_coherent_band():
+    """The Tier-1 placement benchmark must be coherent too — it is the headline.
+
+    Tier-1 keeps its geometry under ``area.z`` / ``problem.R_comm`` rather than
+    ``fl.*``, so the checks above never looked at it, and it ran until
+    2026-08-09 with a 20-120 m band against R_comm = 500 m: a coherent reach of
+    54-324 m, i.e. a radius the band could not earn at any altitude. Combined
+    with the flat range gate it used, altitude could only ever add slant
+    distance and every optimizer drove z to the floor.
+    """
+    path = _REPO / "configs" / "tier1_core.yaml"
+    if not path.exists():
+        return
+    cfg = load_config(path)
+    z_lo, z_hi = (float(v) for v in cfg["area"]["z"])
+    r_comm = float(cfg["problem"]["R_comm"])
+    z = _z_star(r_comm, z_lo, z_hi)
+    assert z_lo < z < z_hi, (
+        f"tier1_core: R_comm={r_comm} with band [{z_lo}, {z_hi}] pins z*={z} at a "
+        "bound — the vertical decision is degenerate and 3D placement is decorative"
+    )
+    assert str(cfg["problem"].get("link_model")) == "path_loss", (
+        "tier1_core must use the path-loss link; under the flat range gate altitude "
+        "is a pure penalty and the band above cannot matter"
+    )
+
+
 def swept_radius_grids_stay_in_the_band():
     """The coverage sweep's whole grid must be coherent, not just its default."""
     path = _REPO / "configs" / "paper_coverage.yaml"
@@ -168,5 +195,6 @@ check("the retired 20-120 m band is demonstrably degenerate", the_old_band_is_sh
 check("altitude materially changes the radius", altitude_actually_changes_the_radius)
 check("operating point is LoS-dominated", operating_point_is_los_dominated)
 check("shipped configs stay in the coherent band", shipped_configs_stay_in_the_coherent_band)
+check("tier1 config stays in the coherent band", tier1_config_stays_in_the_coherent_band)
 check("swept radius grids stay in the band", swept_radius_grids_stay_in_the_band)
 finish()

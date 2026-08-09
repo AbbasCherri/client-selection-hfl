@@ -22,6 +22,7 @@ from .optimizers import build_optimizer
 from .problem.energy import EnergyModel
 from .problem.fitness import Fitness
 from .problem.instance import generate_instance
+from .problem.link import LinkModel
 from .reporting.checkpoint import load_checkpoint, save_checkpoint
 from .reporting.tables import write_table as _write_table
 
@@ -130,7 +131,39 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
     )
 
     fw = (cfg["fitness"]["w1"], cfg["fitness"]["w2"], cfg["fitness"]["w3"])
-    fitness = Fitness(instance, *fw)
+    # Air-to-ground link. "path_loss" derives each UAV's coverage radius from its
+    # own altitude through the shared Al-Hourani channel; "range_gate" is the
+    # legacy flat |x - c| <= R_comm sphere.
+    #
+    # The flat gate makes the vertical decision a pure penalty — altitude only
+    # ever adds slant distance, so every optimizer drives z to the floor and the
+    # "3D" benchmark is a 2D one carrying a height column. That is the same
+    # degeneracy the FL pipeline was corrected for on 2026-08-08, and Tier-1 is
+    # the paper's headline placement table, so it cannot keep reporting under
+    # physics the rest of the benchmark has retired.
+    #
+    # It also dissolves the scoring-fairness problem recorded in
+    # REPORTS/results_provenance.md: the literature baselines (mozaffari2016,
+    # alzenad2017) derive their own radius from altitude and were previously
+    # scored at a larger radius than PSO's flat 500 m. Under a shared channel
+    # nobody has a private radius left — every method is gated by the same
+    # function of the altitude it chose.
+    link = None
+    link_model = str(cfg["problem"].get("link_model", "range_gate"))
+    if link_model == "path_loss":
+        area_z = cfg["area"]["z"]
+        link = LinkModel(
+            r_comm_m=float(cfg["problem"]["R_comm"]),
+            z_min_m=float(area_z[0]),
+            z_max_m=float(area_z[1]),
+            environment=str(cfg["problem"].get("environment", "suburban")),
+            freq_ghz=float(cfg["problem"].get("freq_ghz", 2.0)),
+        )
+    elif link_model != "range_gate":
+        raise ValueError(
+            f"problem.link_model must be 'path_loss' or 'range_gate', got {link_model!r}"
+        )
+    fitness = Fitness(instance, *fw, link=link)
     rng = _optimizer_rng(cfg["optimizer_seed"], method_idx, scenario_idx, seed_i)
     # The two seed families must stay disjoint even when a config sets
     # instance_seed == optimizer_seed (SeedSequence trailing-zero hazard).
@@ -148,7 +181,17 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
         fitness_weights=fw,
         energy_model=EnergyModel(),
         G_max=cfg["budget"]["G_max"],
-        radii=result.meta.get("radii"),
+        # Under a shared channel there are no private radii: Fitness lets an
+        # explicit `radii` override the link, so forwarding a baseline's own
+        # meta["radii"] here would score mozaffari/alzenad on their derived
+        # radius while every other method is gated by the channel — the exact
+        # 618-vs-500 m unfairness recorded in REPORTS/results_provenance.md,
+        # reintroduced through the back door. The link already derives a radius
+        # from whatever altitude each method chose, which is the fair version of
+        # the same idea. Only the legacy flat gate still needs the override.
+        radii=None if link is not None else result.meta.get("radii"),
+        # Same link the optimizer was scored under — see compute_metrics.
+        link=link,
     )
     metrics.update(
         scenario=f"{scenario['distribution']}_N{scenario['N']}_K{scenario['K']}",

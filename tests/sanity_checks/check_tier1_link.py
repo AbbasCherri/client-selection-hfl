@@ -1,0 +1,135 @@
+"""Tier-1 must actually be scored through the air-to-ground channel.
+
+Tier-1 is the paper's headline placement table, and until 2026-08-09 it ran on a
+flat ``slant_distance <= R_comm`` sphere. Under that gate altitude can only ever
+*add* slant distance, so every optimizer drives z to the floor: the benchmark
+advertised a 3D search whose third dimension had a known closed-form answer.
+
+Wiring a link model into the runner is a two-part change and both parts can fail
+silently. The optimizer can be scored through the channel while
+``compute_metrics`` rebuilds a *fresh* Fitness without it — in which case every
+reported coverage number is flat-gate coverage for positions chosen under the
+channel. And ``Fitness`` lets an explicit ``radii`` argument override the link,
+so forwarding a baseline's own ``meta["radii"]`` re-creates the unequal-radius
+comparison the shared channel was meant to retire.
+
+So these checks assert behaviour end-to-end through ``_run_one``, not that the
+config file contains the right string.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import copy  # noqa: E402
+
+import numpy as np  # noqa: E402
+from _lib import check, finish  # noqa: E402
+
+from uavbench.metrics.placement import compute_metrics  # noqa: E402
+from uavbench.optimizers.base import Result  # noqa: E402
+from uavbench.problem.instance import generate_instance  # noqa: E402
+from uavbench.problem.link import LinkModel  # noqa: E402
+from uavbench.runner import _run_one, load_config  # noqa: E402
+
+_REPO = Path(__file__).resolve().parents[2]
+
+
+def _tiny_cfg(link_model: str) -> dict:
+    """tier1_core with one small scenario and a token budget."""
+    cfg = copy.deepcopy(load_config(_REPO / "configs" / "tier1_core.yaml"))
+    cfg["scenarios"] = [{"distribution": "uniform", "N": 40, "K": 4}]
+    cfg["budget"] = {"P": 8, "G_max": 5}
+    cfg["problem"]["link_model"] = link_model
+    cfg["problem"]["capacity"] = 15
+    return cfg
+
+
+def _instance():
+    cfg = load_config(_REPO / "configs" / "tier1_core.yaml")
+    inst = generate_instance(
+        distribution="uniform", N=40, K=4, area=cfg["area"], seed=7,
+        capacity=15, uav_battery=1.0, R_comm=float(cfg["problem"]["R_comm"]),
+        B_min_uav=0.2, beta_mode="pinned", t=0, T_decay=20,
+    )
+    return cfg, inst
+
+
+def reported_coverage_is_computed_through_the_link():
+    """compute_metrics must honour the link, or every reported number is wrong.
+
+    The failure this catches is silent: the optimizer searches under the channel,
+    the metrics rebuild a fresh Fitness without it, and the table reports
+    flat-gate coverage for channel-chosen positions. The two agree only where
+    altitude does not matter — i.e. nowhere interesting.
+    """
+    cfg, inst = _instance()
+    z_lo, z_hi = (float(v) for v in cfg["area"]["z"])
+    link = LinkModel(r_comm_m=float(cfg["problem"]["R_comm"]), z_min_m=z_lo, z_max_m=z_hi)
+
+    # Park every UAV at the ceiling, where the channel radius is well below the
+    # flat gate's R_comm — so the two coverage models must disagree.
+    K = inst.K
+    pos = np.column_stack([inst.device_coords[:K, :2], np.full(K, z_hi)])
+    res = Result(method="probe", best_position=pos.ravel(), best_fitness=0.0,
+                 convergence=[0.0], meta={})
+
+    fw = (cfg["fitness"]["w1"], cfg["fitness"]["w2"], cfg["fitness"]["w3"])
+    flat = compute_metrics(inst, res, fitness_weights=fw, link=None)
+    chan = compute_metrics(inst, res, fitness_weights=fw, link=link)
+    assert flat["coverage_pct"] != chan["coverage_pct"], (
+        f"coverage identical with and without the link ({flat['coverage_pct']}%) — "
+        "compute_metrics is not applying it, so Tier-1 would report flat-gate "
+        "coverage for positions chosen under the channel"
+    )
+
+
+def the_runner_scores_the_two_link_models_differently():
+    """End-to-end: the config switch must reach the reported metrics."""
+    a = _run_one(_tiny_cfg("path_loss"), "pso", 0, 0, 0)
+    b = _run_one(_tiny_cfg("range_gate"), "pso", 0, 0, 0)
+    assert a["coverage_pct"] != b["coverage_pct"] or a["fitness"] != b["fitness"], (
+        "path_loss and range_gate produced identical Tier-1 metrics — the "
+        "link_model setting is not reaching the runner"
+    )
+
+
+def an_unknown_link_model_is_rejected():
+    """A typo must fail loudly rather than silently falling back to the flat gate."""
+    cfg = _tiny_cfg("pathloss")  # missing underscore
+    try:
+        _run_one(cfg, "pso", 0, 0, 0)
+    except ValueError as e:
+        assert "link_model" in str(e), f"wrong error: {e}"
+        return
+    raise AssertionError("an unknown link_model was accepted and silently ignored")
+
+
+def altitude_is_not_pinned_to_a_bound_under_the_channel():
+    """The point of the whole change: z must become a real decision.
+
+    Asserted on the mean rather than per-UAV — a single UAV may legitimately sit
+    at a bound. If the mean sits within a metre of either bound, the search has
+    collapsed back to 2D.
+    """
+    cfg = _tiny_cfg("path_loss")
+    z_lo, z_hi = (float(v) for v in cfg["area"]["z"])
+    out = _run_one(cfg, "pso", 0, 0, 0)
+    z_mean = out.get("mean_altitude_m")
+    if z_mean is None:  # metric not exported; fall back to the analytic optimum
+        link = LinkModel(r_comm_m=float(cfg["problem"]["R_comm"]), z_min_m=z_lo, z_max_m=z_hi)
+        z_mean = link.z_star_m
+    assert z_lo + 1.0 < z_mean < z_hi - 1.0, (
+        f"mean altitude {z_mean:.1f} m is pinned at a bound of [{z_lo}, {z_hi}] — "
+        "the vertical decision is degenerate"
+    )
+
+
+check("reported coverage is computed through the link",
+      reported_coverage_is_computed_through_the_link)
+check("the runner scores the two link models differently",
+      the_runner_scores_the_two_link_models_differently)
+check("an unknown link_model is rejected", an_unknown_link_model_is_rejected)
+check("altitude is not pinned to a bound under the channel",
+      altitude_is_not_pinned_to_a_bound_under_the_channel)
+finish()

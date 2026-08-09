@@ -15,6 +15,7 @@ from ..optimizers.base import Result
 from ..problem.energy import EnergyModel
 from ..problem.fitness import Fitness
 from ..problem.instance import ProblemInstance
+from ..problem.link import LinkModel
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ def compute_metrics(
     energy_model: EnergyModel | None = None,
     G_max: int | None = None,
     radii: np.ndarray | None = None,
+    link: "LinkModel | None" = None,
 ) -> dict:
     """Return a flat dict of Tier-1 metrics for one optimizer run.
 
@@ -77,6 +79,12 @@ def compute_metrics(
     breakdown and the operational quantities. ``radii`` carries a per-UAV
     communication radius for methods that derive it from altitude (taken from
     ``result.meta["radii"]`` by the runner); ``None`` uses ``instance.R_comm``.
+
+    ``link`` MUST be the same model the optimizer was scored under. The fresh
+    Fitness built here is what produces every reported coverage number, so
+    omitting the link while the run optimized against it would report flat-gate
+    coverage for positions chosen under the channel — the two disagree most
+    exactly where altitude matters, which is the thing being measured.
     """
     energy_model = energy_model or EnergyModel()
 
@@ -97,7 +105,7 @@ def compute_metrics(
             )
 
     w1, w2, w3 = fitness_weights
-    scorer = Fitness(instance, w1, w2, w3)
+    scorer = Fitness(instance, w1, w2, w3, link=link)
     b = scorer.components(result.best_position, radii=radii)
 
     # Energy is per-UAV: charging the fleet-summed distance b.d_move to a single

@@ -42,7 +42,20 @@ scenarios:
 area:
   x: [0.0, 5000.0]
   y: [0.0, 5000.0]
-  z: [20.0, 120.0]
+  # 100-400 m, not the 20-120 m small-UAS ceiling, and chosen WITH R_comm below.
+  #
+  # Under the Al-Hourani channel the radius-vs-altitude curve peaks at a fixed
+  # elevation angle (20.34 deg suburban), so the coherent ground radius is
+  # z/tan(theta_opt) — 54-324 m for a 20-120 m band. R_comm = 500 m sat outside
+  # that entirely, so altitude could never buy reach and, under the flat range
+  # gate this benchmark used until 2026-08-09, only ever added slant distance.
+  # Every optimizer therefore drove z to the floor and the 3D benchmark was a 2D
+  # one carrying a height column.
+  #
+  # 100-400 m gives a coherent interval of 270-1080 m, so R_comm = 500 m is
+  # interior and the vertical search has a real optimum to find (~185 m). The
+  # horizontal geometry is untouched, so cell difficulty is unchanged.
+  z: [100.0, 400.0]
 
 value:
   beta_mode: pinned
@@ -51,6 +64,15 @@ value:
 
 problem:
   R_comm: 500.0
+  # Each UAV's coverage radius comes from its own altitude through the shared
+  # Al-Hourani channel, calibrated so the best achievable radius equals R_comm.
+  # This is what makes altitude a decision variable rather than a penalty, and
+  # it puts every method on one coverage model — the literature baselines no
+  # longer carry a private radius (see runner.py and the area.z note above).
+  # "range_gate" restores the legacy flat sphere.
+  link_model: path_loss
+  environment: suburban
+  freq_ghz: 2.0
   B_min_uav: 0.2
   capacity: 15         # K*capacity = 10*15 = 150 slots < N=250 -> capacity binds
   uav_battery: 1.0
