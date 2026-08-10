@@ -1,0 +1,40 @@
+=== screen means by arm and K ===
+--- coverage_pct ---
+arm  mclp_shipped  mclp_w100  moon2022
+K                                     
+20          78.65      79.65     92.45
+30          93.15      94.10    100.00
+--- cover_multiplicity_mean ---
+arm  mclp_shipped  mclp_w100  moon2022
+K                                     
+20          1.525      1.570     1.157
+30          1.758      1.906     1.398
+--- unique_cover_frac ---
+arm  mclp_shipped  mclp_w100  moon2022
+K                                     
+20          0.597      0.557     0.845
+30          0.460      0.384     0.652
+--- uav_pairwise_sep_m ---
+arm  mclp_shipped  mclp_w100   moon2022
+K                                      
+20      30720.512  31288.193  29915.512
+30      29864.623  30308.992  28877.379
+
+=== H-B — does removing the energy/imbalance terms close the coverage gap? ===
+  K=20  mclp  78.65  ->  w100  79.65   moon  92.45   gap +13.80 pp, closed 7%
+  K=30  mclp  93.15  ->  w100  94.10   moon 100.00   gap +6.85 pp, closed 14%
+  => H-B REJECTED (rejected only if < 1/3 closed at BOTH K)
+
+=== H-A — is moon2022's geometry outside the fitness optimisers' spread? ===
+  uav_pairwise_sep_m       K=20  vs shipped: d=-805 p=0.06445  vs w100: d=-1373 p=0.001953
+  uav_pairwise_sep_m       K=30  vs shipped: d=-987.2 p=0.001953  vs w100: d=-1432 p=0.001953
+  unique_cover_frac        K=20  vs shipped: d=+0.2478 p=0.001953  vs w100: d=+0.2878 p=0.001953
+  unique_cover_frac        K=30  vs shipped: d=+0.1916 p=0.001953  vs w100: d=+0.2682 p=0.001953
+  cover_multiplicity_mean  K=20  vs shipped: d=-0.3679 p=0.001953  vs w100: d=-0.4126 p=0.001953
+  cover_multiplicity_mean  K=30  vs shipped: d=-0.3594 p=0.001953  vs w100: d=-0.507 p=0.001953
+  => H-A SURVIVES on unique_cover_frac, cover_multiplicity_mean (needs one statistic separating at BOTH K vs BOTH variants)
+
+=== VERDICT ===
+Surviving: H-A (dispersion)
+Run the corresponding C3 arm on the full fleet grid and judge it
+against the four criteria in REPORTS/preregistration_v6_c3.md §4.
