@@ -1,0 +1,111 @@
+fl:
+  lr: 0.01686
+  uav_lr: 0.01686
+  lr_decay: none
+  logit_adjust_tau: 0.7
+  server_momentum: 0.771
+  ema_decay: 0.783
+  per_method:
+    fedcs:
+      lr: 0.019217
+      uav_lr: 0.019217
+      lr_decay: sqrt
+      logit_adjust_tau: 0.8067
+      server_momentum: 0.3801
+      ema_decay: 0.7168
+    rep_cap:
+      lr: 0.020776
+      uav_lr: 0.020776
+      lr_decay: none
+      logit_adjust_tau: 0.8224
+      server_momentum: 0.6237
+      ema_decay: 0.4943
+    fair_mab:
+      lr: 0.011372
+      uav_lr: 0.011372
+      lr_decay: none
+      logit_adjust_tau: 0.8425
+      server_momentum: 0.3883
+      ema_decay: 0.4555
+    oort:
+      lr: 0.0072598
+      uav_lr: 0.0072598
+      lr_decay: cosine
+      logit_adjust_tau: 0.6699
+      server_momentum: 0.4931
+      ema_decay: 0.715
+    power_of_choice:
+      lr: 0.015295
+      uav_lr: 0.015295
+      lr_decay: none
+      logit_adjust_tau: 0.7344
+      server_momentum: 0.3558
+      ema_decay: 0.5346
+  K: 20
+  z_min_m: 100.0
+  z_max_m: 2000.0
+  R_comm: 1000.0
+  link_model: path_loss
+  uniform_coverage_radius: true
+  capacity: 6
+  n_rounds: 100
+  n_local_epochs: 2
+  n_uav_epochs: 2
+  batch_size: 32
+  T_sel: 5
+  reselect_every: 1
+  lambda_min: 0.5
+  R_min: 0.3
+  placement_method: pso
+  balanced_sampling: false
+  local_optimizer:
+    name: sgd
+    momentum: 0.9
+  server_lr: 1.0
+  fusion_owner: uav
+  placement_class_aware: true
+  target_metric: macro_f1
+  target_value: 0.45
+  seed: 47752
+calibrate_path_loss: false
+name: paper_coverage
+results_dir: results/paper_coverage_v5/R1000/seed4/spiral_place
+n_workers: 12
+n_seeds: 10
+optimizer_seed: 9876
+epicentre:
+- 37.488
+- 137.272
+N: 200
+R_comm_values:
+- 500
+- 1000
+- 2000
+- 3000
+- 4000
+- 5000
+data:
+  source: real
+  subsample: 1.0
+  seed: 42
+  data_dir: ./data
+  feature_batch_size: 32
+  feature_num_workers: 8
+  N_clients: 200
+  partition_seed: 5313
+  feature_cache_path: results/paper_coverage_v5/N200/img_features.npy
+budget:
+  P: 50
+  G_max: 30
+optimizer_params:
+  mozaffari2016:
+    theta_b_deg: 80.0
+  alzenad2017:
+    environment: suburban
+  moon2022:
+    environment: suburban
+methods:
+- spiral_place
+_pipeline_version: 5
+_diagnostics:
+  black_chip_rate: 0.0
