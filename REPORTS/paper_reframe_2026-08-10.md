@@ -56,9 +56,30 @@ the corrected regime the gate flags 47 of 102 coverage-sweep cells and 6 of 52
 number conflates: majority-class collapse, and *never learning a rare class*
 while the headline metric looks acceptable.
 
-### C3. Coverage predicts accuracy and does not cause it — shown by intervention
+### C3. Placement geometry predicts accuracy and does not cause it — shown by two interventions
 
-This is the strongest result in the paper.
+This is the strongest result in the paper, and as of 2026-08-10 it rests on two
+matched, pre-registered interventions rather than one.
+
+**Both interventions moved their target variable as designed. Neither produced
+the predicted accuracy gain.**
+
+| | target | did it move? | accuracy |
+|---|---|---|---|
+| **C1** reachable coverage | coverage_pct | yes, +8-11 pp mid-grid | **34%** of the observational slope's prediction, sign inconsistent across K |
+| **C3** disjoint coverage | overlap | yes, *overshot* — more tiled than `moon2022` (unique-cover 0.913 vs 0.845 at K=20) | **worse** — −0.009 vs `mclp_place` at K=20 and K=30 |
+
+C3's K=20 cell is the cleanest evidence in the project: coverage *higher* than
+`mclp_place` (+2.3 pp) **and** overlap far lower — both target variables moving
+favourably — and macro-F1 *down* 0.009.
+
+`moon2022` beats every placement method at every fleet size, and by more than its
+coverage explains. Its two measurable geometric signatures — more reach, less
+overlap, each differing from `mclp_place` at p=0.002 — were each isolated and
+each failed to transfer. **The mechanism is unidentified, and saying so is the
+result.**
+
+The supporting arithmetic for C1, which is the quantitative core:
 
 *Observationally*, across 16 placement methods at fixed fleet size,
 `coverage_pct` is the best available predictor of macro-F1: within-K r = **0.70**
@@ -76,6 +97,13 @@ So a placement benchmark that optimises coverage is optimising a variable whose
 association with the end task is largely confounded. This indicts a standard
 practice, it indicts our own earlier framing, and it is demonstrated by
 intervention rather than by another correlation.
+
+**Why two interventions is much stronger than one.** A single failed intervention
+invites the reply "you changed the wrong variable". Two, targeting the two
+different geometric properties that actually distinguish the winning method,
+both firing mechanically and both failing to transfer, closes that door — and
+the second one *overshot* its target, so "the effect was too small" does not
+apply either.
 
 ### C4. A capacity floor with a distinct failure signature
 
@@ -129,9 +157,12 @@ mitigations, in order of value:
 2. **The self-inversion.** We are overturning our *own* published-quality
    results with the same code and data. That is unusually clean evidence and
    should be foregrounded, not buried.
-3. **C3-the-experiment** (`REPORTS/preregistration_v6_c3.md`) could still supply
-   a positive mechanism, if the screen survives. It cannot rescue the selection
-   claims and must not be described as doing so.
+3. ~~**C3-the-experiment** could still supply a positive mechanism.~~
+   **Resolved 2026-08-10: it did not.** C3 fails all three substantive criteria
+   and moves *away* from `moon2022`. There is no positive mechanism to add, and
+   the paper should stop looking for one without new evidence — two candidate
+   mechanisms are now refuted as causal and a third guess costs a grid at no
+   better prior.
 
 ## 5. What is still pending
 
