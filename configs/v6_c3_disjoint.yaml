@@ -1,0 +1,37 @@
+# C3 — redundancy-discounted placement coverage.
+#
+# Criteria are fixed in REPORTS/preregistration_v6_c3.md §4, and the exact
+# operationalisation in §5a, both committed (c02625c9, 099fda45) before this
+# arm's code existed. Read those first; this file only says how the arm is run.
+#
+# The one change: `fl.coverage_mode: disjoint`. The coverage term becomes
+# sum(V_i / m_i) over reached devices, m_i = how many live UAVs reach device i.
+# Equal to `reachable` iff the layout is a tiling, strictly below it otherwise —
+# the only one of the three modes that pushes AWAY from double-covering.
+# Parameter-free, so there is nothing to tune and §5's ban on searching holds.
+#
+# Why this arm and not another, stated so it can be wrong: the C3 screen
+# (results/c3_screen, 2026-08-10) rejected the fitness weights as the mechanism —
+# w=(1,0,0) closed only 7%/14% of the coverage gap — and found `moon2022`
+# separating from both `mclp_ls` variants at p=0.002 on overlap: at K=20 it
+# reaches 85% of its covered devices with exactly one aircraft against `mclp`'s
+# 60%, at multiplicity 1.16 against 1.53. Redundancy costs capacity, because two
+# aircraft over the same clients spend the same K*capacity slots on fewer
+# distinct ones.
+#
+# Baselines are NOT recomputed — `moon2022`, `mclp_place` and `flat_fl` already
+# exist in results/paper_uav_count at identical N, seeds and rounds. Reusing
+# them is what makes the Wilcoxon pairing valid.
+#
+# 5 K-values x 1 method x 10 seeds = 50 jobs, ~1 h on 12 vCPU.
+extends: paper_uav_count.yaml
+
+name: v6_c3_disjoint
+results_dir: results/v6_c3_disjoint
+
+fl:
+  coverage_mode: disjoint
+  uav_weight_mode: samples
+
+methods:
+  - mclp_place

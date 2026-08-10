@@ -49,6 +49,24 @@ class AssignmentResult:
         REPORTS/preregistration_v6_method.md §2.
     n_reachable:
         Count of those devices.
+    f_cover_disjoint:
+        ``sum(V_i / m_i)`` over reachable devices, where ``m_i`` is how many live
+        UAVs reach device ``i``. A device contributes its full value when one
+        aircraft reaches it and a shared fraction when several do.
+
+        Always ``<= f_cover_reachable``, with equality **iff** the layout is
+        disjoint — so it is reachable coverage with a redundancy discount, and it
+        reduces to ``f_cover_reachable`` on any tiling.
+
+        Why it exists: ``f_cover_reachable`` counts each device once, so it never
+        double-*rewards* overlap — but it never *penalises* it either, and a
+        redundant layout scores identically to a tiling reaching the same set.
+        Measured 2026-08-10 (`results/c3_screen`): at K=20 `moon2022` reaches 85%
+        of its covered devices with exactly one aircraft and beats every
+        fitness-optimising method downstream, while `mclp_ls` manages 60% and
+        double-covers at multiplicity 1.53. Redundancy is not free — two aircraft
+        over the same clients spend the same ``K*capacity`` slots on fewer
+        distinct ones. See REPORTS/preregistration_v6_c3.md §5a.
     """
 
     assignment: np.ndarray
@@ -57,6 +75,7 @@ class AssignmentResult:
     n_assigned: int
     f_cover_reachable: float = 0.0
     n_reachable: int = 0
+    f_cover_disjoint: float = 0.0
 
 
 def _feasible_static(
@@ -95,19 +114,24 @@ def greedy_assignment_batch(
     positions: np.ndarray,
     radii: np.ndarray | None = None,
     return_reachable: bool = False,
-) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> (
+    tuple[np.ndarray, np.ndarray]
+    | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+):
     """Greedy-assign a whole ``(P, K, 3)`` population at once.
 
     Returns ``(assignment, loads)`` of shapes ``(P, N)`` and ``(P, K)``, each row
     exactly what :func:`greedy_assignment` produces for that candidate.
 
-    ``return_reachable`` appends a ``(P,)`` array of capacity-free reachable
-    value — the batch counterpart of ``AssignmentResult.f_cover_reachable``.
-    It is computed from the same feasibility mask the assignment uses, so the
-    two cannot disagree, and it is **off by default** because the reduction is
-    pure overhead for callers scoring the assigned-coverage objective. It does
-    not touch ``assignment`` or ``loads``, so enabling it cannot perturb a
-    result (the bit-identical guarantee in this module's history still holds).
+    ``return_reachable`` appends two ``(P,)`` arrays: capacity-free reachable
+    value and its redundancy-discounted counterpart — the batch versions of
+    ``AssignmentResult.f_cover_reachable`` and ``.f_cover_disjoint``.
+    Both are computed from the same feasibility mask the assignment uses, so no
+    two of them can disagree, and they are **off by default** because the
+    reductions are pure overhead for callers scoring the assigned-coverage
+    objective. Neither touches ``assignment`` or ``loads``, so enabling them
+    cannot perturb a result (the bit-identical guarantee in this module's
+    history still holds).
 
     The device sweep cannot vectorize over *devices* — each one's feasible set
     depends on the loads left by every higher-value device before it. It can
@@ -157,7 +181,15 @@ def greedy_assignment_batch(
     if return_reachable:
         # (P, N) reachable mask -> (P,) value. Same mask the sweep consumed.
         f_reach = feasible_static.any(axis=2).astype(np.float64) @ instance.value
-        return assignment, loads, f_reach
+        # Redundancy-discounted coverage from the SAME mask, so the two scoring
+        # paths cannot drift — the failure mode C1 had to be guarded against.
+        mult = feasible_static.sum(axis=2)                       # (P, N)
+        share = np.divide(
+            instance.value, mult, out=np.zeros_like(mult, dtype=np.float64),
+            where=mult > 0,
+        )
+        f_disj = share.sum(axis=1)                               # (P,)
+        return assignment, loads, f_reach, f_disj
     return assignment, loads
 
 
@@ -219,7 +251,11 @@ def greedy_assignment(
     n_assigned = int(assigned_mask.sum())
     # Capacity-free reachability, from the same feasibility mask the assignment
     # used, so the two cannot drift apart. See AssignmentResult.f_cover_reachable.
-    reachable_mask = feasible_static.any(axis=1)
+    mult = feasible_static.sum(axis=1)          # (N,) UAVs reaching each device
+    reachable_mask = mult > 0
+    f_cover_disjoint = float(
+        (instance.value[reachable_mask] / mult[reachable_mask]).sum()
+    )
     return AssignmentResult(
         assignment=assignment,
         loads=loads,
@@ -227,4 +263,5 @@ def greedy_assignment(
         n_assigned=n_assigned,
         f_cover_reachable=float(instance.value[reachable_mask].sum()),
         n_reachable=int(reachable_mask.sum()),
+        f_cover_disjoint=f_cover_disjoint,
     )

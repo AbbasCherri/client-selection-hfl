@@ -90,9 +90,23 @@ class Fitness:
         # why v5's fitness-optimising placements all halted within a few clients
         # of the slot budget while a non-optimising baseline covered twice as
         # many and beat them downstream (REPORTS/preregistration_v6_method.md).
-        if coverage_mode not in ("assigned", "reachable"):
+        # "disjoint"  — reachable value with a redundancy discount:
+        #               sum(V_i / m_i) over reached devices, m_i = how many live
+        #               UAVs reach device i. Equals "reachable" iff the layout is
+        #               a tiling, and is strictly below it otherwise, so it is the
+        #               only one of the three that creates pressure AWAY from
+        #               double-covering. Parameter-free by construction — there is
+        #               no penalty coefficient to tune, which matters because
+        #               REPORTS/preregistration_v6_c3.md §5 bans searching.
+        #
+        #               Motivated by measurement, not taste: at K=20 `moon2022`
+        #               reaches 85% of its covered devices with exactly one
+        #               aircraft and beats every fitness-optimising method
+        #               downstream, while `mclp_ls` manages 60% (results/c3_screen).
+        if coverage_mode not in ("assigned", "reachable", "disjoint"):
             raise ValueError(
-                f"coverage_mode must be 'assigned' or 'reachable', got {coverage_mode!r}"
+                "coverage_mode must be 'assigned', 'reachable' or 'disjoint', "
+                f"got {coverage_mode!r}"
             )
         self.coverage_mode = coverage_mode
         # When present, coverage is gated on the radius each UAV's own altitude
@@ -125,7 +139,11 @@ class Fitness:
         mean_load = res.n_assigned / inst.K
         l_imb = float(np.sum((res.loads - mean_load) ** 2))
 
-        cover = res.f_cover if self.coverage_mode == "assigned" else res.f_cover_reachable
+        cover = {
+            "assigned": res.f_cover,
+            "reachable": res.f_cover_reachable,
+            "disjoint": res.f_cover_disjoint,
+        }[self.coverage_mode]
         f_cover_norm = cover / self.f_max
         d_move_norm = d_move / self.d_max
         l_imb_norm = l_imb / self.l_max
@@ -172,16 +190,18 @@ class Fitness:
             # (P, K): candidates in a batch fly at different altitudes, so each
             # gets its own radius vector rather than one shared across the batch.
             radii = self.link.slant_radius(pos[:, :, 2])
-        # The reachable reduction is requested only when the objective uses it,
-        # so the default path keeps its measured 5-7x and stays bit-identical.
-        want_reach = self.coverage_mode == "reachable"
+        # The capacity-free reductions are requested only when the objective uses
+        # one, so the default path keeps its measured 5-7x and stays bit-identical.
+        want_reach = self.coverage_mode in ("reachable", "disjoint")
         if want_reach:
-            assignment, loads, f_reach = greedy_assignment_batch(
+            assignment, loads, f_reach, f_disj = greedy_assignment_batch(
                 inst, pos, radii=radii, return_reachable=True
             )
+            # Pick here, once, rather than per candidate in the loop below.
+            f_capfree = f_disj if self.coverage_mode == "disjoint" else f_reach
         else:
             assignment, loads = greedy_assignment_batch(inst, pos, radii=radii)
-            f_reach = None
+            f_capfree = None
 
         out = np.empty(P, dtype=np.float64)
         for p in range(P):
@@ -191,7 +211,7 @@ class Fitness:
             # penalty is about serving pressure per aircraft, which capacity
             # still governs regardless of how coverage is scored.
             f_cover = (
-                float(f_reach[p]) if want_reach
+                float(f_capfree[p]) if want_reach
                 else float(inst.value[assigned_mask].sum())
             )
             d_move = float(
