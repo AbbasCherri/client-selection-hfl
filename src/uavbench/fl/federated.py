@@ -432,6 +432,26 @@ def _covered_clients(
     }
 
 
+def _seed_method_for(fl: dict, method: str) -> str:
+    """Which method name this run draws its RNG stream from.
+
+    Normally the method's own name, which is what keeps every arm independently
+    reproducible and stops two methods sharing a lucky draw.
+
+    `fl.seed_method_alias` overrides it, and exists for exactly one job: an
+    isolating ablation, where two arms must differ in one mechanism and nothing
+    else. `hfl_balanced_roster` answers whether the roster BUILDER explains
+    proposed_hfl's numbers; under separate streams it would also differ in
+    placement, device values and every UCB tie-break, confounding the mechanism
+    with ordinary seed noise. Aliasing makes those identical.
+
+    Kept as a function so the contract is testable without booting a full run.
+    Disclose wherever an aliased arm is reported.
+    """
+    alias = fl.get("seed_method_alias")
+    return str(alias) if alias else str(method)
+
+
 def _placement_geometry(
     client_coords: dict[int, tuple[float, float]],
     uav_pos_m: np.ndarray,
@@ -1569,7 +1589,19 @@ def run_full_hfl(cfg: dict) -> dict:
         # Per-method seed: run-level seed folded with a stable method hash,
         # exactly once, inside fullsim_method_seed (see seeds.py for why
         # sweep callers must not pre-encode the method into run_seed).
-        _seed = fullsim_method_seed(run_seed, method)
+        #
+        # `fl.seed_method_alias` makes this method draw ANOTHER method's stream.
+        # Normally the per-method hash is exactly what you want — it keeps each
+        # arm independently reproducible and stops two methods sharing a lucky
+        # draw. It is wrong for one specific job: an isolating ablation, where
+        # two arms are meant to differ in exactly one mechanism and nothing else.
+        # `hfl_balanced_roster` exists only to answer whether the roster BUILDER
+        # explains proposed_hfl's numbers, and under separate streams it would
+        # also differ in placement, device values and every UCB tie-break — the
+        # comparison would confound the mechanism with ordinary seed noise.
+        # Aliasing makes those identical so the roster builder is the only
+        # moving part. Disclose wherever an aliased arm is reported.
+        _seed = fullsim_method_seed(run_seed, _seed_method_for(fl, method))
         rng = np.random.default_rng(_seed)
         torch.manual_seed(_seed)  # deterministic model init across runs
 
