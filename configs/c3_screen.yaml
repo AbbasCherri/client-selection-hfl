@@ -1,0 +1,38 @@
+# C3 screening — placement geometry only, at the shipped weights.
+#
+# Criteria, hypotheses and falsification conditions are fixed in
+# REPORTS/preregistration_v6_c3.md, committed (c02625c9) before any C3 code
+# existed. Read that first; this file only says how the screen is run.
+#
+# What this measures and why it is one round
+# ------------------------------------------
+# The question is what the fleet LOOKS LIKE after placement — reach, overlap,
+# dispersion — not what it eventually learns. Placement happens at round 1
+# regardless of T_sel, and the geometry columns are written that same round, so
+# a hundred rounds of training would buy nothing here and cost ~14 h. Anything
+# read from this run must be a geometry or coverage column; macro-F1 after one
+# round is meaningless and is not to be quoted from these results.
+#
+# K=20 and K=30 only. Those are the identification points named in the
+# pre-registration, chosen because `moon2022`'s advantage there is largest and
+# least explicable by coverage — at K=30 both methods sit at 94-100% coverage,
+# so whatever separates them cannot be reach.
+#
+# Grid: 2 K x 2 methods x 10 seeds = 40 one-round jobs. Minutes, not hours.
+extends: paper_uav_count.yaml
+
+name: c3_screen
+results_dir: results/c3_screen
+
+n_seeds: 10
+
+K_values:
+  - {K: 20, capacity: 6}
+  - {K: 30, capacity: 6}
+
+fl:
+  n_rounds: 1
+
+methods:
+  - mclp_place        # the proposed placement, at the Optuna weights
+  - moon2022          # the literature method whose advantage is unexplained

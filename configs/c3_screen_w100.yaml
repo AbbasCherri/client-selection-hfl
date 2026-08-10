@@ -1,0 +1,32 @@
+# C3 screening — the same placement with the energy/imbalance terms removed.
+#
+# Criteria and falsification conditions: REPORTS/preregistration_v6_c3.md
+# (committed c02625c9, before any C3 code existed), hypothesis H-B.
+#
+# The one change: `placement_weights: [1, 0, 0]`. `mclp_ls` normally maximises
+# w1*coverage - w2*energy - w3*imbalance at w = 0.811/0.03/0.159, weights fitted
+# by Optuna on downstream macro-F1 in the pre-2026-08-08 regime — 20 km radius,
+# 20-120 m band — which Defect 1 voided. `moon2022` pays for neither energy nor
+# imbalance and out-covers even the C1 arm (93.4% vs 88.8% at K=20). H-B says
+# that exchange rate, calibrated in a regime that no longer exists, is what
+# makes the optimisers under-cover.
+#
+# This is ONE fixed alternative, not a search. The pre-registration forbids
+# searching over w: the baselines were never re-tuned, so tuning only the
+# proposed method is exactly the asymmetry REPORTS/rigor_plan_2026-08.md
+# documents. (1, 0, 0) is chosen because it removes the trade entirely, not
+# because it scored well — nothing had been scored when this file was written.
+#
+# Falsification, fixed in advance: if this does not close at least a third of
+# the coverage gap to `moon2022` at BOTH K, H-B is rejected and no weight-based
+# C3 arm is run.
+extends: c3_screen.yaml
+
+name: c3_screen_w100
+results_dir: results/c3_screen_w100
+
+fl:
+  placement_weights: [1.0, 0.0, 0.0]
+
+methods:
+  - mclp_place
