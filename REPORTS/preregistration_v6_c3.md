@@ -134,6 +134,74 @@ It is not rounded up into a claim.
 * **No switching the primary endpoint.**
 * Any tuning reads `val_*` columns only.
 
+## 5a. Addendum, 2026-08-10 — screen outcome and the exact intervention
+
+Written after the screen and **before any C3 arm code exists**. §4's criteria are
+unchanged and are not reopened here; this only fixes the operationalisation that
+§4 left as "the corresponding C3 arm".
+
+### The screen's result
+
+**H-B is REJECTED.** `mclp_ls` at `w = (1, 0, 0)` closes **7%** of the coverage
+gap to `moon2022` at K=20 and **14%** at K=30, against the 1/3 threshold fixed
+above. The Optuna weights are not why the optimisers under-cover. This was the
+hypothesis ranked *more likely*, and the screen cost minutes.
+
+**H-A SURVIVES**, on `unique_cover_frac` and `cover_multiplicity_mean`, at both
+K, against both `mclp` variants, at p = 0.002 throughout:
+
+| statistic | K | moon2022 | mclp shipped | mclp w100 |
+|---|---|---|---|---|
+| unique-cover fraction | 20 | 0.845 | 0.597 | 0.557 |
+| unique-cover fraction | 30 | 0.652 | 0.460 | 0.384 |
+| cover multiplicity | 20 | 1.157 | 1.525 | 1.570 |
+| cover multiplicity | 30 | 1.398 | 1.758 | 1.906 |
+
+`moon2022` tiles; the fitness optimisers double-cover. Its aircraft are also
+slightly *closer together* (−0.8 to −1.4 km mean pairwise separation), so the
+effect is not "spread out more" — it is "stop covering the same devices twice".
+
+### A correction to §2 of this document
+
+§2 claimed H-A was "already weakened" because `f_cover_reachable` counts each
+device once, so C1 would have captured disjointness if it were the mechanism.
+**That reasoning was wrong and the screen shows it.** De-duplicating the
+*objective* is not the same as producing a *disjoint layout*: C1 declines to
+double-*reward* overlap but never *penalises* it, so a redundant layout and a
+tiling that reach the same device set score identically. There is no gradient
+toward disjointness. And redundancy is not free — it consumes the slot budget,
+since two aircraft over the same clients chase fewer distinct clients with the
+same `K·capacity`. That also resolves why `moon2022` out-covers even C1.
+
+### C3, named exactly
+
+**`fl.coverage_mode: "disjoint"`.** The coverage term becomes
+
+    f_cover = Σ_{d : m_d ≥ 1}  value_d / m_d
+
+where `m_d` is the number of live UAVs whose radius reaches device `d`. Each
+device contributes its full value when reached by one aircraft and a shared
+fraction when reached by several.
+
+Properties that make this the right operationalisation rather than one of many:
+
+* **Parameter-free.** No penalty coefficient, so there is nothing to tune and
+  §5's ban on searching is not strained. A `f_cover − λ·overlap` form was
+  considered and rejected for exactly this reason.
+* `f_cover ≤ f_cover_reachable`, with equality **iff** the layout is disjoint —
+  so it is reachable coverage with a redundancy discount, and it reduces to C1
+  on any tiling.
+* Adding an aircraft over unreached devices always increases it; adding one over
+  already-covered devices does not. That is the pressure C1 lacks.
+
+Judged against §4's four criteria, unchanged, on the full fleet grid
+(K ∈ {5,10,15,20,30} × 10 seeds), baselines reused from `results/paper_uav_count`.
+
+**One arm.** A C2+C3 combination is *not* the confirmatory test and will not be
+reported as one: C2 was chosen after seeing v6, so pairing it with C3 is
+exploratory by construction. If C3 lands, C2+C3 may be run and must be labelled
+exploratory.
+
 ## 6. What this can and cannot rescue
 
 Even a complete success here does **not** restore the paper's original claims.
