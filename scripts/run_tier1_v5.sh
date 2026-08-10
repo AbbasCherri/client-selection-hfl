@@ -68,6 +68,16 @@ run_cfg() {                       # run_cfg <config-stem>
     rdir=$(python -c "import sys;sys.path.insert(0,'src');from uavbench.runner import load_config;print(load_config('${cfg}')['results_dir'])")
 
     say "--- ${stem} -> ${rdir} ---"
+
+    # Delete DERIVED artifacts before recomputing. `run` overwrites runs.parquet
+    # but nothing overwrites a significance CSV or a figure, so the first version
+    # of this script left 2026-08-06 significance tables — computed under the old
+    # flat range gate — sitting beside fresh 2026-08-10 primary data, in the same
+    # directory, with no marker distinguishing them. That is precisely how a void
+    # number ends up quoted in a paper. Primary data is never touched here.
+    rm -f "${rdir}"/significance_*.csv "${rdir}"/significance_*.parquet \
+          "${rdir}"/component_summary.* "${rdir}"/*.png 2>/dev/null
+
     if python -m uavbench run --config "$cfg" && python -m uavbench analyze --config "$cfg"; then
         # A finished run is not a correct run. If the link failed to reach the
         # scorer, every method pins to a bound and the tables look normal.
@@ -75,6 +85,11 @@ run_cfg() {                       # run_cfg <config-stem>
             say "  !! ${stem} has a DEGENERATE vertical search — not a usable result"
             FAILED="$FAILED ${stem}(degenerate)"
         fi
+        # The paper quotes Holm-corrected comparisons, not the headline means,
+        # so the significance table is part of the run rather than a follow-up.
+        python -m uavbench plot --config "$cfg" || say "  (plot failed, non-fatal)"
+        python -m uavbench significance --config "$rdir" --metric final_fitness \
+            || say "  !! ${stem} significance FAILED"
     else
         say "  !! ${stem} FAILED (exit $?)"
         FAILED="$FAILED ${stem}"
