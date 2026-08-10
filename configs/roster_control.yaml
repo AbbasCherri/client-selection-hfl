@@ -1,0 +1,60 @@
+# Roster-construction control — does the ROSTER BUILDER explain proposed_hfl?
+#
+# The confound, documented before this arm existed. Two roster constructions
+# live in src/uavbench/fl/client_selection.py:
+#
+#   _class_coverage_assign — walks UAV by UAV filling each to capacity. Used by
+#                            `ucb` (the proposed method) and `class_greedy`.
+#   _greedy_assign         — sends each client to the feasible UAV with the
+#                            lowest current load. Used by fedcs, oort,
+#                            power_of_choice, rep_cap, fair_mab.
+#
+# When K*capacity binds, both saturate and agree. When slots are slack, the
+# proposed family concentrates clients into few full shards while the baselines
+# spread them thin — and per-UAV shard width is what decides whether the edge
+# fusion heads learn at all. So in the slack regime the two families are not
+# being compared under equal aggregation conditions.
+#
+# At the operating point K=20/cap=6 there are 120 slots, so paper_full's
+# N=30, 50 and 100 are ALL slack and only N=200 binds. Measured in
+# tests/sanity_checks/check_roster_width.py: 25 clients / 20 UAVs / cap 6 gives
+# load-balanced widths of 1-2 against a fill width of 6.
+#
+# `hfl_balanced_roster` = proposed scoring (same utility, reputation, beta blend,
+# UCB bonus, class histogram) handed to the LOAD-BALANCED builder. Guarded by
+# tests/sanity_checks/check_roster_control.py.
+#
+# Why seed_method_alias is set, and why it must be disclosed
+# ---------------------------------------------------------
+# Each method normally draws its own RNG stream, folded from a hash of its name.
+# That is right for independent arms and wrong here: this arm must differ from
+# `proposed_hfl` in the roster builder and NOTHING else, and separate streams
+# would also change placement, device values and every UCB tie-break. Aliasing
+# to `proposed_hfl` makes all of those identical, so the builder is the only
+# moving part. State this wherever the arm is reported — it is a deliberate
+# departure from the seed design, made to buy an exact pairing.
+#
+# What the result means either way, fixed before running:
+#   * gap SURVIVES  -> roster construction is not the explanation
+#   * gap COLLAPSES -> the paper must either claim roster construction as part of
+#                      the method and explain the mechanism, or report N=200 only
+#
+# Lower stakes than when the confound was found: the advantage it was suspected
+# of inflating no longer exists (proposed_hfl loses to fedcs/oort in v5). It is
+# run anyway because the N-sweep should not ship with a known uncontrolled
+# difference, whichever way it falls.
+#
+# `proposed_hfl` is NOT recomputed — it exists in results/paper_full at identical
+# N, seeds and rounds, which is what keeps the pairing valid.
+#
+# 4 N-values x 1 method x 10 seeds = 40 jobs, ~3-4 h on 12 vCPU.
+extends: paper_full.yaml
+
+name: roster_control
+results_dir: results/roster_control
+
+fl:
+  seed_method_alias: proposed_hfl
+
+methods:
+  - hfl_balanced_roster
