@@ -1,0 +1,27 @@
+# C2 power run — BASELINE arm (v5 default aggregation), fleet grid.
+#
+# Design, criteria and what is not allowed: REPORTS/preregistration_c2_power.md,
+# committed 0bb7abec before any of these seeds were computed. Read that first.
+#
+# This is grid (a): the fleet replication. K ∈ {5,10,15,20,30} at N=200, 25
+# seeds, which is the sample size fixed in §3 — no optional stopping.
+#
+# Fresh results_dir on purpose. run_uav_sweep rebuilds uav_sweep_rounds.parquet
+# from only the jobs in the current run, so aiming a one-method config at
+# results/paper_uav_count would replace a 17-method summary with a 1-method one.
+# Checkpoints are also NOT copied in from there: reusing job outputs across
+# directories is the stale-reuse failure this project hit twice on 2026-08-10.
+#
+# 5 K x 1 method x 25 seeds = 125 jobs.
+extends: paper_uav_count.yaml
+
+name: c2_power_base
+results_dir: results/c2_power_base
+
+n_seeds: 25
+
+fl:
+  uav_weight_mode: samples
+
+methods:
+  - mclp_place

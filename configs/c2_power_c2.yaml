@@ -1,0 +1,16 @@
+# C2 power run — C2 arm (diversity-weighted edge aggregation), fleet grid.
+#
+# Identical to c2_power_base.yaml except `fl.uav_weight_mode: diversity`, so the
+# aggregation weighting is the only moving part. Same 25 seeds and same method
+# name mean both arms draw identical seeds (sweep_job_seed is deterministic in
+# seed_idx, and the method hash is the same), so the pairing is exact even
+# though the arms run as separate configs.
+#
+# Criteria: REPORTS/preregistration_c2_power.md §4.
+extends: c2_power_base.yaml
+
+name: c2_power_c2
+results_dir: results/c2_power_c2
+
+fl:
+  uav_weight_mode: diversity
