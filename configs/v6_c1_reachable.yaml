@@ -1,0 +1,36 @@
+# v6 arm C1 — reachability-maximizing placement, alone.
+#
+# Criteria and rationale are fixed in REPORTS/preregistration_v6_method.md,
+# written and committed (9729a1ce) before any v6 code existed. Read that first;
+# this file only says how the arm is run.
+#
+# What changes vs v5: `fl.coverage_mode: reachable`. The placement objective
+# sums device value over everything in range of a live UAV instead of over
+# what one round's capacity-capped assignment can serve. Nothing else moves —
+# same fleet grid, same N, same seeds, same tuned recipe, same 100 rounds — so
+# any difference is attributable to the objective.
+#
+# Why this arm should help, stated in advance so it can be wrong: v5's
+# fitness-optimizing placements all halted within a few clients of the slot
+# budget (mclp_ls covered 64 against 60 slots at K=10, 134 against 120 at K=20)
+# while moon2022, which does not optimize this objective, covered 138 and 187
+# and beat them on macro-F1 at every K. A direct probe of the objective change
+# at equal optimizer spend took PSO from 91 to 119 devices reached
+# (tests/sanity_checks/check_coverage_mode.py).
+#
+# Only mclp_place is run. The baselines this is judged against already exist in
+# results/paper_uav_count at identical N, seeds and rounds, so they are reused
+# rather than recomputed — that is also what keeps the comparison paired.
+#
+# 5 K-values x 1 method x 10 seeds = 50 jobs, ~1 h on 12 vCPU.
+extends: paper_uav_count.yaml
+
+name: v6_c1_reachable
+results_dir: results/v6_c1_reachable
+
+fl:
+  coverage_mode: reachable
+  uav_weight_mode: samples
+
+methods:
+  - mclp_place

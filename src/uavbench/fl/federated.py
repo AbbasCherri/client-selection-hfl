@@ -186,6 +186,66 @@ def _build_problem_instance(
 
 
 
+def _shard_class_stats(
+    uav_groups: dict[int, list],
+    labels,
+    n_classes: int = 4,
+) -> dict[int, tuple[float, float]]:
+    """Per-UAV ``(minority_share, normalised_class_entropy)`` for non-empty shards.
+
+    Empty shards are omitted rather than scored zero: an idle aircraft is not a
+    single-class one, and averaging it in as such would understate a healthy
+    fleet.
+    """
+    import numpy as _np
+
+    lab = _np.asarray(labels)
+    out: dict[int, tuple[float, float]] = {}
+    log_c = _np.log(n_classes) if n_classes > 1 else 1.0
+    for uav_idx, group in uav_groups.items():
+        idx = [i for c in group for i in c.train_indices]
+        if not idx:
+            continue
+        hist = _np.bincount(lab[idx].astype(int), minlength=n_classes).astype(_np.float64)
+        total = hist.sum()
+        if total <= 0:
+            continue
+        p = hist / total
+        nz = p[p > 0]
+        entropy = float(-(nz * _np.log(nz)).sum() / log_c) if n_classes > 1 else 0.0
+        out[uav_idx] = (float(1.0 - p.max()), entropy)
+    return out
+
+
+def _shard_effective_class_fraction(
+    uav_groups: dict[int, list],
+    labels,
+    n_classes: int = 4,
+) -> dict[int, float]:
+    """Per-UAV ``exp(H) / C`` — the effective class count, normalised to (0, 1].
+
+    This is the C2 aggregation weight (REPORTS/preregistration_v6_method.md).
+    A shard holding one class scores ``1/C``; a class-balanced one scores 1, so
+    a healthy fleet is unaffected and only narrow shards are pulled down.
+
+    Why weight edge models this way at all: the UAV tier trains the fusion head
+    on its pooled shard, and `results/probe_topology` showed that averaging
+    near-single-class fusion heads is what makes the run *unlearn* — capacity
+    only mattered because it set shard width. Weighting by sample count (the
+    default) cannot see this: a 2-client single-class shard and a 2-client
+    balanced one carry identical weight. Weighting by effective class count
+    reads the quantity that actually predicts the damage, and needs no
+    threshold — which matters, because the capacity floor that motivated it was
+    one measurement at one N and one radius and must not be hard-coded.
+    """
+    import numpy as _np
+
+    stats = _shard_class_stats(uav_groups, labels, n_classes)
+    log_c = _np.log(n_classes) if n_classes > 1 else 1.0
+    # entropy is stored normalised by log C, so exp(H_nats) = exp(entropy*logC).
+    return {j: float(_np.exp(ent * log_c) / n_classes) for j, (_m, ent) in stats.items()}
+
+
 def _shard_class_diversity(
     uav_groups: dict[int, list],
     labels,
@@ -269,6 +329,7 @@ def _place_uavs(
     link_model: str = "path_loss",
     z_min_m: float = Z_MIN_M_DEFAULT,
     z_max_m: float = Z_MAX_M_DEFAULT,
+    coverage_mode: str = "assigned",
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray | None]:
     """Run a placement optimizer and return UAV positions in metres.
 
@@ -294,7 +355,7 @@ def _place_uavs(
         )
     elif link_model != "range_gate":
         raise ValueError(f"link_model must be 'path_loss' or 'range_gate'; got {link_model!r}")
-    fitness = Fitness(instance, link=link)
+    fitness = Fitness(instance, link=link, coverage_mode=coverage_mode)
 
     optimizer = build_optimizer(method, params=method_params, budget={"P": P, "G_max": G_max})
     result = optimizer.optimize(instance, fitness, rng)
@@ -314,7 +375,9 @@ def _place_uavs(
     # Re-scoring the returned layout once on a fresh Fitness at the shared
     # R_comm puts every method on one ruler. Fresh so the optimizer's own
     # eval_count (already read back by Optimizer.optimize) stays untouched.
-    placement_score = float(Fitness(instance, link=link)(uav_pos.reshape(-1)))
+    placement_score = float(
+        Fitness(instance, link=link, coverage_mode=coverage_mode)(uav_pos.reshape(-1))
+    )
     radii = result.meta.get("radii")
     if link is not None and radii is None:
         # The coverage gate the placement was scored under, handed to the system
@@ -682,6 +745,11 @@ def run_tier2(cfg: dict) -> dict:
     link_model: str = str(cfg["fl"].get("link_model", "path_loss"))
     z_min_m: float = float(cfg["fl"].get("z_min_m", Z_MIN_M_DEFAULT))
     z_max_m: float = float(cfg["fl"].get("z_max_m", Z_MAX_M_DEFAULT))
+    # Placement objective: "assigned" (capacity-capped, historical) or
+    # "reachable" (capacity-free max-covering). See Fitness.coverage_mode and
+    # REPORTS/preregistration_v6_method.md. In fl.* so it enters the resume
+    # signature — changing the objective must invalidate checkpointed placements.
+    coverage_mode: str = str(cfg["fl"].get("coverage_mode", "assigned"))
     uniform_coverage_radius: bool = bool(cfg["fl"].get("uniform_coverage_radius", False))
     if link_model == "path_loss":
         uniform_coverage_radius = False
@@ -780,6 +848,7 @@ def run_tier2(cfg: dict) -> dict:
                         link_model=link_model,
                         z_min_m=z_min_m,
                         z_max_m=z_max_m,
+                        coverage_mode=coverage_mode,
                     )
                     # cumulative_energy_j counts repositioning (movement) energy
                     # only — hover/communication energy has no simulated-time
@@ -919,7 +988,7 @@ _MODEL_SIZE_MB: float = _IOT_MODEL_SIZE_MB  # kept for run_tier2 back-compat
 # Method configuration: (placement_method, selection_mode, reputation_weighted, dynamic)
 # placement_method: "pso" (authoritative placement optimizer) or None (flat/centralized);
 #                   override per run via cfg["fl"]["placement_method"]
-# selection_mode:   "ucb" | "random" | "all" | "fedcs" | "rep_cap" | "fair_mab"
+# selection_mode:   "ucb" | "ucb_balanced" | "random" | "all" | "fedcs" | "rep_cap" | "fair_mab"
 # reputation_weighted: True → reputation_fedavg; False → uniform sample-weight fedavg
 # dynamic:          True → reposition every T_sel rounds; False → place once at round 1
 _METHOD_CFG: dict[str, tuple] = {
@@ -929,6 +998,14 @@ _METHOD_CFG: dict[str, tuple] = {
     "hfl_no_selection": ("pso", "random", True, True),
     "hfl_static": ("pso", "ucb", True, False),
     "hfl_no_reputation": ("pso", "ucb", False, True),
+    # Roster-construction control. Identical scoring to proposed_hfl — same
+    # utility, reputation, beta blend, UCB bonus and class histogram — handed to
+    # the LOAD-BALANCED roster builder the literature selectors use instead of
+    # the proposed fill-to-capacity one. Isolates "our scores are better" from
+    # "our rosters make wider UAV shards", which the headline comparison
+    # otherwise confounds wherever K*capacity exceeds the covered population
+    # (N=30/50/100 at the operating point; not N=200, where slots bind).
+    "hfl_balanced_roster": ("pso", "ucb_balanced", True, True),
     # Literature baselines (Algorithms B1-B3, REPORTS/master_implementation_reference.md Appendix C):
     # identical PSO placement, reputation FedAvg, and T_sel cadence as
     # proposed_hfl — only the client-selection rule differs, isolating it as
@@ -1218,6 +1295,19 @@ def run_full_hfl(cfg: dict) -> dict:
     # computed under different physics.
     z_min_m = float(fl.get("z_min_m", Z_MIN_M_DEFAULT))
     z_max_m = float(fl.get("z_max_m", Z_MAX_M_DEFAULT))
+    # Placement objective: "assigned" (capacity-capped, historical) or
+    # "reachable" (capacity-free max-covering). See Fitness.coverage_mode and
+    # REPORTS/preregistration_v6_method.md. In fl.* so it enters the resume
+    # signature — changing the objective must invalidate checkpointed placements.
+    coverage_mode = str(fl.get("coverage_mode", "assigned"))
+    # Edge-aggregation weighting: "samples" (data-size FedAvg, historical) or
+    # "diversity" (samples x effective class count). See
+    # _shard_effective_class_fraction. In fl.* so it enters the resume signature.
+    uav_weight_mode = str(fl.get("uav_weight_mode", "samples"))
+    if uav_weight_mode not in ("samples", "diversity"):
+        raise ValueError(
+            f"fl.uav_weight_mode must be 'samples' or 'diversity', got {uav_weight_mode!r}"
+        )
     uniform_coverage_radius = bool(fl.get("uniform_coverage_radius", False))
     if link_model == "path_loss":
         uniform_coverage_radius = False
@@ -1577,6 +1667,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         link_model=link_model,
                         z_min_m=z_min_m,
                         z_max_m=z_max_m,
+                        coverage_mode=coverage_mode,
                     )
                     # Movement (repositioning) energy only — see run_tier2 note.
                     if prev_uav_pos_m is not None:
@@ -1632,6 +1723,11 @@ def run_full_hfl(cfg: dict) -> dict:
 
             _shard_minority, _shard_entropy = _shard_class_diversity(
                 uav_groups, cached_dataset.labels
+            )
+            _shard_div_frac = (
+                _shard_effective_class_fraction(uav_groups, cached_dataset.labels)
+                if uav_weight_mode == "diversity"
+                else {}
             )
             # Shard WIDTH, recorded separately from shard class diversity because
             # the two selection families construct rosters differently and the
@@ -1775,7 +1871,13 @@ def run_full_hfl(cfg: dict) -> dict:
                 # cluster's IoT reputations (paper §IV-C7).
                 cluster_reps = [rep_scores.get(c.client_id, 0.5) for c in uav_groups[uav_idx]]
                 uav_rep = trimmed_mean(cluster_reps) if cluster_reps else 1.0
-                uav_updates.append((parts, total_n, uav_rep))
+                # C2: weight the edge model by the effective number of classes
+                # its shard saw, not by sample count alone. No-op at
+                # uav_weight_mode="samples" (the default and every pre-v6 run).
+                w_n = total_n
+                if uav_weight_mode == "diversity":
+                    w_n = total_n * _shard_div_frac.get(uav_idx, 1.0)
+                uav_updates.append((parts, w_n, uav_rep))
 
             # ── Server-level aggregation + momentum (A3) ──────────────────
             # Reputation-weighted FedAvg; UAVs whose cluster trimmed-mean
