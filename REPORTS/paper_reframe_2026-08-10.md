@@ -105,6 +105,21 @@ both firing mechanically and both failing to transfer, closes that door — and
 the second one *overshot* its target, so "the effect was too small" does not
 apply either.
 
+### C3b. The frozen-feature choice is validated, and it survived the purge
+
+Every FL result here runs on cached ResNet-18 features rather than end-to-end
+vision, which is the first thing a reviewer will question about the pipeline.
+`scripts/e2e_centralized.py` answers it: **frozen features retain 82.3% of
+end-to-end macro-F1** (0.4113 vs 0.5000) at roughly 1/25 the compute.
+
+Verified 2026-08-11 to be **unaffected by both defects** — they are UAV-geometry
+defects, and that script pools every client's training data without consulting
+coverage. It is one of the very few pre-2026-08-08 results that carries over.
+
+Report the *ratio*, disclose the 17.7% headroom given up, and do not quote the
+absolute numbers as an upper bound for the FL runs — different split, different
+regime, not comparable with the v5 `centralized` arm.
+
 ### C4. A capacity floor with a distinct failure signature
 
 Per-UAV shard width ≤ 3 makes the system *unlearn*: it rises to ~0.34 macro-F1
