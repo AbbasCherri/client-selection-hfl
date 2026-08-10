@@ -25,14 +25,17 @@ area:
   - 0.0
   - 5000.0
   z:
-  - 20.0
-  - 120.0
+  - 100.0
+  - 400.0
 value:
   beta_mode: pinned
   t: 0
   T_decay: 20
 problem:
   R_comm: 500.0
+  link_model: path_loss
+  environment: suburban
+  freq_ghz: 2.0
   B_min_uav: 0.2
   capacity: 15
   uav_battery: 1.0
