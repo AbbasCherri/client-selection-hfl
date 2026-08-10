@@ -115,8 +115,13 @@ def main() -> int:
         c3 = df20 > 0 or p20 >= 0.05
         c4 = not degenerate
 
+        # Split the annotation by DIRECTION. Listing "sig at [15]" for an arm
+        # that is significantly WORSE at K=15 reads like a win to anyone
+        # skimming the verdict file, and this file is the record.
+        sig_wins = [k for k, s in sig_moon.items() if s and diffs_moon[k] > 0]
+        sig_losses = [k for k, s in sig_moon.items() if s and diffs_moon[k] < 0]
         print(f"  [1] beats moon2022 at K=10/15/20, Holm-sig >=2 : {c1}  "
-              f"(sig at {[k for k, s in sig_moon.items() if s]})")
+              f"(Holm-sig wins at {sig_wins}; Holm-sig LOSSES at {sig_losses})")
         print(f"  [2] beats mclp_place at every K                : {c2}")
         print(f"  [3] not losing to flat_fl at K=20              : {c3}  "
               f"(diff {df20:+.4f}, p={p20:.4f})")

@@ -51,8 +51,13 @@ FAILED=""
 
 say "===== Tier-1 v5: 100-400 m band, path-loss link, R_comm 500 m ====="
 
-for chk in check_altitude_band check_tier1_link check_placement_baselines \
-           check_placement_methods check_mclp; do
+# check_tier1_resume is not optional here. The first attempt at this rebuild
+# (2026-08-10) resumed all 840 jobs from results computed under the old band and
+# the old flat range gate, and finished in eleven seconds. Checkpoints are now
+# keyed by a config signature; this asserts the key actually moves when the
+# physics does.
+for chk in check_tier1_resume check_altitude_band check_tier1_link \
+           check_placement_baselines check_placement_methods check_mclp; do
     python "tests/sanity_checks/${chk}.py" || { say "${chk} FAILED — aborting"; exit 1; }
 done
 
