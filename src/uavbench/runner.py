@@ -8,6 +8,8 @@ run is independently reproducible (simulation plan Section 9).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -207,8 +209,36 @@ def _dir_size_mb(path: Path) -> float:
     return sum(p.stat().st_size for p in path.rglob("*") if p.is_file()) / 1e6
 
 
-def _checkpoint_path(results_dir: Path, method: str, scenario_idx: int, seed_i: int) -> Path:
-    return results_dir / ".checkpoints" / f"{method}__s{scenario_idx}__seed{seed_i}.pkl"
+# Config sections that change what a job COMPUTES. A checkpoint written under
+# one setting of these must never be reused under another.
+#
+# This exists because it happened. On 2026-08-10 the Tier-1 rebuild — whose
+# entire purpose was to rescore placement through the Al-Hourani channel on a
+# corrected 100-400 m altitude band — logged "Resuming: 840/840 jobs already
+# checkpointed, running the remaining 0" and finished in eleven seconds, silently
+# re-serving results computed under the old flat range gate and the old band. The
+# key was (method, scenario, seed) and knew nothing about the physics. Only the
+# altitude gate caught it, and only because that particular change happened to
+# have a gate; a weights change would have sailed through.
+#
+# The FL side already solved this with PIPELINE_VERSION + a resume signature.
+# This is the Tier-1 equivalent.
+_RESUME_SIG_KEYS = ("area", "problem", "fitness", "budget", "value",
+                    "scenarios", "optimizer_params", "instance_seed",
+                    "optimizer_seed")
+
+
+def _config_signature(cfg: dict) -> str:
+    """Short stable hash of the config fields a checkpoint's validity depends on."""
+    payload = {k: cfg.get(k) for k in _RESUME_SIG_KEYS}
+    blob = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha1(blob.encode()).hexdigest()[:10]
+
+
+def _checkpoint_path(
+    results_dir: Path, method: str, scenario_idx: int, seed_i: int, sig: str
+) -> Path:
+    return results_dir / ".checkpoints" / f"{method}__s{scenario_idx}__seed{seed_i}__{sig}.pkl"
 
 
 def _run_one_checkpointed(
@@ -248,23 +278,38 @@ def run_experiment(cfg: dict) -> dict:
         for seed_i in range(n_seeds)
     ]
 
+    sig = _config_signature(cfg)
+
     job_outputs: dict[tuple, dict] = {}
     pending = []
     for job in jobs:
         _, m, s_idx, seed_i = job
-        ckpt = _checkpoint_path(results_dir, m, s_idx, seed_i)
+        ckpt = _checkpoint_path(results_dir, m, s_idx, seed_i, sig)
         cached = load_checkpoint(ckpt)
         if cached is not None:
             job_outputs[job] = cached
         else:
             pending.append(job)
 
+    # Say out loud when checkpoints exist that this config cannot use. Silence
+    # here is what let a physics change re-serve eleven-second stale results.
+    stale = len(list((results_dir / ".checkpoints").glob("*.pkl"))) - (len(jobs) - len(pending))
+    if stale > 0:
+        logger.warning(
+            "Ignoring %d checkpoint(s) written under a different config "
+            "(current signature %s over %s) — they will be recomputed",
+            stale,
+            sig,
+            ", ".join(_RESUME_SIG_KEYS),
+        )
+
     n_done = len(jobs) - len(pending)
     if n_done:
         logger.info(
-            "Resuming: %d/%d jobs already checkpointed, running the remaining %d",
+            "Resuming: %d/%d jobs already checkpointed (signature %s), running the remaining %d",
             n_done,
             len(jobs),
+            sig,
             len(pending),
         )
     logger.info(
@@ -279,7 +324,7 @@ def run_experiment(cfg: dict) -> dict:
     if pending:
         computed = Parallel(n_jobs=cfg["n_workers"])(
             delayed(_run_one_checkpointed)(
-                cfg, m, m_idx, s_idx, seed_i, _checkpoint_path(results_dir, m, s_idx, seed_i)
+                cfg, m, m_idx, s_idx, seed_i, _checkpoint_path(results_dir, m, s_idx, seed_i, sig)
             )
             for (m_idx, m, s_idx, seed_i) in pending
         )
