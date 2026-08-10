@@ -1,0 +1,4 @@
+harness,method,N,K,capacity,seed_idx,job_seed,seed,partition_seed
+uav,mclp_place,200,20,6,0,16076,2761,5309
+uav,mclp_place,200,20,6,1,23995,27070,5310
+uav,mclp_place,200,20,6,2,31914,18607,5311
