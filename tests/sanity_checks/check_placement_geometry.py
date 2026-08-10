@@ -36,15 +36,31 @@ def _coords(n, spread_m=4000.0, seed=0):
     return {i: (float(lat[i]), float(lon[i])) for i in range(n)}
 
 
+def _clustered_coords(centres_m, per_cluster=30, spread_m=500.0, seed=0):
+    """Clients tightly grouped around each given metre offset from _REF."""
+    rng = np.random.default_rng(seed)
+    R = 6_371_000.0
+    out = {}
+    for ci, (cx, cy) in enumerate(centres_m):
+        xy = rng.uniform(-spread_m, spread_m, size=(per_cluster, 2)) + [cx, cy]
+        for j in range(per_cluster):
+            lat = _REF[0] + np.degrees(xy[j, 1] / R)
+            lon = _REF[1] + np.degrees(xy[j, 0] / (R * np.cos(np.radians(_REF[0]))))
+            out[ci * per_cluster + j] = (float(lat), float(lon))
+    return out
+
+
 def _uavs(xy_m, z=1500.0):
     return np.column_stack([np.asarray(xy_m, dtype=float),
                             np.full(len(xy_m), float(z))])
 
 
 def disjoint_placement_has_multiplicity_one():
-    # Two UAVs 40 km apart with a 5 km reach cannot both see any client.
-    coords = _coords(60, spread_m=1000.0)
-    pos = _uavs([[-20_000.0, 0.0], [20_000.0, 0.0]])
+    # Two UAVs 40 km apart, each with its own cluster of clients inside a 5 km
+    # reach. Every client is covered, and by exactly one aircraft.
+    centres = [(-20_000.0, 0.0), (20_000.0, 0.0)]
+    coords = _clustered_coords(centres)
+    pos = _uavs(centres)
     g = _placement_geometry(coords, pos, _REF, R_comm=5000.0)
     assert abs(g["cover_multiplicity_mean"] - 1.0) < 1e-9, g
     assert abs(g["unique_cover_frac"] - 1.0) < 1e-9, g
@@ -139,7 +155,7 @@ def the_rescore_uses_the_same_weights_as_the_search():
         link_model="path_loss", z_min_m=100.0, z_max_m=2000.0, weights=w,
     )
     from uavbench.fl.federated import _build_problem_instance
-    from uavbench.problem.path_loss import LinkModel
+    from uavbench.problem.link import LinkModel
     inst, _ = _build_problem_instance(coords, 6, 5000.0, 6, None,
                                       z_min_m=100.0, z_max_m=2000.0)
     link = LinkModel(r_comm_m=5000.0, z_min_m=100.0, z_max_m=2000.0)
