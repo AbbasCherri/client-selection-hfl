@@ -330,6 +330,7 @@ def _place_uavs(
     z_min_m: float = Z_MIN_M_DEFAULT,
     z_max_m: float = Z_MAX_M_DEFAULT,
     coverage_mode: str = "assigned",
+    weights: tuple[float, float, float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray | None]:
     """Run a placement optimizer and return UAV positions in metres.
 
@@ -355,7 +356,12 @@ def _place_uavs(
         )
     elif link_model != "range_gate":
         raise ValueError(f"link_model must be 'path_loss' or 'range_gate'; got {link_model!r}")
-    fitness = Fitness(instance, link=link, coverage_mode=coverage_mode)
+    # `weights=None` keeps Fitness's own defaults, so every run before this
+    # option existed is bit-identical. An explicit triple is applied to BOTH the
+    # optimizer's fitness and the re-score below — scoring a layout under
+    # different weights than it was optimized for would be meaningless.
+    w = {} if weights is None else {"w1": weights[0], "w2": weights[1], "w3": weights[2]}
+    fitness = Fitness(instance, link=link, coverage_mode=coverage_mode, **w)
 
     optimizer = build_optimizer(method, params=method_params, budget={"P": P, "G_max": G_max})
     result = optimizer.optimize(instance, fitness, rng)
@@ -376,7 +382,7 @@ def _place_uavs(
     # R_comm puts every method on one ruler. Fresh so the optimizer's own
     # eval_count (already read back by Optimizer.optimize) stays untouched.
     placement_score = float(
-        Fitness(instance, link=link, coverage_mode=coverage_mode)(uav_pos.reshape(-1))
+        Fitness(instance, link=link, coverage_mode=coverage_mode, **w)(uav_pos.reshape(-1))
     )
     radii = result.meta.get("radii")
     if link is not None and radii is None:
@@ -423,6 +429,65 @@ def _covered_clients(
             cids, nearest, nearest_dist, np.broadcast_to(limits, nearest_dist.shape)
         )
         if d <= lim
+    }
+
+
+def _placement_geometry(
+    client_coords: dict[int, tuple[float, float]],
+    uav_pos_m: np.ndarray,
+    ref: np.ndarray,
+    R_comm: float,
+    radii: np.ndarray | None = None,
+) -> dict[str, float]:
+    """Geometry of a placement, beyond how much of the map it covers.
+
+    Two placements can reach the same devices with very different layouts, and
+    the layout decides which UAV each device is assigned to — hence the shard
+    composition the edge tier trains on. `moon2022` places greedily over the
+    *residual* device set, so its discs are pushed apart by construction, while
+    the fitness optimisers may cluster freely. These columns make that
+    difference measurable instead of arguable; see
+    REPORTS/preregistration_v6_c3.md, hypothesis H-A.
+
+    Distances use the same Haversine gate as :func:`_covered_clients` so the
+    numbers refer to the coverage that actually happened, not to a second
+    slightly different notion of range.
+    """
+    lat0, lon0 = float(ref[0]), float(ref[1])
+    lat0_rad = math.radians(lat0)
+    R = 6_371_000.0
+
+    uav_latlon = np.column_stack(
+        [
+            lat0 + np.degrees(uav_pos_m[:, 1] / R),
+            lon0 + np.degrees(uav_pos_m[:, 0] / (R * math.cos(lat0_rad))),
+        ]
+    )
+    client_latlon = np.array(list(client_coords.values()), dtype=np.float64)
+    dists = haversine_matrix(client_latlon, uav_latlon)  # (N, K)
+    limits = np.broadcast_to(
+        np.asarray(radii, dtype=np.float64) if radii is not None else np.float64(R_comm),
+        dists.shape,
+    )
+    in_range = dists <= limits                       # (N, K)
+    mult = in_range.sum(axis=1)
+    covered = mult > 0
+
+    K = uav_pos_m.shape[0]
+    if K > 1:
+        d = np.sqrt(
+            ((uav_pos_m[:, None, :2] - uav_pos_m[None, :, :2]) ** 2).sum(axis=2)
+        )
+        sep = float(d[np.triu_indices(K, k=1)].mean())
+    else:
+        sep = float("nan")
+
+    return {
+        # Mean number of aircraft reaching a covered device. 1.0 means a
+        # perfectly disjoint tiling; higher means redundant overlap.
+        "cover_multiplicity_mean": float(mult[covered].mean()) if covered.any() else float("nan"),
+        "unique_cover_frac": float((mult[covered] == 1).mean()) if covered.any() else float("nan"),
+        "uav_pairwise_sep_m": sep,
     }
 
 
@@ -1308,6 +1373,30 @@ def run_full_hfl(cfg: dict) -> dict:
         raise ValueError(
             f"fl.uav_weight_mode must be 'samples' or 'diversity', got {uav_weight_mode!r}"
         )
+    # Placement fitness weights (w1 coverage, w2 energy, w3 imbalance). None
+    # keeps Fitness's shipped defaults, so omitting this reproduces every
+    # earlier run exactly. Present so REPORTS/preregistration_v6_c3.md's H-B —
+    # that the Optuna weights, fitted in the pre-2026-08-08 regime that Defect 1
+    # voided, now make the optimizers buy movement energy out of their coverage
+    # budget — can be tested at ONE fixed alternative. It is not a search knob:
+    # the pre-registration forbids searching over w, because the baselines were
+    # never re-tuned and tuning only the proposed method is the asymmetry
+    # REPORTS/rigor_plan_2026-08.md already documents.
+    # In fl.* so it enters the resume signature: changing the objective must
+    # invalidate checkpointed placements.
+    placement_weights = fl.get("placement_weights")
+    if placement_weights is not None:
+        placement_weights = tuple(float(v) for v in placement_weights)
+        if len(placement_weights) != 3:
+            raise ValueError(
+                f"fl.placement_weights must be [w1, w2, w3], got {placement_weights!r}"
+            )
+        if any(v < 0 for v in placement_weights):
+            raise ValueError(
+                f"fl.placement_weights must be non-negative, got {placement_weights!r}"
+            )
+        if sum(placement_weights) <= 0:
+            raise ValueError("fl.placement_weights cannot be all zero")
     uniform_coverage_radius = bool(fl.get("uniform_coverage_radius", False))
     if link_model == "path_loss":
         uniform_coverage_radius = False
@@ -1575,6 +1664,15 @@ def run_full_hfl(cfg: dict) -> dict:
         _cc_counts, _cc_scarcity = client_class_counts, class_scarcity
         _client_class_value = _class_value_vector(clients, _cc_counts, _cc_scarcity)
 
+        # NaN, not zero: flat_fl has no fleet, so "the mean separation between
+        # its aircraft" has no value rather than a value of nothing, and a zero
+        # would quietly average into any cross-method summary.
+        _place_geom: dict[str, float] = {
+            "cover_multiplicity_mean": float("nan"),
+            "unique_cover_frac": float("nan"),
+            "uav_pairwise_sep_m": float("nan"),
+        }
+
         for rnd in range(1, n_rounds + 1):
             t0 = time.perf_counter()
 
@@ -1668,6 +1766,7 @@ def run_full_hfl(cfg: dict) -> dict:
                         z_min_m=z_min_m,
                         z_max_m=z_max_m,
                         coverage_mode=coverage_mode,
+                        weights=placement_weights,
                     )
                     # Movement (repositioning) energy only — see run_tier2 note.
                     if prev_uav_pos_m is not None:
@@ -1678,6 +1777,14 @@ def run_full_hfl(cfg: dict) -> dict:
                     prev_uav_pos_m = uav_pos_m.copy()
                     uav_latlon = _uav_pos_to_latlon(uav_pos_m, ref)
                     covered_all = _covered_clients(
+                        client_coord_map, uav_pos_m, ref, R_comm,
+                        radii=None if uniform_coverage_radius else uav_radii
+                    )
+                    # Recomputed only when the fleet moves, then carried between
+                    # repositioning rounds — the layout is unchanged in between,
+                    # so recomputing per round would burn an (N,K) matrix to
+                    # arrive at the same three numbers.
+                    _place_geom = _placement_geometry(
                         client_coord_map, uav_pos_m, ref, R_comm,
                         radii=None if uniform_coverage_radius else uav_radii
                     )
@@ -1985,6 +2092,9 @@ def run_full_hfl(cfg: dict) -> dict:
                     "shard_class_entropy": _shard_entropy,
                     "mean_shard_clients": _mean_shard_clients,
                     "n_active_uavs": _n_active_uavs,
+                    # Placement geometry — see _placement_geometry and
+                    # REPORTS/preregistration_v6_c3.md.
+                    **_place_geom,
                     **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
                     # val_* mirrors the reported metrics on the validation
                     # split (NaN when no val split is configured). Anything
