@@ -146,6 +146,39 @@ Point 4 is the constructive close and is already supported by
 **Do not** write this as "our method failed". Written as above, the negative
 findings are the *result of* the protocol, which is the contribution.
 
+## 3a. The power problem — read before writing any null
+
+`scripts/power_analysis.py`, 2026-08-11. **Median minimum detectable effect at
+n=10 is 0.0340 macro-F1**, at alpha=0.05 and 80% power. Most of the effects this
+project argues about are smaller than that.
+
+| comparison | observed | MDE | observed/MDE |
+|---|---|---|---|
+| class-realism **selection** | +0.0173 | 0.0597 | **0.29** |
+| class-realism placement | +0.0391 | 0.0398 | 0.98 |
+| C2 best cell (K=10) | +0.0330 | 0.0406 | 0.81 |
+| C1 vs mclp, K=20 | +0.0051 | 0.0263 | 0.19 |
+
+**So most individual per-cell nulls are uninformative and must not be written as
+"no effect".** The correct sentence is "not detected; this design could not have
+detected an effect below X", with X quoted.
+
+What survives this unchanged, because the effects are large relative to MDE:
+
+* `paper_full`'s losses to fedcs / oort / flat_fl (−0.035 … −0.167).
+* C1 losing to `moon2022` at K=15 (obs/MDE 1.32); C3 at K=20 (1.14).
+* **The coverage-causality result — because it rests on the AGGREGATE across
+  K (34% of the predicted gain, summed), not on any single cell.** Write it that
+  way. Never defend it by pointing at one K.
+* C3's mechanism overshoot, which is a geometry measurement, not a null.
+
+Class-realism placement at 0.98 is exactly on the threshold: report it as
+marginally powered, not as a clean detection.
+
+**Design implication for any future run: n=10 is too small for this problem.**
+MDE scales as 1/√n, so resolving a 0.02 effect needs roughly n=30, and 0.015
+needs n≈55. Any claim the paper wants to rest on a single cell needs that.
+
 ## 4. Risk, stated plainly
 
 This is an evaluation/negative-result paper. Some Q1 venues take these readily
