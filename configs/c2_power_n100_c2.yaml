@@ -1,0 +1,11 @@
+# C2 power run — C2 arm, client-count generalisation at N=100.
+#
+# Paired counterpart to c2_power_n100_base.yaml; fl.uav_weight_mode is the only
+# difference. Rationale in REPORTS/preregistration_c2_power.md §3, grid (b).
+extends: c2_power_n100_base.yaml
+
+name: c2_power_n100_c2
+results_dir: results/c2_power_n100_c2
+
+fl:
+  uav_weight_mode: diversity

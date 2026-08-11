@@ -1,0 +1,22 @@
+# C2 power run — BASELINE arm, client-count generalisation at N=50.
+#
+# Grid (b) of REPORTS/preregistration_c2_power.md §3. Every C2 number before
+# this run sat at N=200, where K*capacity=120 BINDS. At N=50 the slots are
+# SLACK, which is the regime that changes shard composition — the thing C2 acts
+# on — so an effect measured only at N=200 may be an effect of the binding
+# regime rather than of the method.
+#
+# K ∈ {10, 20}: C2's largest observed effect and the operating point. Chosen as
+# the two most informative fleet sizes, not because they scored best.
+#
+# 2 K x 1 method x 25 seeds = 50 jobs.
+extends: c2_power_base.yaml
+
+name: c2_power_n50_base
+results_dir: results/c2_power_n50_base
+
+N: 50
+
+K_values:
+  - {K: 10, capacity: 6}
+  - {K: 20, capacity: 6}
