@@ -40,7 +40,7 @@ the authority on what each number means.
 | 3.1 | FL main table: 13 methods × N ∈ {30,50,100,200} × 10 seeds | `results/paper_full/paper_sweep_rounds.parquet`, `significance_macro_f1.csv` | have |
 | 3.2 | Accuracy / macro-F1 vs round, per N | `results/paper_full/paper_*_vs_rounds_N*.png` (11 figures) | have |
 | 3.3 | Per-class F1 and confusion | `per_class_f1.csv`, `confusion.parquet` | have |
-| 3.4 | Operational metrics — movement energy, comm cost, coverage | `operational_summary.csv` | have |
+| 3.4 | Operational metrics — repositioning energy, comm cost, coverage | `operational_summary.csv` + fleet-sweep analysis | have (2026-08-11) — metaheuristic placement is dominated on reach-per-joule |
 | 3.5 | Convergence: rounds-to-target | `rounds_to_target` column | have |
 | 3.6 | Fleet-size sweep, 17 methods × 5 K | `results/paper_uav_count/uav_sweep_rounds.parquet` | have (data) |
 | 3.7 | Fleet-sweep figures | `results/paper_uav_count/uav_sweep_*.png` (4) | have — `plot_uav_sweep` added 2026-08-11; the harness had no plotting path at all |
@@ -58,8 +58,8 @@ the authority on what each number means.
 | 4.6 | Coverage-causality analysis (observational slope vs interventional delivery) | `scripts/coverage_causality.py` → `results/coverage_causality/{mediators,causality}.csv` | have (2026-08-11) |
 | 4.7 | Placement-geometry columns (multiplicity, unique-cover, separation) | recorded per round since `46f601d3` | have (v6/C3 arms only; v5 baselines predate the columns) |
 | 4.8 | Capacity-floor diagnostic | `results/probe_topology/` | have |
-| 4.9 | Roster-construction control | `results/roster_control/` | running |
-| 4.10 | C2 at n=25 + client-count generalisation | `results/c2_power_*` | queued |
+| 4.9 | Roster-construction control | `results/roster_control/` | have (2026-08-11) — fill-to-capacity is better, so the main table gave the proposed method an advantage; capacity never binds |
+| 4.10 | C2 at n=25 + client-count generalisation | `results/c2_power_*`, `c2_power_verdict.txt` | have (2026-08-11) — fails pre-registration; discovery cell did not replicate |
 | 4.11 | Power analysis / MDE for every null | `scripts/power_analysis.py` | have |
 | 4.12 | Frozen-vs-end-to-end validation | `results/e2e_centralized/e2e_comparison.csv` | have — survives the void, see provenance carve-out |
 
@@ -78,12 +78,14 @@ Ordered by whether the paper can go without it.
 3.7 were filled without any new simulation compute — they were scripts and
 figures over data already in hand.
 
-Remaining, and neither blocks a draft:
+**Every experiment is now complete** (4.9 and 4.10 landed 2026-08-11). No
+element of the paper is waiting on compute.
 
-1. **4.9 roster-construction control** and **4.10 C2 at n=25 + client-count
-   generalisation** are running; both are pre-registered and land on their own.
-2. **Writing.** Every table and figure the paper needs now exists or is in
-   flight. What is left is prose, against `REPORTS/paper_reframe_2026-08-10.md`.
+Remaining:
+
+1. **Writing.** `REPORTS/paper_draft.md` carries §1-§8 with every number filled
+   in. §2 (related work) is still an outline and needs the author's literature
+   framing; everything else is drafted.
 
 Two caveats that must survive into the text, because they are easy to lose:
 * every null carries its MDE (`scripts/power_analysis.py`) — n=10 could not
