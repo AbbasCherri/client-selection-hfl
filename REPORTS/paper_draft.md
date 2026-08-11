@@ -332,9 +332,49 @@ not be used to justify a placement objective.
 
 ### 6.6 Operational metrics [TABLE 5]
 
-Where placement *does* pay: reach, movement energy, communication cost. This is
-the honest framing for a placement layer whose value does not show up in
-end-task accuracy.
+If placement does not buy accuracy (§6.5), the natural fallback is that it buys
+operational quality — reach per joule, communication cost. The data does not
+support even that for the optimisation-based methods.
+
+Repositioning energy at K=20 spans **three orders of magnitude**, and it is not
+repaid:
+
+| method | coverage % | repositioning energy (J) | MJ per coverage point | macro-F1 |
+|---|---|---|---|---|
+| `flat_fl` (no UAVs) | 100.0 | 0 | 0 | 0.395 |
+| `hfl_static` (place once) | 59.0 | 0 | 0 | 0.347 |
+| `ahc_place` | **83.4** | 2.41e5 | **0.0029** | 0.366 |
+| `spiral_place` | 78.2 | 2.28e5 | 0.0029 | 0.365 |
+| `mclp_place` (proposed) | 80.4 | 8.05e6 | 0.100 | 0.380 |
+| `moon2022` | **93.4** | 6.35e7 | 0.679 | **0.411** |
+| `pso_cluster_place` | 75.8 | 1.93e8 | 2.54 | 0.370 |
+| `proposed_hfl` (PSO) | 60.5 | 1.87e8 | 3.10 | 0.354 |
+| `ga_place` | 46.7 | 1.90e8 | 4.08 | 0.379 |
+| `random_place` | 32.0 | 1.94e8 | 6.08 | 0.327 |
+
+Three things follow, and none is the expected one.
+
+**The metaheuristic family is dominated.** PSO, GA, DE, GWO, MOGOA and
+`cap_kmeans` all burn ~1.9e8 J to reach 47-76% of the population. `moon2022`
+reaches 93.4% for a third of that, and `ahc_place` reaches 83.4% for **1/800th**
+of it. Spending on repositioning does not buy reach here.
+
+**The proposed placement is not the operational winner either.** `ahc_place`
+achieves *higher* coverage than `mclp_place` (83.4% vs 80.4%) at 1/33 the
+energy, giving up 0.014 macro-F1 — well inside the 0.034 MDE (§6.7), so that
+difference is not resolved by this design.
+
+**The honest positive statement is narrower than "placement pays
+operationally":** among methods that reposition at all, the cheap deterministic
+rules are on the efficient frontier, and the optimisation-based ones are not.
+A deployment optimising for reach per joule should not be running a
+metaheuristic.
+
+*Caveat.* `cumulative_energy_j` counts **movement** energy only; hover and
+communication have no simulated-time model here, so methods that place once
+legitimately report zero and the column must be labelled as repositioning
+energy, not total energy. Comparisons among repositioning methods are
+unaffected.
 
 ### 6.7 Power [TABLE 6]
 
