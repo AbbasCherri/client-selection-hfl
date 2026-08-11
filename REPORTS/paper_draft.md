@@ -128,7 +128,10 @@ largely confounded.
    strong, is largely non-causal — and that the advantage of the best baseline
    is explained by neither of its measurable geometric signatures (§6.5).
 5. A reporting standard for negative results: every null is accompanied by the
-   minimum effect the design could have detected (§6.7).
+   minimum effect the design could have detected (§6.7), and every candidate
+   improvement is confirmed against criteria fixed before it is run — a
+   discipline that, in this paper, caught one of our own apparent wins
+   evaporating on fresh seeds (§6.8).
 
 Contribution 3 is a self-inversion, and we state it plainly rather than burying
 it. It is the paper's strongest piece of evidence about the protocol, because
@@ -446,6 +449,12 @@ single cell.**
   (17.7% headroom quantified); n=10 for most cells with MDE stated; no
   perturbation-robustness grid in the corrected regime; the mechanism behind the
   strongest baseline is unidentified.
+- **On the value of pre-registration in systems work.** Three of the four
+  candidate improvements evaluated here had their success criteria fixed in
+  writing before the code existed, and all three failed them. One had already
+  produced a publishable-looking cell (+0.033, p=0.037) that vanished on fresh
+  seeds. We would have reported it. The cost of the discipline was a few hours
+  of writing; the cost of skipping it would have been a false claim in print.
 - **Threats to validity we actively checked:** stale checkpoints surviving a
   physics change (now signature-keyed), derived artifacts surviving a rerun (now
   deleted before recompute), and unequal per-method coverage radii (now one
