@@ -1,0 +1,30 @@
+### grid (a) — fleet replication, N=200, 25 seeds
+   K       C2     base     diff        p    n
+   5   0.3437   0.3449  -0.0012   0.6915   25
+  10   0.4068   0.3963  +0.0105   0.2411   25
+  15   0.4069   0.3904  +0.0166   0.0236   25
+  20   0.3910   0.3725  +0.0185   0.0025   25
+  30   0.3710   0.3636  +0.0074   0.2996   25
+
+### grid (b) — client-count generalisation, 25 seeds
+   N    K       C2     base     diff        p
+  50   10   0.3737   0.3569  +0.0168   0.0136
+  50   20   0.3416   0.3258  +0.0157   0.0173
+ 100   10   0.3788   0.3668  +0.0121   0.0296
+ 100   20   0.3775   0.3637  +0.0137   0.0626
+
+### independent subset (grid a, seeds 10-24) — NOT decisive
+  K=5   diff -0.0031  p=0.5995  n=15
+  K=10  diff -0.0045  p=0.7615  n=15
+  K=15  diff +0.0131  p=0.1514  n=15
+  K=20  diff +0.0230  p=0.0125  n=15
+  K=30  diff +0.0016  p=0.9780  n=15
+
+  [1] Holm-sig wins at >=2 of 5 fleet sizes : False  (sig at [20])
+  [2] positive at all 5 fleet sizes         : False  (min -0.0012 at K=5)
+  [3] positive in >=3 of 4 grid-(b) cells   : True  (4/4)
+  [-] no degenerate cell                    : True  
+
+==============================================================
+VERDICT: C2 does NOT meet the pre-registered criteria.
+Report the negative result; §6 says failure is reportable.
