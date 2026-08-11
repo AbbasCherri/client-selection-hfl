@@ -5,9 +5,9 @@ traces to a row in `REPORTS/results_provenance.md`; nothing is quoted that does
 not. Bracketed `[TABLE n]` / `[FIG n]` markers map to
 `REPORTS/paper_data_manifest.md`.
 
-Status: §1-§7 drafted 2026-08-11. Two experiments still in flight (roster
-control, C2 at n=25) — their placeholders are marked **[PENDING]** and are the
-only gaps.
+Status: §1 and §3-§8 drafted 2026-08-11, with every number filled in and no
+placeholders — all experiments have landed. **§2 (related work) is still an
+outline** and needs the author's literature framing.
 
 ---
 
