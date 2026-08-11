@@ -1,0 +1,5 @@
+class,clients_holding,pct_of_clients
+survived,200,100.0
+collapsed,101,50.5
+obstructed,133,66.5
+missing,196,98.0

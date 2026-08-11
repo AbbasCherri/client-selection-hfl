@@ -1,0 +1,8 @@
+mediator,r_pooled,r_within_K_mean,r_within_K_min,r_within_K_max
+coverage_pct,0.596,0.702,0.493,0.838
+n_active_uavs,0.401,0.629,0.269,0.86
+shard_class_entropy,0.293,0.422,0.107,0.737
+mean_shard_clients,0.117,0.385,0.174,0.521
+jain_fairness,0.424,0.373,-0.24,0.678
+n_unique_selected,0.388,0.349,-0.118,0.593
+shard_minority_share,0.223,0.27,-0.132,0.62

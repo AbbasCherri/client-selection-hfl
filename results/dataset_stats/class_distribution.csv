@@ -1,0 +1,5 @@
+class,count,share
+survived,104917,0.8143
+collapsed,3407,0.0264
+obstructed,8365,0.0649
+missing,12154,0.0943

@@ -1,0 +1,3 @@
+predicted +0.055500
+realised +0.019100
+fraction 0.3441

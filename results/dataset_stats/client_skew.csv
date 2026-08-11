@@ -1,0 +1,2 @@
+n_clients,samples_min,samples_median,samples_max,samples_gini,mean_client_class_entropy,clients_with_1_class,clients_with_all_classes
+200,21,393.5,2678,0.4146,0.3676,1,70
