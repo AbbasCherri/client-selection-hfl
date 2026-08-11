@@ -544,6 +544,12 @@ def cmd_run_uav_sweep(args: argparse.Namespace) -> None:
         )
         with pd.option_context("display.max_rows", None, "display.width", 200):
             print(summary.round(3).to_string())
+    try:
+        from .plotting import plot_uav_sweep
+
+        plot_uav_sweep(out["results_dir"])
+    except Exception as exc:  # plotting is non-fatal
+        logger.warning("Fleet-sweep plotting skipped: %s", exc)
     print(f"\nDisk footprint: {out['size_mb']:.2f} MB at {out['results_dir']}")
 
 

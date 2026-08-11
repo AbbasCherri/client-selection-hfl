@@ -539,6 +539,58 @@ def plot_coverage_sweep(results_dir: Path) -> list[Path]:
     return paths
 
 
+def plot_uav_sweep(results_dir: Path) -> list[Path]:
+    """Fleet-size sweep figures: metric vs K, per placement method.
+
+    The fleet sweep had no plotting path at all until 2026-08-11 — `run_uav_sweep`
+    wrote its parquet and stopped, unlike `run_coverage_sweep` — so the
+    experiment that carries the fleet-size argument had zero figures.
+
+    `coverage_pct` is plotted beside `macro_f1` deliberately and should be read
+    beside it: it is what separates "placement does not matter at this fleet
+    size" from "every method already covers everyone", and conflating those is
+    the trap that made the 20 km placement contrast powerless.
+    """
+    df = _read_table(results_dir / "uav_sweep_rounds.parquet")
+    final = _last_round(df, ["K", "method", "seed"])
+    paths: list[Path] = []
+    for metric, ylabel in [
+        ("macro_f1", "Final Macro F1"),
+        ("coverage_pct", "Coverage (%)"),
+        ("mean_shard_clients", "Mean clients per UAV shard"),
+        ("accuracy", "Final Accuracy"),
+    ]:
+        if metric not in final.columns:
+            continue
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for method in sorted(final["method"].unique()):
+            g = (
+                final[final["method"] == method]
+                .groupby("K")[metric]
+                .agg(["mean", "std"])
+                .reset_index()
+                .sort_values("K")
+            )
+            # flat_fl has no UAVs, so it is a horizontal reference rather than a
+            # curve — drawn dashed so it is not read as a fleet-size trend.
+            style = {"linestyle": "--", "color": "0.4"} if method == "flat_fl" else {}
+            ax.errorbar(
+                g["K"], g["mean"], yerr=g["std"], label=method,
+                marker="o", markersize=5, linewidth=1.8, capsize=3, **style,
+            )
+        ax.set_xlabel("Fleet size K (capacity fixed at 6)")
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"Fleet-size sweep: {ylabel} vs K")
+        ax.legend(frameon=False, fontsize=7, ncol=2)
+        fig.tight_layout()
+        out = results_dir / f"uav_sweep_{metric}.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        paths.append(out)
+    return paths
+
+
 def plot_sweep(results_dir: Path) -> list[Path]:
     """Generate scalability sweep figures: accuracy/macro-F1 vs N, per method."""
     df = _read_table(results_dir / "sweep_rounds.parquet")
