@@ -414,8 +414,24 @@ single cell.**
   the selector fills 5.5% / 10.4% / 21.7% / 40.9% of available slots at
   N=30/50/100/200. **There is no binding cell, and the confound is therefore
   active in every cell of the main table**, in the direction stated above.
-- *Higher-powered replication:* **[PENDING]** — C2 at n=25 plus a client-count
-  generalisation.
+- *Higher-powered replication, and a replication failure worth reporting.* One
+  aggregation variant (diversity-weighted edge aggregation) showed a positive
+  effect at all five fleet sizes in the first evaluation, largest at K=10
+  (+0.033, p=0.037), significant at none after correction. We pre-registered a
+  25-seed replication with criteria fixed in advance and no optional stopping.
+
+  **It failed, and the cell that motivated it failed hardest.** K=10 fell to
+  +0.0105 at n=25 and is **−0.0045 across the 15 fresh seeds alone**. K=20
+  instead strengthened to +0.0185 (Holm-significant; +0.0230 on fresh seeds
+  alone), and a client-count generalisation at N ∈ {50,100} came out positive in
+  4 of 4 cells. The pre-registered bar — Holm-significant at ≥2 of 5 fleet sizes
+  and positive at all 5 — is not met.
+
+  We report this as a failure rather than promoting K=20, and we draw the
+  methodological point explicitly: without the discovery/confirmation split, the
+  reportable result from the first run would have been "wins at K=10, +0.033,
+  p=0.037". At n=10 with an MDE of 0.041 (§6.7), that was a coin-flip dressed as
+  a finding.
 
 ## 7. Discussion and limitations
 
