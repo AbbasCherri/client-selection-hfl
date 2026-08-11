@@ -1,22 +1,36 @@
 #!/usr/bin/env bash
-# One-command reproduction of every figure and table in the paper, from raw
-# runs to significance tests, using the checked-in configs and seed manifests.
+# One-command reproduction of every figure and table in the paper.
 #
 # Usage:
-#   scripts/reproduce_paper.sh           # full grid (hours; see REPORTS/master_implementation_reference.md §18)
-#   scripts/reproduce_paper.sh --smoke   # reduced end-to-end check (real data at small subsample)
+#   scripts/reproduce_paper.sh           # full grid — days of compute
+#   scripts/reproduce_paper.sh --smoke   # reduced end-to-end check (real data, small)
 #
-# Requirements: the pinned environment (pip install -r requirements.txt,
-# then pip install -e .) and, for the real-data harnesses, HF_TOKEN exported.
-# Every step logs to results/reproduce_paper.log and each harness writes its
-# own seed_manifest.csv + config.*.resolved.yaml next to its outputs.
+# Requirements: the pinned environment (pip install -r requirements.txt, then
+# pip install -e .) and HF_TOKEN exported for the real-data harnesses. Every
+# step logs to results/reproduce_paper.log and each harness writes its own
+# seed_manifest.csv + config.*.resolved.yaml next to its outputs.
 #
-# Interrupted runs: every step below (run/run_paper_sim/run_selection_sim/
-# run_sweep/run_stress_sweep) checkpoints each (N, method/mode, seed) job as
-# it finishes and skips + reloads already-finished jobs on the next attempt.
-# If this script is killed (Ctrl-C, SSH drop, VM preemption), just re-run it
-# unchanged — it resumes from the last completed job in the step it was on,
-# then continues to the remaining steps, instead of starting over.
+# Interrupted runs: every simulation step checkpoints per job and resumes, so
+# re-running this script unchanged continues from where it stopped.
+#
+# ORDER MATTERS — it is a dependency order, not a narrative one:
+#   * the fleet sweep (step 3) must precede v6, C3 and the C2 power run, which
+#     reuse its `moon2022` / `mclp_place` / `flat_fl` cells as paired baselines
+#     instead of recomputing them
+#   * the v6 C1 arm must precede the coverage-causality analysis, which needs
+#     both the observational slope and the intervention
+#
+# WHAT THIS SCRIPT DELIBERATELY DOES NOT RUN, and why (see
+# REPORTS/paper_data_manifest.md §5):
+#   * selection-isolation sweep — `paper_full` already isolates selection, since
+#     every selector there runs on identical placement. Regenerating a 45 h
+#     experiment to re-answer that would change no claim.
+#   * stress / robustness grid — dropped for cost. The fleet, coverage and N
+#     sweeps vary conditions across 27 cells. Stated as a limitation in the
+#     paper rather than silently omitted.
+#
+# Everything reported in the paper must trace to a row in
+# REPORTS/results_provenance.md.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -29,101 +43,112 @@ LOG=results/reproduce_paper.log
 exec > >(tee -a "$LOG") 2>&1
 
 echo "=== reproduce_paper.sh started $(date -Is) (smoke=$SMOKE) ==="
-
-if [[ $SMOKE -eq 1 ]]; then
-    TIER1_CFG=configs/smoke.yaml
-    STRESS_CFG=${STRESS_SMOKE_CFG:-configs/stress_test.yaml}
-else
-    TIER1_CFG=configs/tier1_core.yaml
-    STRESS_CFG=configs/stress_test.yaml
-fi
-
 step() { echo; echo "--- [$(date -Is)] $* ---"; }
 
-# 1. Tier-1 placement benchmark (PSO/GA/heuristics/literature baselines)
-step "Tier-1 placement grid ($TIER1_CFG)"
-python -m uavbench run --config "$TIER1_CFG"
-python -m uavbench analyze --config "$TIER1_CFG"
-python -m uavbench plot --config "$TIER1_CFG"
-step "Tier-1 significance (final_fitness, paired Wilcoxon + effect size + CIs)"
-python -m uavbench significance \
-    --config "$(python -c "import yaml;print(yaml.safe_load(open('$TIER1_CFG'))['results_dir'])")" \
-    --metric final_fitness
-step "Tier-1 MCLP optimality reference (PSO % of MILP-optimal coverage)"
-python -m uavbench mclp --config "$TIER1_CFG" --n-seeds 3
+# ---------------------------------------------------------------- 0. protocol
+# Analytic and dataset-level artifacts. Cheap, and they gate everything else:
+# if the altitude band and R_comm are incoherent, no simulation below is
+# interpretable (Defect 1).
+step "Protocol figure — coherent altitude-radius band"
+python scripts/plot_coherent_band.py --out results/protocol_figs
+
+step "Dataset characterisation (class skew, per-client skew, geography)"
+python scripts/dataset_stats.py --n 200 --out results/dataset_stats
+
+step "Sanity checks — the guards every later claim rests on"
+for chk in check_altitude_band check_tier1_link check_collapse_guard \
+           check_coverage_mode check_disjoint_coverage check_uav_weight_mode \
+           check_shard_diversity check_roster_control check_roster_width \
+           check_seed_alias check_tier1_resume check_placement_geometry; do
+    [[ -f "tests/sanity_checks/${chk}.py" ]] && python "tests/sanity_checks/${chk}.py"
+done
 
 if [[ $SMOKE -eq 1 ]]; then
-    # Reduced real-data stand-ins for the full harnesses.
-    step "Tier-2 smoke (real, reduced)"
-    python -m uavbench smoke_tier2
-    step "Coverage-sweep smoke (2 R_comm × 2 methods × 1 seed)"
+    step "Tier-1 smoke"
+    python -m uavbench run --config configs/smoke.yaml
+    python -m uavbench analyze --config configs/smoke.yaml
+    step "Coverage-sweep smoke"
     python -m uavbench run_coverage_sweep --config configs/coverage_smoke.yaml
-    step "End-to-end centralized smoke (tiny)"
+    step "End-to-end centralized smoke"
     python scripts/e2e_centralized.py --subsample 0.03 --n 20 --epochs 1 \
         --out results/e2e_smoke
-else
-    # 2. Full paper system simulation (real data; needs HF_TOKEN)
-    step "Full paper simulation (configs/paper_full.yaml)"
-    python -m uavbench run_paper_sim --config configs/paper_full.yaml
-    step "Paper-sim significance (accuracy + macro_f1, paired Wilcoxon)"
-    python -m uavbench significance --config results/paper_full --metric accuracy --reference proposed_hfl --correction-scope group
-    python -m uavbench significance --config results/paper_full --metric macro_f1 --reference proposed_hfl --correction-scope group
-
-    # 3. Selection-isolation benchmark (real data)
-    step "Selection isolation (configs/selection_isolation.yaml)"
-    python -m uavbench run_selection_sim --config configs/selection_isolation.yaml
-    step "Selection-isolation significance (accuracy + macro_f1)"
-    python -m uavbench significance --config results/selection_isolation --metric accuracy --reference ucb --correction-scope group
-    python -m uavbench significance --config results/selection_isolation --metric macro_f1 --reference ucb --correction-scope group
-
-    # 4. N-scalability sweep (real data)
-    step "N-scalability sweep (configs/tier2_sweep.yaml)"
-    python -m uavbench run_sweep --config configs/tier2_sweep.yaml
-
-    # 4b. Coverage-constrained sweep — placement quality vs macro_f1 as R_comm binds
-    step "Coverage-constrained sweep (configs/paper_coverage.yaml)"
-    python -m uavbench run_coverage_sweep --config configs/paper_coverage.yaml
-    step "Coverage-sweep significance (macro_f1, per R_comm)"
-    python -m uavbench significance --config results/paper_coverage --metric macro_f1 --reference proposed_hfl --correction-scope group
-
-    # 4c. End-to-end centralized validation of the frozen-feature simplification
-    step "End-to-end centralized (frozen vs trainable ResNet-18)"
-    python scripts/e2e_centralized.py --subsample 0.2 --n 200 --epochs 15 \
-        --out results/e2e_centralized
+    echo; echo "=== smoke finished $(date -Is) ==="
+    exit 0
 fi
 
-# 5. Synthetic stress-test sweep (robustness evidence; no HF_TOKEN needed)
-step "Stress-test sweep ($STRESS_CFG)"
-python -m uavbench run_stress_sweep --config "$STRESS_CFG"
-step "Stress-sweep significance (accuracy + macro_f1)"
-STRESS_RESULTS="$(python -c "import yaml;print(yaml.safe_load(open('$STRESS_CFG'))['results_dir'])")"
-python -m uavbench significance --config "$STRESS_RESULTS" --metric accuracy --reference proposed_hfl --correction-scope group
-# macro_f1 is the primary reported metric (fl.target_metric) — it was missing
-# here through the 2026-07-22 run, leaving the robustness claims on accuracy
-# alone, which barely separates methods under an ~0.8 majority class.
-python -m uavbench significance --config "$STRESS_RESULTS" --metric macro_f1 --reference proposed_hfl --correction-scope group
+# ------------------------------------------------------------- 1. placement
+# run_tier1_v5.sh rather than bare `uavbench run`: it deletes derived artifacts
+# before recomputing (a significance CSV is not overwritten by a rerun and will
+# otherwise sit stale beside fresh primary data), gates the vertical search, and
+# runs plot + significance itself.
+step "Tier-1 placement benchmark + ablations (scripts/run_tier1_v5.sh)"
+./scripts/run_tier1_v5.sh
 
-# 5b. Selection-pressure stress sweep — same grid with K*capacity < N so the
-# client-selection rule binds (stress_test.yaml has slots == N, leaving
-# selection inert). Skipped in smoke runs. See configs/stress_selection.yaml.
-if [[ $SMOKE -ne 1 ]]; then
-    step "Selection-pressure stress sweep (configs/stress_selection.yaml)"
-    python -m uavbench run_stress_sweep --config configs/stress_selection.yaml
-    step "Selection-pressure stress significance (accuracy + macro_f1)"
-    SELSTRESS_RESULTS="$(python -c "import yaml;print(yaml.safe_load(open('configs/stress_selection.yaml'))['results_dir'])")"
-    python -m uavbench significance --config "$SELSTRESS_RESULTS" --metric accuracy --reference proposed_hfl --correction-scope group
-    python -m uavbench significance --config "$SELSTRESS_RESULTS" --metric macro_f1 --reference proposed_hfl --correction-scope group
-fi
+step "Tier-1 MCLP optimality reference (grid-convergence 20/30/45)"
+python -m uavbench mclp --config configs/tier1_core.yaml --n-seeds 3
 
-# 6. Stage the paper artifact: seed manifests + resolved configs + significance tables
+# ------------------------------------------------------------------ 2. FL main
+step "FL main results (configs/paper_full.yaml)"
+python -m uavbench run_paper_sim --config configs/paper_full.yaml
+python scripts/gate_collapse.py results/paper_full || echo "  (degenerate cells — see gate output)"
+step "FL significance (macro_f1 + accuracy, Holm within N)"
+python -m uavbench significance --config results/paper_full --metric macro_f1 --reference proposed_hfl --correction-scope group
+python -m uavbench significance --config results/paper_full --metric accuracy --reference proposed_hfl --correction-scope group
+
+# --------------------------------------------------------------- 3. sweeps
+# The fleet sweep is a PREREQUISITE for steps 5-7, which reuse its cells.
+step "Fleet-size sweep (configs/paper_uav_count.yaml) — baseline for v6/C3/C2"
+python -m uavbench run_uav_sweep --config configs/paper_uav_count.yaml
+python scripts/gate_collapse.py results/paper_uav_count || echo "  (degenerate cells — expected at small K)"
+python -m uavbench plot --config configs/paper_uav_count.yaml || echo "  (plot failed, non-fatal)"
+
+step "Coverage-constrained sweep (configs/paper_coverage.yaml)"
+python -m uavbench run_coverage_sweep --config configs/paper_coverage.yaml
+python scripts/gate_collapse.py results/paper_coverage_v5 || echo "  (degenerate cells — expected below 3 km)"
+
+# ------------------------------------------------------------ 4. ablations
+step "Class-realism ablation (6 arms)"
+./scripts/run_class_realism.sh
+
+step "Roster-construction control (isolating ablation for the N-sweep)"
+./scripts/run_roster_control.sh
+
+# ------------------------------------------------- 5-7. interventions
+step "v6 2x2 — C1 reachable x C2 diversity, control first"
+./scripts/run_v6.sh
+
+step "C3 screen — which geometric hypothesis survives"
+./scripts/run_c3_screen.sh
+
+step "C3 confirmatory arm — redundancy-discounted coverage"
+./scripts/run_c3.sh
+
+step "C2 at n=25 + client-count generalisation"
+./scripts/run_c2_power.sh
+
+# ---------------------------------------------------------- 8. validation
+step "End-to-end centralized (frozen vs trainable ResNet-18)"
+python scripts/e2e_centralized.py --subsample 0.2 --n 200 --epochs 15 \
+    --out results/e2e_centralized
+
+# ------------------------------------------------------------ 9. analyses
+# These produce paper numbers and must not live in a scratch directory.
+step "Coverage causality — observational slope vs C1's intervention"
+python scripts/coverage_causality.py --out results/coverage_causality
+
+step "Power analysis — minimum detectable effect for every reported null"
+python scripts/power_analysis.py | tee results/power_analysis.txt
+
+# ----------------------------------------------------------- 10. artifact
 step "Staging results/paper_artifact"
 ARTIFACT=results/paper_artifact
+rm -rf "$ARTIFACT"          # else a stale copy of a deleted table survives here
 mkdir -p "$ARTIFACT"
 find results -maxdepth 2 \
-    \( -name "seed_manifest.csv" -o -name "config.*.resolved.yaml" -o -name "significance.csv" -o -name "significance_*.csv" \) \
+    \( -name "seed_manifest.csv" -o -name "config.*.resolved.yaml" \
+       -o -name "significance*.csv" -o -name "*_verdict.txt" \) \
     -not -path "$ARTIFACT/*" | while read -r f; do
-    dest="$ARTIFACT/$(dirname "${f#results/}" | tr '/' '_')_$(basename "$f")"
-    cp "$f" "$dest"
+    cp "$f" "$ARTIFACT/$(dirname "${f#results/}" | tr '/' '_')_$(basename "$f")"
 done
 echo "Artifact staged at $ARTIFACT ($(ls "$ARTIFACT" | wc -l) files)"
 
