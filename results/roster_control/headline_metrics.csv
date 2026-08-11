@@ -1,0 +1,5 @@
+method,N,accuracy_mean,accuracy_std,macro_f1_mean,macro_f1_std,f1_survived_mean,f1_survived_std,f1_collapsed_mean,f1_collapsed_std,f1_obstructed_mean,f1_obstructed_std,f1_missing_mean,f1_missing_std,n_seeds
+hfl_balanced_roster,30,0.696,0.1311,0.3416,0.0479,0.8088,0.1018,0.2223,0.0646,0.1797,0.0824,0.1556,0.1296,10
+hfl_balanced_roster,50,0.7659,0.1101,0.2895,0.0296,0.8633,0.0778,0.1254,0.0777,0.0995,0.0548,0.0699,0.0924,10
+hfl_balanced_roster,100,0.7715,0.0623,0.3752,0.0441,0.8694,0.0423,0.2562,0.0519,0.2064,0.0701,0.1688,0.0987,10
+hfl_balanced_roster,200,0.7771,0.0764,0.3369,0.0491,0.8745,0.0503,0.1953,0.0806,0.1665,0.0907,0.1113,0.0869,10

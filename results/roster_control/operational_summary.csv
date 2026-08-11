@@ -1,0 +1,2 @@
+method,coverage_pct,participation_pct,comm_mb_round,cumulative_energy_j,round_time_s,placement_fitness,jain_fairness,rounds_to_target
+hfl_balanced_roster,93.3792,25.5833,27.1235,3756008.8668,6.3568,0.7801,0.7055,58.0
