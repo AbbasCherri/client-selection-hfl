@@ -398,9 +398,22 @@ single cell.**
 - *Frozen features:* frozen ResNet-18 retains **82.3%** of end-to-end macro-F1
   (0.4113 vs 0.5000) at ~1/25 the compute. Report the ratio; disclose the 17.7%
   headroom.
-- *Roster construction:* **[PENDING]** — isolating ablation, proposed scoring
-  handed to the load-balanced roster builder, seed-aliased so the builder is the
-  only moving part.
+- *Roster construction:* the proposed selector fills each aircraft to capacity
+  before moving on; every literature selector load-balances. Handing the
+  proposed **scoring** to the load-balanced **builder**, with seeds aliased so
+  the builder is the only moving part, costs 0.021 macro-F1 at N=50 (p=0.0098),
+  0.012 at N=100 and 0.035 at N=200. **The proposed method's builder is the
+  better one, so the main table gave it a systematic advantage over every
+  literature selector — and it lost anyway.** Corrected for the builder the gap
+  to FedCS and Oort widens.
+
+  This control also falsified its own design premise, which we report because it
+  bears on how the main table should be read. We had expected N=200 to saturate
+  capacity (120 slots, 200 clients) and so serve as a cell where the two
+  builders must agree. Capacity never binds: participation holds at 22-26%, so
+  the selector fills 5.5% / 10.4% / 21.7% / 40.9% of available slots at
+  N=30/50/100/200. **There is no binding cell, and the confound is therefore
+  active in every cell of the main table**, in the direction stated above.
 - *Higher-powered replication:* **[PENDING]** — C2 at n=25 plus a client-count
   generalisation.
 
