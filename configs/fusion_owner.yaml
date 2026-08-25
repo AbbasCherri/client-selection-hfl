@@ -1,0 +1,94 @@
+# Fusion-ownership control — is the UAV TIER, not the selector, what loses?
+#
+# PRE-REGISTERED. Criteria below are fixed before any seed of this arm exists.
+# Committed before the run; do not edit after results land.
+#
+# The finding that motivates it
+# -----------------------------
+# At the coherent operating point (R_comm 5 km, K=20, capacity 6) EVERY
+# hierarchical arm loses to `flat_fl` in results/paper_full — proposed_hfl,
+# fedcs, oort, hfl_static and hfl_no_selection alike. proposed_hfl - flat_fl on
+# macro_f1 is -0.168 / -0.139 / -0.052 / -0.012 at N=30/50/100/200, and
+# results/paper_coverage_v5 shows that deficit closing monotonically with reach
+# (-0.165 at R=500 m -> -0.019 at R=5000 m). A deficit shared by every arm and
+# ordered by radius is a property of the TIER, not of any selection rule.
+#
+# What flat_fl actually is (federated.py, block-ownership branch)
+# --------------------------------------------------------------
+# flat_fl has no UAV tier, so `img_proj` STAYS AT INITIALISATION — it never
+# trains the image pathway at all. Its clients own struct_branch + fusion and it
+# sees imagery only through a frozen random projection of the cached features.
+# So the arm beating the full hierarchy is the one that declines to learn the
+# very pathway the hierarchy exists to provide. Per-class: flat_fl reaches
+# f1_obstructed 0.388 against proposed_hfl's 0.201.
+#
+# The mechanism this arm tests
+# ----------------------------
+# With fusion_owner: uav the UAV tier owns img_proj + fusion and trains BOTH on
+# the pooled shard of its assigned clients — `capacity` = 6 of them, all inside
+# one 5 km disc. Noto damage classes are strongly spatially clustered, so that
+# shard is close to single-class, and a fusion head trained on it and then
+# averaged across K=20 UAVs forgets. fusion_owner: client leaves the UAV only
+# img_proj and moves fusion to the clients, where it is globally averaged.
+#
+# Arms and contrasts (both fixed here, before running)
+# ----------------------------------------------------
+#   A = proposed_hfl, fusion_owner: uav     EXISTING, results/paper_full
+#   B = proposed_hfl, fusion_owner: client  NEW, this config
+#   C = flat_fl                             EXISTING, results/paper_full
+#
+#   C1 = B - A : does moving fusion OFF the UAV tier help?
+#   C2 = B - C : with fusion globally averaged, does UAV-trained img_proj beat
+#                flat_fl's frozen random projection?
+#
+# C1 and C2 decompose the deficit. C1 isolates UAV-owned FUSION; C2 isolates
+# UAV-trained IMG_PROJ. Every combination of outcomes is interpretable, which is
+# the property the failed placement arms lacked.
+#
+# Why NO seed_method_alias (unlike roster_control.yaml)
+# ----------------------------------------------------
+# Seed streams fold a hash of the METHOD NAME. This arm runs the method
+# `proposed_hfl` under a different config key, so it draws proposed_hfl's stream
+# already and pairs exactly against results/paper_full seed-for-seed. flat_fl
+# ignores fusion_owner entirely (no UAV tier), so C is valid unrecomputed.
+# Neither A nor C is recomputed — that is what keeps both pairings exact.
+#
+# Power, stated in advance
+# ------------------------
+# n=10 gives a median MDE of ~0.034 macro-F1 on this harness. The A-C gaps are
+# 0.168 / 0.139 / 0.052 / 0.012, so N=30 and N=50 are well powered, N=100 is
+# marginal and N=200 SITS BELOW THE MDE AND CANNOT RESOLVE. A null at N=200 is
+# uninformative and will be reported as such, not as "no effect".
+#
+# Decision rules, fixed before the seeds exist
+# --------------------------------------------
+#   1. C1 > 0 and Holm-significant at >= 3 of 4 N
+#        -> UAV-owned fusion IS the mechanism.
+#   2. C2 >= 0 (not significantly negative) at >= 3 of 4 N
+#        -> the UAV image tier at least pays for itself.
+#   3. C1 null
+#        -> UAV-owned fusion is NOT the mechanism. The deficit is the image
+#           pathway or the sharding, and the paper reports the hierarchy as
+#           net-negative at coherent radius (scope-condition framing).
+#
+# A POSITIVE RESULT HERE IS A DISCOVERY, NOT A WIN. If rule 1 fires it changes
+# the proposed system's architecture, so it licenses exactly one thing: rerunning
+# the FULL v5 table for EVERY baseline under fusion_owner: client, plus a
+# re-tune, before any comparative claim is made. Reporting "we beat fedcs" off
+# this arm alone would be selecting the configuration after seeing the answer —
+# the error the K=10 C2 collapse already demonstrated on this project.
+#
+# Stopping rule: 10 seeds (0-9), no optional stopping, no extension, no post-hoc
+# choice of which N to report.
+#
+# 4 N-values x 1 method x 10 seeds = 40 jobs, ~3-4 h on 12 vCPU.
+extends: paper_full.yaml
+
+name: fusion_owner
+results_dir: results/fusion_owner
+
+fl:
+  fusion_owner: client   # the whole point of this arm; validated in federated.py
+
+methods:
+  - proposed_hfl

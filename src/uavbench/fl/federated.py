@@ -452,6 +452,33 @@ def _seed_method_for(fl: dict, method: str) -> str:
     return str(alias) if alias else str(method)
 
 
+def _block_ownership(
+    fusion_owner: str, has_uav_tier: bool
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Which tier trains which model blocks: (uav_blocks, client_blocks).
+
+    Hierarchical methods let the UAV tier own img_proj + fusion (both modalities
+    co-located there) and clients own struct_branch alone. `fusion_owner:
+    client` leaves the UAV only img_proj and moves fusion to the clients, where
+    it is globally averaged instead of being trained on one UAV's pooled shard.
+
+    flat_fl has no UAV tier, so its clients own struct_branch + fusion and
+    img_proj STAYS AT INITIALISATION — it never trains the image pathway at
+    all, which is precisely the limitation the hierarchy exists to remove.
+
+    Kept as a pure function so the contract is testable exactly, without
+    depending on a fixture being strong enough for the choice to show up in a
+    macro-F1 curve. It is not: on the synthetic fixture every setting collapses
+    to the same degenerate score, so an outcome-based guard here passes
+    vacuously.
+    """
+    if not has_uav_tier:
+        return (), ("struct_branch", "fusion")
+    if fusion_owner == "uav":
+        return ("img_proj", "fusion"), ("struct_branch",)
+    return ("img_proj",), ("struct_branch", "fusion")
+
+
 def _placement_geometry(
     client_coords: dict[int, tuple[float, float]],
     uav_pos_m: np.ndarray,
@@ -1443,6 +1470,13 @@ def run_full_hfl(cfg: dict) -> dict:
     lr_decay = str(fl.get("lr_decay", "cosine")).lower()  # "cosine" | "none"
     ema_decay = float(fl.get("ema_decay", 0.9))  # 0 → evaluate the raw global model
     fusion_owner = str(fl.get("fusion_owner", "uav")).lower()  # "uav" | "client"
+    if fusion_owner not in ("uav", "client"):
+        # Line ~1639 branches on `== "uav"`, so ANY other string — a typo,
+        # a stray "server" — silently selects the client branch and
+        # produces a clean, wrong table. Fail instead.
+        raise ValueError(
+            f"fl.fusion_owner must be 'uav' or 'client', got {fusion_owner!r}"
+        )
     reselect_every = int(fl.get("reselect_every", 1))  # selection cadence (≠ placement T_sel)
     # Class-aware placement biases UAV coverage toward clients holding rare
     # classes. It carries an information assumption that class-aware *selection*
@@ -1635,12 +1669,7 @@ def run_full_hfl(cfg: dict) -> dict:
         # still own struct_branch + fusion (img_proj stays at init — it cannot
         # use imagery, which is precisely the limitation the hierarchy removes).
         has_uav_tier = placement_method is not None
-        if has_uav_tier:
-            uav_blocks = ("img_proj", "fusion") if fusion_owner == "uav" else ("img_proj",)
-            client_blocks = ("struct_branch",) if fusion_owner == "uav" else ("struct_branch", "fusion")
-        else:
-            uav_blocks = ()
-            client_blocks = ("struct_branch", "fusion")
+        uav_blocks, client_blocks = _block_ownership(fusion_owner, has_uav_tier)
 
         # EMA-of-global evaluation model (A4) and server-momentum buffer (A3),
         # both per-method (reset each method).
