@@ -123,3 +123,35 @@ work. That is the search this file exists to prevent.
 | arm | launched | verdict | gates cleared |
 |---|---|---|---|
 | H1 fusion ownership | 2026-08-25 21:19 | pending | — |
+
+### H1 verdict — FAILS (2026-08-25)
+
+`results/fusion_owner_verdict.txt`. Criteria fixed in `configs/fusion_owner.yaml`
+at commit `c2b463bef`, before the first seed existed. n=10, no optional stopping.
+
+**Both criteria fail 0/4. Rule 3 fires: UAV-owned fusion is NOT the mechanism.**
+
+C1 (client-fusion minus uav-fusion): -0.098 / -0.085 / -0.156 / -0.154 at
+N=30/50/100/200, every one Holm-significant in the WRONG direction.
+
+**The arm COLLAPSED — the collapse gate fired in 4/4 cells.** At N=200,
+macro-F1 0.2245 against a constant-predictor baseline of 0.2243 (margin
++0.0001, need >= 0.05) with at least one class never predicted. So C1 and C2
+are not graded effect sizes; they are comparisons against a degenerate arm and
+must be reported that way. **The scorer's printed line "UAV-trained img_proj is
+worse than flat_fl's frozen random projection" is NOT supportable** — it is
+confounded by the collapse, and is retracted here.
+
+What this does establish: co-locating img_proj + fusion at the UAV tier is
+**load-bearing and correct as designed**. Moving fusion to the client tier does
+not merely cost accuracy, it destroys learning.
+
+Mechanism, consistent with an already-established result rather than invented
+after the fact: a UAV trains fusion on the POOLED shard of its `capacity`
+clients, whereas a client trains it on its own shard alone — the narrowest,
+most single-class pool available. The capacity ladder in `results/probe_topology`
+already showed narrow pools unlearn (cap<=3 collapses below the floor). H1 moved
+fusion to the narrowest pool in the system and got the same signature.
+
+This **strengthens** the shard-width and shard-diversity hypotheses (H3, H2)
+rather than motivating a new arm. No arm is added under §6.
