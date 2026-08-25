@@ -40,10 +40,11 @@ if [[ -z "${HF_TOKEN:-}" && -f "$HOME/.hf_env" ]]; then
 fi
 [[ -n "${HF_TOKEN:-}" ]] || { echo "HF_TOKEN missing"; exit 1; }
 
-# id | results-dir name | config | human label
+# id | results-dir name | config | scorer script | human label
 READY_ARMS=(
-    "H1|fusion_owner|configs/fusion_owner.yaml|fusion ownership"
-    "H3|capacity12|configs/capacity12.yaml|capacity above tested ceiling"
+    "H1|fusion_owner|configs/fusion_owner.yaml|scripts/score_arm.py|fusion ownership"
+    "H3|capacity12|configs/capacity12.yaml|scripts/score_arm.py|capacity above tested ceiling"
+    "H5|selectors_k10|configs/selectors_k10.yaml|scripts/score_selectors.py|selector separation at K=10 (160 jobs)"
 )
 # Arms that must not be auto-run: they need code or a judgement call.
 BLOCKED_ARMS=(
@@ -51,28 +52,34 @@ BLOCKED_ARMS=(
     "P1|retune_5km|NEEDS_DECISION|re-tune every method at 5 km (runs LAST, under the final architecture)"
 )
 
+# EVERY variable here is `local`. An earlier version reused the same names the
+# main loop uses (id/name/cfg/label) without declaring them, so calling
+# write_state from inside that loop silently rebound them to the LAST BLOCKED
+# entry — the sweep still ran, then gate_collapse and the scorer were handed a
+# non-existent arm and the driver reported "queue exhausted" looking healthy.
 write_state() {
+    local entry _id _name _cfg _scorer _label _why _status _jobs
     {
         echo "UPDATED=$(date -Is)"
         echo "DRIVER_PID=$$"
         for entry in "${READY_ARMS[@]}"; do
-            IFS='|' read -r id name cfg label <<<"$entry"
-            local_status="QUEUED"
-            if [[ -f "results/${name}_verdict.txt" ]]; then
-                if grep -q "PASSES its pre-registered criteria" "results/${name}_verdict.txt" 2>/dev/null; then
-                    local_status="DONE_PASS"
+            IFS='|' read -r _id _name _cfg _scorer _label <<<"$entry"
+            _status="QUEUED"
+            if [[ -f "results/${_name}_verdict.txt" ]]; then
+                if grep -q "PASSES its pre-registered criteria" "results/${_name}_verdict.txt" 2>/dev/null; then
+                    _status="DONE_PASS"
                 else
-                    local_status="DONE_FAIL"
+                    _status="DONE_FAIL"
                 fi
-            elif pgrep -f "config ${cfg}" >/dev/null 2>&1 || [[ "${RUNNING_ARM:-}" == "$name" ]]; then
-                local_status="RUNNING"
+            elif pgrep -f "config ${_cfg}" >/dev/null 2>&1 || [[ "${RUNNING_ARM:-}" == "$_name" ]]; then
+                _status="RUNNING"
             fi
-            jobs=$(find "results/${name}" -name "fullsim_rounds.parquet" 2>/dev/null | wc -l)
-            echo "${id} ${name} ${local_status} jobs=${jobs}/40 -- ${label}"
+            _jobs=$(find "results/${_name}" -name "fullsim_rounds.parquet" 2>/dev/null | wc -l)
+            echo "${_id} ${_name} ${_status} jobs=${_jobs} -- ${_label}"
         done
         for entry in "${BLOCKED_ARMS[@]}"; do
-            IFS='|' read -r id name why label <<<"$entry"
-            echo "${id} ${name} ${why} -- ${label}"
+            IFS='|' read -r _id _name _why _label <<<"$entry"
+            echo "${_id} ${_name} ${_why} -- ${_label}"
         done
     } > "$STATE"
 }
@@ -99,28 +106,36 @@ say "===== programme driver up ====="
 write_state
 wait_for_running_sweep
 
-for entry in "${READY_ARMS[@]}"; do
-    IFS='|' read -r id name cfg label <<<"$entry"
+# ARM_* names are deliberately distinct from anything a helper uses. The bug
+# noted above turned a clobbered loop variable into a clean-looking success.
+for ARM_ENTRY in "${READY_ARMS[@]}"; do
+    IFS='|' read -r ARM_ID ARM_NAME ARM_CFG ARM_SCORER ARM_LABEL <<<"$ARM_ENTRY"
 
-    if [[ -f "results/${name}_verdict.txt" ]]; then
-        say "$id ($name) already has a verdict — skipping"
+    if [[ -f "results/${ARM_NAME}_verdict.txt" ]]; then
+        say "$ARM_ID ($ARM_NAME) already has a verdict — skipping"
         continue
     fi
 
-    say "$id ($name) — $label"
-    export RUNNING_ARM="$name"; write_state
+    say "$ARM_ID ($ARM_NAME) — $ARM_LABEL"
+    export RUNNING_ARM="$ARM_NAME"; write_state
 
-    if python -m uavbench run_paper_sim --config "$cfg"; then
-        python scripts/gate_collapse.py "results/${name}" \
-            || say "  !! degenerate cells in $name — see gate output"
-        python scripts/score_arm.py "$name" | tee "results/${name}_verdict.txt"
+    if python -m uavbench run_paper_sim --config "$ARM_CFG"; then
+        # The sweep can succeed while post-processing targets the wrong tree.
+        # Refuse to gate or score anything that is not this arm's own output.
+        if [[ ! -d "results/${ARM_NAME}" ]]; then
+            say "  !! ${ARM_NAME} ran but results/${ARM_NAME} does not exist — refusing to score"
+        else
+            python scripts/gate_collapse.py "results/${ARM_NAME}" \
+                || say "  !! degenerate cells in $ARM_NAME — see gate output"
+            python "$ARM_SCORER" "$ARM_NAME" | tee "results/${ARM_NAME}_verdict.txt"
+        fi
     else
-        say "  !! $id ($name) FAILED — leaving no verdict so it retries next pass"
+        say "  !! $ARM_ID ($ARM_NAME) FAILED — leaving no verdict so it retries next pass"
     fi
 
     unset RUNNING_ARM
     write_state
-    commit_results "Add ${name} results $(date -Is)"
+    commit_results "Add ${ARM_NAME} results $(date -Is)"
 done
 
 write_state

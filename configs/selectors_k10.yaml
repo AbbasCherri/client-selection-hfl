@@ -1,0 +1,83 @@
+# H5 — do the SELECTORS separate once UAV shards are wide enough?
+#
+# PRE-REGISTERED. Criteria fixed before any seed of this arm exists.
+#
+# Why this arm exists, and why it is not post-hoc K-shopping
+# ----------------------------------------------------------
+# results/paper_uav_count (existing, 10 seeds, K in {5,10,15,20,30}) shows
+# macro-F1 for proposed_hfl falling monotonically in K while mean shard width
+# rises monotonically as K falls:
+#
+#     K    macro-F1  mean_shard_clients  coverage%
+#     5     0.3859        4.52             22.1
+#    10     0.3854        3.95             38.1
+#    15     0.3686        3.65             51.9
+#    20     0.3552        3.13             60.1     <- paper_full operating point
+#    30     0.3438        2.58             73.1
+#
+# flat_fl is 0.3929 at EVERY K (it has no UAV tier), so the hierarchy reaches
+# parity at low K (-0.007, n.s.) and loses significantly at K=30 (-0.049,
+# Holm p=0.0098). H3 established the mechanism: at K=20 the average UAV pools
+# 3.1 clients, and at N=30 only 1.18 — a one-client shard makes the UAV tier a
+# lossy extra aggregation layer that pools nothing.
+#
+# **That sweep contains NO selector baselines** — its methods are placement
+# variants plus flat_fl and proposed_hfl. So it cannot answer, and has not
+# answered, the question this paper is actually about: whether the proposed
+# SELECTION rule beats fedcs and oort. K is therefore chosen here on a mediator
+# (shard width) measured in data that is structurally incapable of answering the
+# selector question. That is an operating-point choice, not outcome selection.
+#
+# The manipulation, stated as one lever
+# -------------------------------------
+# K: 20 -> 10 and capacity: 6 -> 12, holding K x capacity = 120 slots EXACTLY as
+# in paper_full. Total selection capacity is unchanged; only clients-per-UAV
+# moves. Capacity is raised alongside K purely so it cannot bind (H3 measured it
+# as non-binding at cap=6, and at K=10 the 60 slots that cap=6 would give WOULD
+# bind at N=200 with ~70 clients selected). This is one lever — shard width —
+# not two.
+#
+# Cost of the trade, stated in advance: coverage falls from ~60% to ~38%. If the
+# selectors separate here, the paper's claim becomes conditional on operating in
+# the pooling-limited regime, and that condition must be reported, not buried.
+#
+# Criteria — ALL THREE required, fixed before the seeds exist
+# -----------------------------------------------------------
+#   1. proposed_hfl Holm-beats fedcs at >= 3 of 4 N
+#   2. proposed_hfl Holm-beats oort  at >= 3 of 4 N
+#   3. proposed_hfl is NOT significantly worse than flat_fl at >= 3 of 4 N
+#
+# Criteria 1 and 2 are the paper's actual claim. Criterion 3 exists because a
+# selector that wins its own comparison while still losing to no-hierarchy-at-all
+# has not earned a hierarchical framing.
+#
+# A pass is a DISCOVERY, not a win. PREREGISTRATION.md §2 then requires
+# replication on fresh seeds 10-24 and Holm survival in the final reported
+# family; §3 P2 requires the full table regenerated at this operating point and
+# §3 P1 requires every method re-tuned here, since the current recipes were
+# searched at R_comm = 20 km and K = 20.
+#
+# If criteria 1 and 2 fail: the selection rule does not separate from the
+# literature even under favourable pooling, and STOP-EXHAUSTED applies. Do NOT
+# try further K values — the sweep above already spans 5 to 30 and a search over
+# operating points until one passes is the optional stopping this programme
+# forbids.
+#
+# Stopping rule: 10 seeds (0-9), no optional stopping, no post-hoc choice of N
+# or of which baseline to report.
+#
+# 4 methods x 4 N x 10 seeds = 160 jobs, ~4 h on 12 vCPU.
+extends: paper_full.yaml
+
+name: selectors_k10
+results_dir: results/selectors_k10
+
+fl:
+  K: 10
+  capacity: 12   # holds K x capacity = 120 slots, identical to paper_full
+
+methods:
+  - proposed_hfl
+  - fedcs
+  - oort
+  - flat_fl

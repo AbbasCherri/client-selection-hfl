@@ -188,3 +188,32 @@ composition (H2).
 The lever this identifies is **clients pooled per UAV**, which is set by K and
 by participation, NOT by capacity. Whether that is already answered by the
 existing fleet sweep is checked before any new arm is written (§6).
+
+### H5 — selector separation at K=10 (added 2026-08-25 under §6)
+
+Added under the §6 rule: derived from a MEASURED mediator that moved.
+`mean_shard_clients` in results/paper_uav_count runs 4.52 -> 2.58 as K goes
+5 -> 30, and proposed_hfl's macro-F1 falls monotonically with it (0.3859 ->
+0.3438) while coverage rises (22% -> 73%). flat_fl is 0.3929 at every K.
+
+Criteria are in `configs/selectors_k10.yaml`, committed before the first seed.
+
+**Why this is an operating-point choice and not post-hoc K-shopping:** the fleet
+sweep that identifies K contains NO selector baselines — its methods are
+placement variants plus flat_fl and proposed_hfl. It is structurally incapable
+of answering whether proposed_hfl beats fedcs or oort, which is the question H5
+asks. K is selected on shard width, a mediator, in data that cannot see the
+outcome being tested.
+
+One lever: K 20 -> 10 with capacity 6 -> 12, holding K x capacity = 120 slots
+exactly as in paper_full. Capacity moves only so it cannot bind (H3 measured
+cap=6 as non-binding, but 60 slots at K=10 WOULD bind at N=200).
+
+All three criteria required: beat fedcs at >=3 of 4 N, beat oort at >=3 of 4 N,
+and not be significantly worse than flat_fl. Criterion 3 exists because a
+selector that wins its own comparison while losing to no-hierarchy-at-all has
+not earned a hierarchical framing.
+
+If criteria 1-2 fail, STOP-EXHAUSTED applies. **No further K values may be
+tried** — the sweep already spans 5 to 30, and searching operating points until
+one passes is exactly what §1 forbids.
