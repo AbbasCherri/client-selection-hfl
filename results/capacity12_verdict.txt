@@ -1,0 +1,36 @@
+
+=== C1  B-A   capacity12 minus paper_full (proposed_hfl) ===
+    N       diff          p   Holm  pairs  note
+   30    -0.0169     0.1602  False     10  below MDE - uninformative on small effects
+   50    -0.0012     1.0000  False     10  below MDE - uninformative on small effects
+  100    -0.0129     1.0000  False     10  below MDE - uninformative on small effects
+  200    +0.0140     0.6250  False     10  below MDE - uninformative on small effects
+
+=== C2  B-C   capacity12 (proposed_hfl) minus flat_fl ===
+    N       diff          p   Holm  pairs  note
+   30    -0.1847     0.0020   True     10  
+   50    -0.1403     0.0020   True     10  
+  100    -0.0648     0.0059   True     10  
+  200    +0.0018     0.6250  False     10  below MDE - uninformative on small effects
+
+=== reference  A-C   paper_full proposed_hfl minus flat_fl (the deficit this arm targets) ===
+   30    -0.1678  p=0.0020
+   50    -0.1391  p=0.0020
+  100    -0.0519  p=0.0039
+  200    -0.0121  p=0.2754
+
+==================================================================
+criterion 1  C1 Holm-positive at >=3 of 4 N : 0/4  FAIL
+criterion 2  C2 not sig-negative at >=3 of 4 N: 1/4  FAIL
+==================================================================
+
+VERDICT: capacity12 FAILS its pre-registered criteria (rule 3).
+What that failure means for the mechanism is stated in this arm's
+own config, fixed before the run. It is NOT a licence to add a new
+arm: see PREREGISTRATION.md §6.
+
+Gap closed vs the deficit this arm targets (C2 - reference):
+  N=30   arm -0.1847 vs deficit -0.1678  -> -10% of the gap
+  N=50   arm -0.1403 vs deficit -0.1391  -> -1% of the gap
+  N=100  arm -0.0648 vs deficit -0.0519  -> -25% of the gap
+  N=200  arm +0.0018 vs deficit -0.0121  -> +115% of the gap

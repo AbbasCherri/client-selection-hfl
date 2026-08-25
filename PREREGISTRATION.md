@@ -155,3 +155,36 @@ fusion to the narrowest pool in the system and got the same signature.
 
 This **strengthens** the shard-width and shard-diversity hypotheses (H3, H2)
 rather than motivating a new arm. No arm is added under §6.
+
+### H3 verdict — FAILS, and the intervention was INERT (2026-08-25)
+
+`results/capacity12_verdict.txt`. Criteria fixed in `configs/capacity12.yaml`
+at `2e9de421b`, before the first seed. All 4 cells CLEARED the collapse gate,
+so unlike H1 this is a clean comparison.
+
+Both criteria fail. C1 (cap12 - cap6): -0.017 / -0.001 / -0.013 / +0.014,
+none Holm-significant, all below MDE. Gap closed: **-10% / -1% / -25%** at
+N=30/50/100 — it moved the wrong way.
+
+**The manipulation did not manipulate.** `mean_shard_clients` at capacity 6 is
+already only **1.18 / 1.48 / 2.32 / 3.79** at N=30/50/100/200. Nothing was
+reaching the cap of 6, so raising it to 12 changed shard width by +0.0000 at
+N=30 and -0.0018 at N=50. Shard class entropy moved by <0.016 everywhere.
+
+So H3 is **not** evidence that shard width does not matter. It is a failed
+intervention on a non-binding constraint, and it must not be reported as a null
+about width. The design error was mine and was avoidable: the roster-control
+result already established that capacity never binds here, because participation
+sits near 25% and the selector fills only a fraction of K x capacity slots.
+
+**What it did measure, and this is the substantive finding:** with K=20 at a
+5 km coherent radius, the average UAV pools **one to four clients**. At N=30 it
+is 1.18. A one-client shard means the UAV tier performs no pooling at all — it
+is a lossy extra aggregation layer between a client and the server. That is a
+sufficient explanation for why `flat_fl`, which has no such layer, beats every
+hierarchical arm, and it is independent of both fusion ownership (H1) and class
+composition (H2).
+
+The lever this identifies is **clients pooled per UAV**, which is set by K and
+by participation, NOT by capacity. Whether that is already answered by the
+existing fleet sweep is checked before any new arm is written (§6).
