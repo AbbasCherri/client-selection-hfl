@@ -1,0 +1,72 @@
+# H3 — capacity above the tested ceiling. Pre-registered in PREREGISTRATION.md §4.
+#
+# Criteria fixed before any seed of this arm exists. Committed before the run.
+#
+# The gap in the existing evidence
+# --------------------------------
+# results/probe_topology swept capacity as a LADDER AT FIXED SLOTS:
+#
+#     K    cap  slots  final macro-F1
+#    120    1    120     0.199  unlearns
+#     60    2    120     0.274  unlearns
+#     40    3    120     0.286  unlearns
+#     30    4    120     0.379  learns
+#     20    6    120     0.395  learns   <- the operating point
+#
+# Every rung traded capacity against fleet size to hold K x cap = 120. So the
+# ladder shows capacity ORDERS the outcome, but it never measured cap > 6 at
+# K = 20 — the direction the trend points. The one off-ladder control (K=60,
+# cap=6, 360 slots) raised slots without raising WIDTH and did not help (0.367),
+# which is consistent with width mattering and slots not.
+#
+# Mechanism: per-UAV shard width. The UAV tier trains img_proj+fusion on the
+# POOLED SHARD of its assigned clients; capacity is exactly how many clients
+# that shard pools. Noto damage classes are strongly spatially clustered, so a
+# 6-client shard inside one 5 km disc is close to single-class. Doubling
+# capacity doubles the pool the fusion head sees.
+#
+# K stays at 20 so the fleet, the coverage and the placement problem are
+# UNCHANGED and capacity is the only moving part. 20 x 12 = 240 slots.
+#
+# Arms and contrasts
+# ------------------
+#   A = proposed_hfl, capacity 6   EXISTING, results/paper_full (not recomputed)
+#   B = proposed_hfl, capacity 12  NEW, this config
+#   C = flat_fl                    EXISTING, results/paper_full (not recomputed)
+#
+#   C1 = B - A : does a wider shard help?
+#   C2 = B - C : does the hierarchy beat no-hierarchy once shards are wide?
+#
+# Both pairings are exact without a seed alias: this arm runs the method
+# `proposed_hfl`, so it draws proposed_hfl's stream seed-for-seed. flat_fl is
+# registered as (None, "all", ...) — no placement tier and it selects ALL
+# clients — so it is capacity-independent and valid unrecomputed.
+#
+# Decision rules, fixed before the seeds exist
+# --------------------------------------------
+#   1. C1 > 0 and Holm-significant at >= 3 of 4 N -> shard width IS a lever
+#   2. C2 >= 0 (not significantly negative) at >= 3 of 4 N -> the hierarchy pays
+#   3. C1 null -> width is not the lever within this range; do NOT keep raising
+#      capacity looking for a threshold. One more rung is a test; a search over
+#      rungs until one passes is the optional stopping this programme forbids.
+#
+# N=200 is pre-declared underpowered for C2 (the A-C gap there is 0.012 against
+# a median MDE of ~0.034 at n=10). A null there is uninformative, not "no effect".
+#
+# A pass here is a DISCOVERY, not a win: it changes the operating point, so
+# PREREGISTRATION.md §3 P2 requires the full table rerun for every baseline at
+# the new capacity, plus a re-tune, before any comparative claim.
+#
+# Stopping rule: 10 seeds (0-9), no optional stopping, no post-hoc choice of N.
+#
+# 4 N-values x 1 method x 10 seeds = 40 jobs, ~3-4 h on 12 vCPU.
+extends: paper_full.yaml
+
+name: capacity12
+results_dir: results/capacity12
+
+fl:
+  capacity: 12   # the only moving part; K stays 20
+
+methods:
+  - proposed_hfl
