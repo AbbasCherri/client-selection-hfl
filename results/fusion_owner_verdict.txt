@@ -1,0 +1,34 @@
+
+=== C1  B-A   client-fusion  minus  uav-fusion (proposed_hfl) ===
+    N       diff          p   Holm  pairs  note
+   30    -0.0982     0.0020   True     10  
+   50    -0.0848     0.0020   True     10  
+  100    -0.1563     0.0020   True     10  
+  200    -0.1540     0.0020   True     10  
+
+=== C2  B-C   client-fusion (proposed_hfl)  minus  flat_fl ===
+    N       diff          p   Holm  pairs  note
+   30    -0.2660     0.0020   True     10  
+   50    -0.2239     0.0020   True     10  
+  100    -0.2082     0.0020   True     10  
+  200    -0.1661     0.0020   True     10  
+
+=== reference  A-C   uav-fusion (proposed_hfl) minus flat_fl ===
+   30    -0.1678  p=0.0020
+   50    -0.1391  p=0.0020
+  100    -0.0519  p=0.0039
+  200    -0.0121  p=0.2754
+
+==============================================================
+criterion 1  C1 Holm-positive at >=3 of 4 N : 0/4  FAIL
+criterion 2  C2 not sig-negative at >=3 of 4 N: 0/4  FAIL
+==============================================================
+
+VERDICT: rule 3 - UAV-owned fusion is NOT the mechanism.
+The deficit lies in the image pathway itself or in the geographic
+sharding. Report the hierarchy as net-negative at coherent radius
+(scope-condition framing).
+
+C2 significantly negative: UAV-trained img_proj is WORSE than
+flat_fl's frozen random projection. The image tier does not pay
+for itself at this radius regardless of who owns fusion.

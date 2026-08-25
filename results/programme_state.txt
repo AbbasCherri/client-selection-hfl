@@ -1,0 +1,6 @@
+UPDATED=2026-08-25T22:24:11+00:00
+DRIVER_PID=4685
+H1 fusion_owner RUNNING jobs=39/40 -- fusion ownership
+H3 capacity12 QUEUED jobs=0/40 -- capacity above tested ceiling
+H2 shard_diversity NEEDS_IMPL -- shard-diversity assignment builder
+P1 retune_5km NEEDS_DECISION -- re-tune every method at 5 km (runs LAST, under the final architecture)
