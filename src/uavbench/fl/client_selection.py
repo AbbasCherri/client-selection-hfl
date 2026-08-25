@@ -375,7 +375,7 @@ class ClientSelector:
             )
             return self._record_selection(selected, round_num)
 
-        if mode not in ("ucb", "ucb_noclass", "ucb_balanced"):
+        if mode not in ("ucb", "ucb_noclass", "ucb_balanced", "ucb_diversity"):
             raise ValueError(f"unknown selection mode: {mode!r}")
 
         # ── UCB pipeline ────────────────────────────────────────────────
@@ -429,6 +429,25 @@ class ClientSelector:
             selected = self._greedy_assign(
                 eligible_ids, eligible, static, uav_capacity,
                 client_coords, uav_coords_latlon, R_comm,
+            )
+            return self._record_selection(selected, round_num)
+
+        if mode == "ucb_diversity":
+            # A third roster-construction control, alongside `ucb_balanced`
+            # above. `ucb_balanced` isolates "our scores are better" from
+            # "our rosters make wider shards" by keeping the scores and
+            # swapping in the literature selectors' load-balanced builder.
+            # This isolates a different axis: it keeps the SAME scores *and*
+            # the SAME selected client set (obtained by delegating straight
+            # to `_class_coverage_assign`, so there is no second selection
+            # implementation that could drift from the proposed one) and
+            # varies only WHICH UAV each already-selected client lands on —
+            # maximising the mean per-UAV class entropy of the resulting
+            # shards instead of accepting the proposed walk order. See
+            # `_ucb_diversity_assign`.
+            selected = self._ucb_diversity_assign(
+                eligible_ids, eligible, static, class_counts, class_scarcity,
+                uav_capacity, client_coords, uav_coords_latlon, R_comm,
             )
             return self._record_selection(selected, round_num)
 
@@ -803,6 +822,116 @@ class ClientSelector:
                 base = cov(acc)
                 self._counts[cid] += 1
         return selected
+
+    def _ucb_diversity_assign(
+        self,
+        eligible_ids: list[int],
+        eligible: dict[int, int],
+        static: np.ndarray,
+        class_counts: dict[int, np.ndarray] | None,
+        class_scarcity: np.ndarray | None,
+        uav_capacity: int,
+        client_coords: dict[int, tuple[float, float]],
+        uav_coords_latlon: list[tuple[float, float]],
+        R_comm: float,
+    ) -> dict[int, int]:
+        """Roster-construction control: identical SELECTION, different UAV
+        ASSIGNMENT (the `ucb_diversity` mode).
+
+        Delegates selection straight to `_class_coverage_assign` with the
+        exact arguments the proposed `ucb` mode would use — same utility,
+        reputation, beta blend, UCB bonus and class histogram — so the set of
+        clients selected this round is *identical* to the proposed system's;
+        this function never decides who participates, only which UAV a
+        participant lands on. That avoids a second, potentially-diverging
+        selection implementation: there is nothing here that could drift from
+        `ucb`'s roster except the assignment step below.
+
+        The assignment is the simple greedy the roster is required to use:
+        walk the selected clients in the deterministic order
+        `_class_coverage_assign` produced them (Python dicts preserve
+        insertion order; no new randomness is drawn here — the only RNG use
+        in this whole call happened inside the delegated selection step), and
+        place each one on the feasible, non-full UAV whose *current* class
+        histogram gains the most normalised entropy from that client's own
+        histogram. Ties broken by lowest current load, then smallest
+        distance — the same tie-break every other builder in this module
+        uses. "Feasible" is the same notion `_class_coverage_assign` and
+        `_greedy_assign` use: within `R_comm` of the UAV's actual position
+        when positions are known, or the client's single precomputed
+        covering UAV for legacy/flat topologies that supply none.
+
+        Falls back to whatever `_class_coverage_assign` produced verbatim
+        when there is no class histogram to diversify against (mirroring its
+        own fallback to `_greedy_assign` in that case) — with nothing to
+        maximise, there is nothing for this builder to do differently. A
+        client is left unassigned only when literally no feasible non-full
+        UAV remains for it at the point it is processed — the same "skipped
+        if no UAV is feasible" rule as Algorithm 4.
+        """
+        base = self._class_coverage_assign(
+            eligible_ids, eligible, static, class_counts, class_scarcity,
+            uav_capacity, client_coords, uav_coords_latlon, R_comm,
+        )
+        if class_counts is None or class_scarcity is None or not base:
+            return base
+
+        # `base.keys()` is the roster this call must not alter; iterate it in
+        # the exact order `_class_coverage_assign` produced it.
+        selected_ids = list(base.keys())
+        scarcity = np.asarray(class_scarcity, dtype=np.float64)
+        n_cls = scarcity.shape[0]
+        log_c = math.log(n_cls) if n_cls > 1 else 1.0
+
+        dist: np.ndarray | None = None
+        if uav_coords_latlon:
+            dist = haversine_matrix(
+                np.asarray([client_coords[cid] for cid in selected_ids]),
+                np.asarray(uav_coords_latlon),
+            )
+            n_uav = len(uav_coords_latlon)
+        else:
+            n_uav = (max(eligible.values()) + 1) if eligible else 0
+
+        def feasible_uavs(i: int, cid: int) -> list[int]:
+            if dist is not None:
+                return [j for j in range(n_uav) if dist[i, j] <= R_comm]
+            return [eligible[cid]]  # legacy fallback: fixed covering UAV
+
+        def entropy(hist: np.ndarray) -> float:
+            total = hist.sum()
+            if total <= 0:
+                return 0.0
+            p = hist / total
+            nz = p[p > 0]
+            return float(-(nz * np.log(nz)).sum() / log_c) if n_cls > 1 else 0.0
+
+        fill = [0] * n_uav
+        shard_hist = [np.zeros(n_cls) for _ in range(n_uav)]
+        reassigned: dict[int, int] = {}
+
+        for i, cid in enumerate(selected_ids):
+            c = np.asarray(class_counts.get(cid, np.zeros(n_cls)), dtype=np.float64)
+            candidates = [j for j in feasible_uavs(i, cid) if fill[j] < uav_capacity]
+            if not candidates:
+                continue  # no feasible non-full UAV — skip (Algorithm 4)
+
+            gains = {
+                j: entropy(shard_hist[j] + c) - entropy(shard_hist[j])
+                for j in candidates
+            }
+            best_gain = max(gains.values())
+            tied = [j for j in candidates if gains[j] >= best_gain - 1e-12]
+            if dist is not None:
+                j_star = min(tied, key=lambda j: (fill[j], dist[i, j]))
+            else:
+                j_star = min(tied, key=lambda j: fill[j])
+
+            reassigned[cid] = j_star
+            fill[j_star] += 1
+            shard_hist[j_star] = shard_hist[j_star] + c
+
+        return reassigned
 
     def _random_select(
         self,
