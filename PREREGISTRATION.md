@@ -340,3 +340,42 @@ why fairness requires it.
 **Adoption is NOT automatic.** P1 produces leaderboards. Adopting winners into
 `configs/tuned_weights.yaml` and rerunning the comparison is a separate,
 deliberate step. P1 changes no reported number by itself.
+
+### P1 first pass — 3 of 4 methods tuned; proposed_hfl hit a LATENT BUG (2026-08-26)
+
+Best `val_macro_f1` at 5 km (tuning seeds 20-22, N=30/50, subsample 0.2):
+
+    oort          0.3497   (30 trials)
+    fedcs         0.3467   (30 trials)
+    flat_fl       0.3425   (30 trials)
+    proposed_hfl  -inf     (50 trials, ALL FAILED)
+
+`-inf` is not a result. All 50 trials raised
+`TypeError: <lambda>() got an unexpected keyword argument 'link'`.
+
+**Root cause, and it predates this programme.** `scripts/tune_weights.py`
+monkeypatches `fed.Fitness` with a lambda accepting only `instance` when the
+search space contains `fitness_w*`. `Fitness.__init__` gained a `link`
+parameter in the **2026-08-06 placement redesign**, and `run_full_hfl` calls it
+as `Fitness(instance, link=..., coverage_mode=..., **w)`. The last HPO ran
+**2026-08-05**, one day earlier. So from the redesign onward, ANY attempt to
+tune the proposed method's fitness weights silently scored -inf, and nothing
+caught it because proposed_hfl is the only method whose space contains
+`fitness_w*` and it had not been retuned since.
+
+**Consequence for the paper:** the placement weights in
+`configs/tuned_weights.yaml` were fitted under the OLD placement physics
+(20 km, range-gate link) and have been unrevisable ever since. Every result in
+this programme ran them.
+
+Fixed at `ab7fc884b`: the patch now forwards `link`/`coverage_mode` untouched
+and lets the tuned triple win. Verified — trials return finite values (0.2550,
+0.1276) instead of -inf. proposed_hfl is being retuned as study
+`w5k_proposed_hfl_fix`, 50 trials.
+
+**To verify at adoption time, BEFORE adopting anything:** `Fitness`'s w1/w2/w3
+are the SHARED placement objective, not a proposed-method-only constant, and
+every method uses pso placement. So a tuned triple must be applied to ALL arms
+or to NONE. Tuning it inside proposed_hfl's full space and applying it only
+there would hand the proposed method a placement advantage the baselines never
+got — the same single-arm tuning defect that inflated v4.
