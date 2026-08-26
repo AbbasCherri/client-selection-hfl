@@ -314,3 +314,29 @@ existed because H3 had already cost exactly that.
 The `hfl_diverse_roster` code is kept (commit `32520b8d5`) as a documented
 negative engineering result: an explicit entropy-maximising assignment adds
 nothing over the proposed builder's existing coverage objective.
+
+### P1 — DECIDED and launched (2026-08-26)
+
+Unblocked: no arm changed the architecture (H1 collapsed, H3 inert, H5 clean
+fail, H2 inert), so the final architecture is settled as the paper_full
+operating point — K=20, capacity 6, fusion_owner uav, R_comm 5 km. P1 therefore
+runs there.
+
+`scripts/tune_weights.py` had `R_comm = 20000.0` HARDCODED in its job builder.
+That hardcoding IS the defect: it is why every recipe in
+`configs/tuned_weights.yaml` was fitted at 20 km and applied at 5 km. Now a CLI
+option (`--r-comm`, `--k-uavs`, `--capacity`); defaults reproduce the old
+behaviour exactly, so nothing already run changes meaning.
+
+Re-tuning proposed_hfl (50 trials, full space) and fedcs, oort, flat_fl
+(30 each, recipe space) at R_comm=5000. Objective `val_macro_f1` on tuning
+seeds 20-22, disjoint from evaluation seeds 0-19; the test metric is never read.
+
+**flat_fl is included deliberately.** It currently has no recipe of its own and
+inherits proposed_hfl's, making it the one under-tuned arm — and it is beating
+proposed_hfl anyway. Tuning it can only strengthen the negative result, which is
+why fairness requires it.
+
+**Adoption is NOT automatic.** P1 produces leaderboards. Adopting winners into
+`configs/tuned_weights.yaml` and rerunning the comparison is a separate,
+deliberate step. P1 changes no reported number by itself.

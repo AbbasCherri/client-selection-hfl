@@ -223,6 +223,17 @@ def _score(df: pd.DataFrame) -> float:
     return float(last5 - 0.5 * last10_std)
 
 
+# Deployment regime the tuner searches in. These USED TO BE HARDCODED at
+# R_comm=20000, so every recipe in configs/tuned_weights.yaml was fitted at
+# 20 km and then applied at the 5 km coherent operating point — a regime
+# mismatch affecting every method in the paper. Overridable from the CLI;
+# the defaults reproduce the old behaviour exactly so nothing already run
+# changes meaning.
+TUNE_K = 20
+TUNE_R_COMM = 20000.0
+TUNE_CAPACITY = 6
+
+
 def _build_jobs(method: str, w: dict, n_values, seeds, n_rounds: int,
                 subsample: float, feature_cache_dir: Path) -> list[dict]:
     base_cfg = {
@@ -236,7 +247,7 @@ def _build_jobs(method: str, w: dict, n_values, seeds, n_rounds: int,
             "val_ratio": 0.1,
         },
         "fl": {
-            "K": 20, "R_comm": 20000.0, "capacity": 6,
+            "K": TUNE_K, "R_comm": TUNE_R_COMM, "capacity": TUNE_CAPACITY,
             "n_rounds": n_rounds, "n_local_epochs": 2, "n_uav_epochs": 2,
             "batch_size": 32, "T_sel": 5, "reselect_every": 1,
             "lambda_min": 0.5, "R_min": 0.3, "placement_method": "pso",
@@ -330,6 +341,12 @@ def main() -> None:
     ap.add_argument("--n-rounds", type=int, default=20)
     ap.add_argument("--subsample", type=float, default=0.2)
     ap.add_argument("--n-values", type=int, nargs="+", default=[30, 50])
+    ap.add_argument("--r-comm", type=float, default=20000.0,
+                    help="communication radius to tune AT; the paper's coherent "
+                         "operating point is 5000. Default reproduces the "
+                         "pre-2026-08-26 behaviour.")
+    ap.add_argument("--k-uavs", type=int, default=20, help="fleet size to tune at")
+    ap.add_argument("--capacity", type=int, default=6, help="per-UAV capacity to tune at")
     ap.add_argument("--seeds", type=int, nargs="+", default=[20, 21, 22],
                     help="tuning seed indices; must not overlap evaluation seeds 0-19")
     ap.add_argument("--transfer-seeds", type=int, nargs="+", default=[23, 24])
@@ -345,6 +362,10 @@ def main() -> None:
         help="Optuna storage URL; sqlite makes the study resumable/inspectable.",
     )
     args = ap.parse_args()
+
+    global TUNE_K, TUNE_R_COMM, TUNE_CAPACITY
+    TUNE_K, TUNE_R_COMM, TUNE_CAPACITY = args.k_uavs, args.r_comm, args.capacity
+    print(f"tuning regime: K={TUNE_K} R_comm={TUNE_R_COMM} capacity={TUNE_CAPACITY}")
 
     leaked = sorted(set(args.seeds) & set(RESERVED_EVAL_SEEDS))
     if leaked:
