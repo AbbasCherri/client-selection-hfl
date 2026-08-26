@@ -1,6 +1,7 @@
-UPDATED=2026-08-25T23:23:15+00:00
-DRIVER_PID=4685
-H1 fusion_owner DONE_FAIL jobs=40/40 -- fusion ownership
-H3 capacity12 QUEUED jobs=40/40 -- capacity above tested ceiling
+UPDATED=2026-08-26T02:35:02+00:00
+DRIVER_PID=9229
+H1 fusion_owner DONE_FAIL jobs=40 -- fusion ownership
+H3 capacity12 DONE_FAIL jobs=40 -- capacity above tested ceiling
+H5 selectors_k10 DONE_FAIL jobs=160 -- selector separation at K=10 (160 jobs)
 H2 shard_diversity NEEDS_IMPL -- shard-diversity assignment builder
 P1 retune_5km NEEDS_DECISION -- re-tune every method at 5 km (runs LAST, under the final architecture)
