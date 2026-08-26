@@ -180,9 +180,31 @@ def _run_one_job(job_cfg: dict, w: dict, method: str) -> pd.DataFrame | None:
     rep.W_ANOMALY = w.get("w_anomaly", _STOCK["rep.W_ANOMALY"])
     rep.W_TEMP = w.get("w_temp", _STOCK["rep.W_TEMP"])
     if "fitness_w1" in w:
-        fed.Fitness = lambda instance, w1=w["fitness_w1"], w2=w["fitness_w2"], w3=w["fitness_w3"]: (
-            _RealFitness(instance, w1, w2, w3)
-        )
+        # This used to be a lambda taking ONLY `instance`. Fitness.__init__
+        # gained `link` (and `coverage_mode`) in the 2026-08-06 placement
+        # redesign, and run_full_hfl calls it as
+        #     Fitness(instance, link=..., coverage_mode=..., **w)
+        # so from that date every full-space trial died with
+        #     TypeError: <lambda>() got an unexpected keyword argument 'link'
+        # and scored -inf. The last HPO predates the redesign (2026-08-05),
+        # so nothing caught it: proposed_hfl is the only method whose space
+        # contains fitness_w*, and it had not been retuned since.
+        # Forward everything; let the TUNED triple win, since it is the thing
+        # being searched.
+        _tuned = (w["fitness_w1"], w["fitness_w2"], w["fitness_w3"])
+
+        def _fitness_with_tuned_weights(instance, *args, **kwargs):
+            if args:
+                raise TypeError(
+                    "patched Fitness expects keyword weights, got positional "
+                    f"args {args!r} — forwarding would silently reorder them"
+                )
+            for k in ("w1", "w2", "w3"):
+                kwargs.pop(k, None)
+            kwargs["w1"], kwargs["w2"], kwargs["w3"] = _tuned
+            return _RealFitness(instance, **kwargs)
+
+        fed.Fitness = _fitness_with_tuned_weights
 
     with tempfile.TemporaryDirectory() as d:
         job_cfg = copy.deepcopy(job_cfg)
