@@ -260,3 +260,32 @@ H2 is recorded as **INERT — not run**, which is an honest outcome and NOT a
 null about class diversity.
 
 The pre-check runs after H5, which currently owns all 12 vCPUs.
+
+### H5 verdict — FAILS decisively (2026-08-26)
+
+`results/selectors_k10_verdict.txt`. Criteria fixed in
+`configs/selectors_k10.yaml` at `db67b5ba1`, before the first seed.
+**All 16 method/cell combinations cleared the collapse gate**, so unlike H1 this
+is a clean, valid comparison. And unlike H3 the manipulation WORKED:
+`mean_shard_clients` rose from 1.18/1.48/2.32/3.79 at K=20 to
+**1.34/1.84/3.07/5.57** at K=10.
+
+All three criteria fail, 0/4, 0/4, 1/4.
+
+proposed_hfl minus fedcs: -0.0775 / -0.0756 / -0.0524 / -0.0357
+proposed_hfl minus oort:  -0.0513 / -0.0553 / -0.0726 / -0.0494
+
+**Every one of those eight cells is a Holm-significant LOSS.** The proposed
+selection rule does not separate from the literature selectors, and widening the
+UAV shards — the lever the whole mechanism argument pointed at — did not change
+that. It also remains worse than flat_fl at 3 of 4 N.
+
+Per the arm's config: **no further K values may be tried.** The existing fleet
+sweep already spans K=5..30 and searching operating points until one passes is
+the optional stopping §1 forbids.
+
+**Programme status: H1 FAIL, H3 FAIL (inert), H5 FAIL (clean and decisive).**
+The only items outstanding are H2, which is gated behind a mediator pre-check,
+and P1, the re-tune prerequisite. No arm has changed the architecture, so the
+final architecture for P1 is settled as the paper_full operating point
+(K=20, capacity 6, fusion_owner uav, R_comm 5 km).
