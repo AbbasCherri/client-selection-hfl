@@ -1,0 +1,111 @@
+# R1 — the decisive rerun: fair 5 km recipes, real protocol, evaluation seeds.
+#
+# PRE-REGISTERED. Criteria fixed before any seed of this arm exists.
+#
+# Why this exists
+# ---------------
+# Every result in this programme ran recipes searched at R_comm = 20 km
+# (results/hpo, 2026-08-05) and applied at 5 km. P1 closed that, and in doing so
+# uncovered that `scripts/tune_weights.py` had been UNABLE to tune proposed_hfl
+# at all since the 2026-08-06 placement redesign: its Fitness monkeypatch did
+# not accept the `link` kwarg, so every full-space trial scored -inf. Fixed at
+# `ab7fc884b`. So the negative results H1/H3/H5 were obtained with the proposed
+# method carrying placement weights fitted to physics that no longer exists,
+# and no way to revise them.
+#
+# On the 5 km tuning proxy, POOLED over all five val seeds (3 tune + 2 transfer):
+#
+#     proposed_hfl  0.3533   (tune 0.3555 / transfer 0.3501)
+#     oort          0.3488   (tune 0.3497 / transfer 0.3475)
+#     flat_fl       0.3465   (tune 0.3425 / transfer 0.3526)
+#     fedcs         0.3456   (tune 0.3467 / transfer 0.3440)
+#
+# That proxy is 20 rounds at 0.2 subsample on seeds 20-24. It is NOT the
+# reported metric and cannot overturn H5 by itself. This arm applies the
+# adopted recipes to the real protocol — 100 rounds, full data, evaluation
+# seeds 0-9 — which is the only thing that can.
+#
+# What is and is not adopted, and why it is symmetric
+# ---------------------------------------------------
+# ADOPTED: the six recipe params, per method, each from its OWN 5 km search.
+# NOT ADOPTED: proposed_hfl's selector internals (SEL_STATIC_BLEND, the
+# utility/reputation simplexes) and the shared PSO fitness weights w1-w3.
+# The fitness weights govern placement for EVERY arm — all of them use pso
+# placement — so tuning them inside proposed_hfl's larger space and applying
+# them only there would hand it a placement advantage no baseline received.
+# This is the rule the existing configs/tuned_weights.yaml header already
+# states; it is followed here unchanged.
+#
+# The search remains asymmetric in SIZE (proposed_hfl searched 19 params over
+# 50 trials; the baselines ~5 over 30) because the baselines have no analogue of
+# the extra knobs. That asymmetry favours proposed_hfl and must be disclosed
+# wherever this arm is reported. It is the reason criterion 3 exists.
+#
+# flat_fl gets its own recipe here for the first time. It previously inherited
+# proposed_hfl's, making it the one under-tuned arm — and it was winning anyway.
+# Tuning it can only make a negative result stronger, which is why fairness
+# requires it.
+#
+# Criteria — ALL THREE required, fixed before the seeds exist
+# -----------------------------------------------------------
+#   1. proposed_hfl Holm-beats fedcs at >= 3 of 4 N
+#   2. proposed_hfl Holm-beats oort  at >= 3 of 4 N
+#   3. proposed_hfl is NOT significantly worse than flat_fl at >= 3 of 4 N
+#
+# Identical to H5's criteria, deliberately: this arm differs from H5 only in the
+# recipes and the operating point, so the bar must not move with it.
+#
+# A pass is a DISCOVERY, not a win. PREREGISTRATION.md §2 still requires
+# replication on fresh seeds 10-24 and Holm survival in the final reported
+# family before any comparative claim is written.
+#
+# If it fails, STOP-EXHAUSTED applies: the re-tune was the last prerequisite,
+# and no further arm is licensed.
+#
+# Stopping rule: 10 seeds (0-9), no optional stopping, no post-hoc choice of N
+# or of which baseline to report.
+#
+# 4 methods x 4 N x 10 seeds = 160 jobs, ~3.5 h on 12 vCPU.
+extends: paper_full.yaml
+
+name: paper_full_5km
+results_dir: results/paper_full_5km
+
+fl:
+  # Base = proposed_hfl's own 5 km recipe, as before. Ablations inherit it so
+  # they differ from the proposed system only in the ablated component.
+  lr: 2.3027e-02
+  uav_lr: 2.3027e-02
+  lr_decay: sqrt
+  logit_adjust_tau: 0.6714
+  server_momentum: 0.8853
+  ema_decay: 0.7293
+
+  per_method:
+    fedcs:
+      lr: 1.6346e-02
+      uav_lr: 1.6346e-02
+      lr_decay: cosine
+      logit_adjust_tau: 0.7915
+      server_momentum: 0.8151
+      ema_decay: 0.7073
+    oort:
+      lr: 3.4691e-02
+      uav_lr: 3.4691e-02
+      lr_decay: cosine
+      logit_adjust_tau: 0.6508
+      server_momentum: 0.5571
+      ema_decay: 0.5790
+    flat_fl:
+      lr: 3.8212e-02
+      uav_lr: 3.8212e-02
+      lr_decay: cosine
+      logit_adjust_tau: 0.7221
+      server_momentum: 0.9182
+      ema_decay: 0.4329
+
+methods:
+  - proposed_hfl
+  - fedcs
+  - oort
+  - flat_fl
