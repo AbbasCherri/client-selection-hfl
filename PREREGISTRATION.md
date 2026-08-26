@@ -379,3 +379,80 @@ every method uses pso placement. So a tuned triple must be applied to ALL arms
 or to NONE. Tuning it inside proposed_hfl's full space and applying it only
 there would hand the proposed method a placement advantage the baselines never
 got — the same single-arm tuning defect that inflated v4.
+
+### R1 verdict — FAILS. STOP-EXHAUSTED. (2026-08-26)
+
+`results/paper_full_5km_verdict.txt`. Criteria fixed in
+`configs/paper_full_5km.yaml` at `4378e5379` with ZERO result files in
+existence. **All 16 method/cell combinations cleared the collapse gate.**
+Config merge verified before scoring: R_comm 5000, K 20, capacity 6, 100
+rounds, 10 seeds, and the stale 20 km recipes confirmed overridden
+(oort lr 0.0073 -> 0.0347, a 4.8x change).
+
+**0/4 on all three criteria.**
+
+    proposed_hfl - fedcs    -0.0700 / -0.1241 / -0.0677 / -0.0898  (all Holm-sig losses)
+    proposed_hfl - oort     -0.0498 / -0.0631 / -0.0442 / -0.0593  (2/4 Holm-sig losses)
+    proposed_hfl - flat_fl  -0.1907 / -0.1961 / -0.1502 / -0.1389  (all Holm-sig losses)
+
+The margins are LARGER than H5's, because flat_fl received its own tuned recipe
+for the first time (lr 0.0382 against the 0.0230 it used to inherit). Tuning the
+one under-tuned arm made the negative result stronger, which is exactly what was
+predicted when it was included.
+
+**The val proxy did not transfer.** Pooled val had proposed_hfl first at 0.3533.
+On the real protocol it is last of four. A 20-round, 0.2-subsample proxy does not
+predict 100-round full-data performance here, and that is worth stating as a
+methodological finding in its own right.
+
+#### Observation, NOT a pre-registered test: an early-round advantage that reverses
+
+From R1's own round trajectories (post-hoc analysis of already-collected data,
+reported with that caveat):
+
+    proposed_hfl - oort   r<=20        r<=50        r91-100
+      N=100             +0.0260**    -0.0002      -0.0442*
+      N=200             +0.0505**    +0.0078      -0.0593*
+
+proposed_hfl converges FASTER than oort in early rounds at large client counts,
+reaches parity by round 50, and is overtaken by round 100. This explains the
+proxy discrepancy exactly, since the proxy horizon was 20 rounds.
+
+**It does not rescue the method, and must not be reported as if it does.**
+Against flat_fl, proposed_hfl loses at EVERY round budget (-0.064 / -0.077 /
+-0.050 / -0.003 at r<=20). **There is no round budget at which the proposed
+method leads the field.** The early advantage is relative to one baseline only.
+Promoting it to a claim would require pre-registration and fresh seeds; it is
+recorded here as an observation and nothing more.
+
+## FINAL: STOP-EXHAUSTED
+
+Per §5, the pre-committed outcome. Every hypothesis failed and the prerequisite
+is closed:
+
+| arm | verdict |
+|---|---|
+| H1 fusion ownership | FAIL — collapsed 4/4 |
+| H3 capacity | FAIL — manipulation inert |
+| H5 selectors at K=10 | FAIL — clean, all 8 cells Holm-sig losses |
+| H2 shard diversity | INERT — verified not to intervene, not run |
+| P1 re-tune at 5 km | done; exposed and fixed a latent tuner bug |
+| R1 fair rerun | FAIL — 0/4 on all three criteria |
+
+**The proposed client-selection method does not beat the literature selectors,
+and the hierarchy does not beat flat FL, at a physically coherent radius.** This
+was tested under conditions deliberately favourable to it: its own tuned recipe,
+a 19-parameter search against the baselines' ~5, 50 trials against their 30, and
+a fill-to-capacity roster builder already shown to be the better one.
+
+No further arm is licensed. §6 permits additions only from a measured mediator,
+and the two mediators this programme identified — shard width and shard class
+entropy — were each manipulated and each failed to move accuracy.
+
+**What the paper reports** is the crossover characterisation: hierarchical FL
+with class-aware selection pays off only when UAV reach exceeds the spatial
+correlation length of the label field. Below it, geographic sharding leaves the
+average UAV pooling 1-4 clients, making the UAV tier a lossy aggregation hop
+rather than a pooling layer. The radius sweep (-0.165 at 500 m rising
+monotonically to -0.019 at 5000 m) is the quantitative backbone, and that single
+mechanism explains every negative result recorded above.
