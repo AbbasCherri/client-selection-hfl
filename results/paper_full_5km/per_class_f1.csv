@@ -1,0 +1,5 @@
+method,f1_survived,f1_collapsed,f1_obstructed,f1_missing
+fedcs,0.8452,0.2412,0.3555,0.226
+flat_fl,0.8317,0.2757,0.5494,0.3295
+oort,0.8696,0.27,0.22,0.1857
+proposed_hfl,0.8705,0.2108,0.1385,0.0953

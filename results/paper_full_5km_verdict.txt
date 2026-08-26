@@ -1,0 +1,40 @@
+
+=== proposed_hfl minus fedcs ===
+    N       diff          p   Holm  pairs  note
+   30    -0.0700     0.0137   True     10  
+   50    -0.1241     0.0020   True     10  
+  100    -0.0677     0.0020   True     10  
+  200    -0.0898     0.0020   True     10  
+
+=== proposed_hfl minus oort ===
+    N       diff          p   Holm  pairs  note
+   30    -0.0498     0.0840  False     10  
+   50    -0.0631     0.0273  False     10  
+  100    -0.0442     0.0137   True     10  
+  200    -0.0593     0.0059   True     10  
+
+=== proposed_hfl minus flat_fl ===
+    N       diff          p   Holm  pairs  note
+   30    -0.1907     0.0020   True     10  
+   50    -0.1961     0.0020   True     10  
+  100    -0.1502     0.0020   True     10  
+  200    -0.1389     0.0020   True     10  
+
+=== mediator: mean_shard_clients (the lever this arm moves) ===
+  N=30   1.18
+  N=50   1.48
+  N=100  2.31
+  N=200  3.79
+
+====================================================================
+criterion 1  beats fedcs   at >=3 of 4 N : 0/4  FAIL
+criterion 2  beats oort    at >=3 of 4 N : 0/4  FAIL
+criterion 3  not worse than flat_fl      : 0/4  FAIL
+====================================================================
+
+VERDICT: paper_full_5km FAILS its pre-registered criteria.
+Per this arm's config, failure of criteria 1-2 means the selection
+rule does not separate from the literature even under favourable
+pooling. Do NOT try further K values: the existing fleet sweep
+already spans K=5..30, and searching operating points until one
+passes is the optional stopping PREREGISTRATION.md forbids.
