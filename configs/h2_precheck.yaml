@@ -1,0 +1,29 @@
+# H2 mediator pre-check — does the diversity builder actually move shard entropy?
+#
+# NOT an outcome test. This measures ONLY the mediator, at the paper_full
+# operating point, against the threshold fixed in PREREGISTRATION.md:
+#   mean shard_class_entropy must rise by >= +0.05 over proposed_hfl on >= 3 seeds.
+#
+# Threshold derived from H3, which moved entropy by <= +0.016 and produced no
+# accuracy effect at all. Below roughly 3x that, an arm cannot be informative.
+#
+# seed_method_alias makes hfl_diverse_roster draw proposed_hfl's stream, so
+# placement, device values and every UCB tie-break are identical and the ROSTER
+# BUILDER is the only moving part. proposed_hfl aliases to itself (a no-op).
+#
+# 2 methods x 1 N x 3 seeds x 20 rounds = 6 short jobs.
+extends: paper_full.yaml
+
+name: h2_precheck
+results_dir: results/h2_precheck
+n_seeds: 3
+
+fl:
+  n_rounds: 20
+  seed_method_alias: proposed_hfl
+
+N_values: [100]
+
+methods:
+  - proposed_hfl
+  - hfl_diverse_roster
