@@ -1,0 +1,7 @@
+harness,method,N,seed_idx,job_seed,seed,partition_seed
+paper_sweep,proposed_hfl,100,0,12976,24339,5309
+paper_sweep,proposed_hfl,100,1,20895,15420,5310
+paper_sweep,proposed_hfl,100,2,28814,7469,5311
+paper_sweep,hfl_diverse_roster,100,0,12976,9055,5309
+paper_sweep,hfl_diverse_roster,100,1,20895,16496,5310
+paper_sweep,hfl_diverse_roster,100,2,28814,24929,5311

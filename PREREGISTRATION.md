@@ -289,3 +289,28 @@ The only items outstanding are H2, which is gated behind a mediator pre-check,
 and P1, the re-tune prerequisite. No arm has changed the architecture, so the
 final architecture for P1 is settled as the paper_full operating point
 (K=20, capacity 6, fusion_owner uav, R_comm 5 km).
+
+### H2 — INERT, NOT RUN (2026-08-26)
+
+`results/h2_precheck/`, 3 seeds, N=100, 20 rounds, seed-aliased so the roster
+builder is the only moving part. Threshold fixed beforehand: >= +0.05 mean
+`shard_class_entropy`.
+
+  proposed_hfl        0.4303
+  hfl_diverse_roster  0.4307
+  **delta +0.0004**, per-seed -0.0030 / +0.0054 / -0.0012
+
+**125x below the threshold, and the sign flips across seeds.** The builder is
+correct — six sanity checks pass and it demonstrably raises entropy on a
+collapsible fixture — but at the real operating point it does nothing, because
+`_class_coverage_assign` already carries a submodular class-coverage objective
+that does the same work.
+
+**H2 is recorded as INERT and is NOT RUN.** This is not a null result about
+class diversity: the intervention was verified not to intervene, so a sweep
+could only have produced an uninformative null at a cost of 40 jobs. The gate
+existed because H3 had already cost exactly that.
+
+The `hfl_diverse_roster` code is kept (commit `32520b8d5`) as a documented
+negative engineering result: an explicit entropy-maximising assignment adds
+nothing over the proposed builder's existing coverage objective.
