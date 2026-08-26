@@ -217,3 +217,46 @@ not earned a hierarchical framing.
 If criteria 1-2 fail, STOP-EXHAUSTED applies. **No further K values may be
 tried** — the sweep already spans 5 to 30, and searching operating points until
 one passes is exactly what §1 forbids.
+
+### H2 — built, and its premise is PARTLY FALSIFIED (2026-08-25)
+
+Builder implemented and committed at `32520b8d5` as selection mode
+`ucb_diversity` / method `hfl_diverse_roster`. It delegates SELECTION to the
+same `_class_coverage_assign` call the proposed method uses (so the selected
+client set is identical and cannot drift), then reassigns each selected client
+to the feasible non-full UAV whose class histogram gains the most entropy.
+Six sanity checks pass, and `check_roster_control`, `check_roster_width` and
+`check_selection_rules` all still pass, so nothing existing was broken. The
+change is purely additive: one registry entry plus one widened mode-validity
+tuple.
+
+**CORRECTION to §4.** The H2 entry above states that both existing builders
+"ignore class entirely". **That is wrong.** `_class_coverage_assign` already
+carries a submodular class-coverage objective with diminishing (sqrt) returns,
+which discourages same-class stacking, and its per-slot pick order is
+deliberately randomised by a large `SEL_GUMBEL_SCALE`. So the proposed builder
+is ALREADY partly diversity-aware, and H2 is a marginal refinement of an
+existing mechanism, not the introduction of a missing one. I wrote the §4 claim
+without checking the builder, and it inflated H2's prior.
+
+Measured consequence, reported by the implementation: on a deliberately
+collapsible fixture the new builder raises mean shard class entropy from 0.9543
+to 0.9699, **+0.0156** — and across ~10 other seeds/fixtures the margin
+"occasionally flips sign", because it is competing with an objective that
+already does much of this work.
+
+**H2 is therefore NOT queued for a sweep yet.** H3 already cost 40 jobs and
+produced a misleading null because its knob turned out to be inert, and the
+signature here is the same: a small manipulation on a quantity that barely
+moves. Before H2 may run, it must clear a mediator pre-check, fixed here:
+
+> At the paper_full operating point, on >= 3 seeds, `hfl_diverse_roster` must
+> raise mean `shard_class_entropy` over `proposed_hfl` by **>= +0.05**.
+
+The threshold is derived, not chosen: H3 moved shard entropy by <= +0.016 and
+produced no accuracy effect whatsoever, so a manipulation smaller than roughly
+three times that cannot be expected to be informative. If the pre-check fails,
+H2 is recorded as **INERT — not run**, which is an honest outcome and NOT a
+null about class diversity.
+
+The pre-check runs after H5, which currently owns all 12 vCPUs.
