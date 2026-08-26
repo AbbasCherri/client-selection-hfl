@@ -91,13 +91,16 @@ def an_unrecognised_value_is_rejected():
 
 
 def both_documented_values_are_accepted():
-    for good in ("uav", "client", "UAV", "Client"):
+    for good in ("uav", "client", "client_full", "UAV", "Client", "CLIENT_FULL"):
         _run(["proposed_hfl"], good)
 
 
 def ownership_is_exact_for_every_case():
     assert _block_ownership("uav", True) == (("img_proj", "fusion"), ("struct_branch",))
     assert _block_ownership("client", True) == (("img_proj",), ("struct_branch", "fusion"))
+    # client_full: the UAV trains NOTHING and is a pure aggregator.
+    assert _block_ownership("client_full", True) == (
+        (), ("struct_branch", "img_proj", "fusion"))
     # No UAV tier: fusion_owner is irrelevant and img_proj is owned by nobody.
     for owner in ("uav", "client"):
         assert _block_ownership(owner, False) == ((), ("struct_branch", "fusion"))
@@ -107,7 +110,7 @@ def every_block_is_owned_exactly_once():
     # A block owned by both tiers would be trained twice per round; a block
     # owned by neither silently stays at initialisation. Only img_proj may be
     # unowned, and only when there is no UAV tier.
-    for owner in ("uav", "client"):
+    for owner in ("uav", "client", "client_full"):
         uav, client = _block_ownership(owner, True)
         assert not set(uav) & set(client), f"{owner}: block owned by both tiers"
         assert set(uav) | set(client) == ALL_BLOCKS, f"{owner}: a block is unowned"
@@ -143,10 +146,32 @@ def flat_fl_never_trains_img_proj():
         assert ("struct_branch", "fusion") in seen, "flat_fl did not train fusion"
 
 
+
+
+def client_full_makes_the_uav_train_nothing():
+    # The whole point of the mode. If the UAV still trains anything, it is not
+    # a pure aggregator and the comparison against flat_fl is not clean.
+    seen = _captured_blocks(["proposed_hfl"], "client_full")
+    assert seen, "nothing trained at all"
+    assert all(tuple(b) == ("struct_branch", "img_proj", "fusion") for b in seen), (
+        f"under client_full some tier trained a partial block set: {set(seen)}"
+    )
+
+
+def client_full_trains_strictly_more_than_flat_fl():
+    # flat_fl leaves img_proj at init. client_full must train it, otherwise it
+    # cannot dominate flat_fl and the hypothesis is untestable.
+    full = _captured_blocks(["proposed_hfl"], "client_full")
+    flat = _captured_blocks(["flat_fl"], "client_full")
+    assert any("img_proj" in b for b in full), "client_full never trained img_proj"
+    assert all("img_proj" not in b for b in flat), "flat_fl trained img_proj"
+
 check("an unrecognised value is rejected", an_unrecognised_value_is_rejected)
 check("both documented values are accepted", both_documented_values_are_accepted)
 check("ownership is exact for every case", ownership_is_exact_for_every_case)
 check("every block is owned exactly once", every_block_is_owned_exactly_once)
 check("the knob reaches the training call", the_knob_reaches_the_training_call)
 check("flat_fl never trains img_proj", flat_fl_never_trains_img_proj)
+check("client_full: UAV trains nothing", client_full_makes_the_uav_train_nothing)
+check("client_full trains more than flat_fl", client_full_trains_strictly_more_than_flat_fl)
 finish()

@@ -476,6 +476,20 @@ def _block_ownership(
         return (), ("struct_branch", "fusion")
     if fusion_owner == "uav":
         return ("img_proj", "fusion"), ("struct_branch",)
+    if fusion_owner == "client_full":
+        # Clients train the WHOLE model; the UAV tier trains nothing and acts as
+        # a pure aggregator, still doing placement and selection. This is
+        # textbook hierarchical FedAvg.
+        #
+        # Motivated by the R1 diagnosis: under `uav` ownership the clients train
+        # ONLY struct_branch, and the entire image pathway is trained on a UAV
+        # shard that pools 1.2-3.8 clients at a coherent radius. flat_fl beats
+        # that while never training img_proj at all, which says the tier split
+        # starves the client tier rather than that the extra hop is costly.
+        # Here clients get strictly more than flat_fl's clients do (flat_fl
+        # leaves img_proj at init), so if the split is the problem this should
+        # dominate it.
+        return (), ("struct_branch", "img_proj", "fusion")
     return ("img_proj",), ("struct_branch", "fusion")
 
 
@@ -1483,12 +1497,13 @@ def run_full_hfl(cfg: dict) -> dict:
     lr_decay = str(fl.get("lr_decay", "cosine")).lower()  # "cosine" | "none"
     ema_decay = float(fl.get("ema_decay", 0.9))  # 0 → evaluate the raw global model
     fusion_owner = str(fl.get("fusion_owner", "uav")).lower()  # "uav" | "client"
-    if fusion_owner not in ("uav", "client"):
+    if fusion_owner not in ("uav", "client", "client_full"):
         # Line ~1639 branches on `== "uav"`, so ANY other string — a typo,
         # a stray "server" — silently selects the client branch and
         # produces a clean, wrong table. Fail instead.
         raise ValueError(
-            f"fl.fusion_owner must be 'uav' or 'client', got {fusion_owner!r}"
+            f"fl.fusion_owner must be 'uav', 'client' or 'client_full', "
+            f"got {fusion_owner!r}"
         )
     reselect_every = int(fl.get("reselect_every", 1))  # selection cadence (≠ placement T_sel)
     # Class-aware placement biases UAV coverage toward clients holding rare

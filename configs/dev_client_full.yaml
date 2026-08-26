@@ -1,0 +1,58 @@
+# DEV — method development. NOT an evaluation run. NOT pre-registered.
+#
+# seed_offset: 20 puts this on seeds 20-24, disjoint from the evaluation seeds
+# 0-9 that every reported number in this project uses. That separation is the
+# whole point: iterating on an algorithm while scoring it on the evaluation
+# seeds manufactures a winner, because enough variants will produce one by
+# chance. Development happens here; only a FINALISED variant is ever scored on
+# 0-9, once, and the number of variants tried is disclosed.
+#
+# Nothing from this config may be reported as a result.
+#
+# The hypothesis
+# --------------
+# R1 established that flat_fl beats every hierarchical arm by 0.14-0.20 at a
+# coherent radius, and that the average UAV pools only 1.2-3.8 clients. The
+# received reading was "the UAV tier is a lossy extra hop". The block-ownership
+# code says something more specific:
+#
+#   fusion_owner: uav  ->  clients train ONLY struct_branch
+#                          the ENTIRE image pathway (img_proj + fusion) is
+#                          trained on a UAV shard pooling 1.2-3.8 clients
+#
+# So the client tier never touches imagery at all. flat_fl beats that while
+# leaving img_proj at initialisation — i.e. a frozen random projection beats a
+# pathway trained on near-single-client shards.
+#
+# `client_full` gives clients the whole model and demotes the UAV tier to a pure
+# aggregator, still doing placement and selection. That is textbook
+# hierarchical FedAvg. Clients then train strictly MORE than flat_fl's clients
+# do (flat_fl never learns img_proj), so if the ownership split is what costs
+# the hierarchy its accuracy, this should dominate flat_fl rather than trail it.
+#
+# What each outcome means, written before the run:
+#   * client_full >= flat_fl  -> the deficit was the OWNERSHIP SPLIT, not the
+#     hierarchy. The architecture is fixable and the selector comparison should
+#     be redone on top of it.
+#   * client_full ~ uav       -> the split is not the mechanism; the tier itself
+#     is the cost, and STOP-EXHAUSTED stands.
+#
+# 4 methods x 2 N x 5 seeds = 40 jobs, ~1 h.
+extends: paper_full.yaml
+
+name: dev_client_full
+results_dir: results/dev_client_full
+
+seed_offset: 20     # DEV split. Evaluation seeds are 0-9 and are not touched.
+n_seeds: 5
+
+fl:
+  fusion_owner: client_full
+
+N_values: [50, 100]
+
+methods:
+  - proposed_hfl
+  - fedcs
+  - oort
+  - flat_fl

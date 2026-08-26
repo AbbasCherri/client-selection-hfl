@@ -59,9 +59,22 @@ PIPELINE_VERSION = 5
 # computes. Keys in _RESUME_VOLATILE_DATA_KEYS are locations/credentials, not
 # semantics (the feature cache is separately validated against the dataset by
 # compute_feature_cache/CachedDataset).
-_RESUME_SIG_KEYS = ("data", "fl", "budget", "methods", "optimizer_params", "epicentre")
+_RESUME_SIG_KEYS = ("data", "fl", "budget", "methods", "optimizer_params", "epicentre", "seed_offset")
 _RESUME_VOLATILE_DATA_KEYS = ("hf_token", "prebuilt", "feature_cache_path")
 
+
+def _seed_indices(cfg: dict) -> range:
+    """Which seed indices this sweep runs.
+
+    `seed_offset` exists to keep METHOD DEVELOPMENT off the evaluation seeds.
+    Iterating on an algorithm while scoring it on seeds 0-9 manufactures a
+    winner: enough variants and one wins by chance. Development uses an offset
+    split (20+), and only a finalised variant is ever scored on 0-9, once.
+
+    Default 0, so every config written before this existed is bit-identical.
+    """
+    return range(int(cfg.get("seed_offset", 0)),
+                 int(cfg.get("seed_offset", 0)) + int(cfg.get("n_seeds", 1)))
 
 def _resume_signature(cfg: dict) -> dict:
     """The job-defining subset of a config, normalized through YAML.
@@ -148,7 +161,7 @@ def _prefetch_all_N(cfg: dict) -> None:
         # Warm the per-seed partition caches too (cheap K-means only — the
         # rows and feature cache are seed-independent), so parallel workers
         # never race on computing the same partition.
-        for seed_idx in range(cfg.get("n_seeds", 1)):
+        for seed_idx in _seed_indices(cfg):
             get_hfl_data_partitions(
                 csv_path=data_cfg.get("csv_path"),
                 data_dir=data_cfg.get("data_dir", "./data"),
@@ -458,7 +471,7 @@ def run_paper_sweep(cfg: dict) -> dict:
 
     # --- Phase 2: parallel full-system sweep ---
     jobs = [
-        (N, method, seed_idx) for N in N_values for method in methods for seed_idx in range(n_seeds)
+        (N, method, seed_idx) for N in N_values for method in methods for seed_idx in _seed_indices(cfg)
     ]
     logger.info(
         "Phase 2: %d N × %d methods × %d seeds = %d jobs — %d parallel workers",
