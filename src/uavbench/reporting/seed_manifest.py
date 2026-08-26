@@ -120,9 +120,14 @@ def build_seed_manifest(cfg: dict, harness: str) -> pd.DataFrame:
 
     elif harness == "paper_sweep":
         opt_seed = cfg.get("optimizer_seed", 9876)
+        # `seed_offset` must be honoured here or this file — the artifact whose
+        # entire job is to record which seeds a run used — misreports them. It
+        # is read ONLY for paper_sweep, because run_paper_sim is the only
+        # harness whose job generation applies it (sweep.py::_seed_indices).
+        _off = int(cfg.get("seed_offset", 0))
         for N in cfg["N_values"]:
             for method in cfg["methods"]:
-                for seed_idx in range(cfg.get("n_seeds", 1)):
+                for seed_idx in range(_off, _off + cfg.get("n_seeds", 1)):
                     job_seed = sweep_job_seed(opt_seed, seed_idx, N)
                     rows.append(
                         {
