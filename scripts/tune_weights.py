@@ -254,6 +254,10 @@ def _score(df: pd.DataFrame) -> float:
 TUNE_K = 20
 TUNE_R_COMM = 20000.0
 TUNE_CAPACITY = 6
+# Block-ownership mode. Recipes are NOT transferable across it: under "uav"
+# clients train only struct_branch, under "client_full" they train the whole
+# model, so the optimal lr/momentum differ. Default preserves old behaviour.
+TUNE_FUSION_OWNER = "uav"
 
 
 def _build_jobs(method: str, w: dict, n_values, seeds, n_rounds: int,
@@ -270,6 +274,7 @@ def _build_jobs(method: str, w: dict, n_values, seeds, n_rounds: int,
         },
         "fl": {
             "K": TUNE_K, "R_comm": TUNE_R_COMM, "capacity": TUNE_CAPACITY,
+            "fusion_owner": TUNE_FUSION_OWNER,
             "n_rounds": n_rounds, "n_local_epochs": 2, "n_uav_epochs": 2,
             "batch_size": 32, "T_sel": 5, "reselect_every": 1,
             "lambda_min": 0.5, "R_min": 0.3, "placement_method": "pso",
@@ -369,6 +374,10 @@ def main() -> None:
                          "pre-2026-08-26 behaviour.")
     ap.add_argument("--k-uavs", type=int, default=20, help="fleet size to tune at")
     ap.add_argument("--capacity", type=int, default=6, help="per-UAV capacity to tune at")
+    ap.add_argument("--fusion-owner", default="uav",
+                    choices=("uav", "client", "client_full"),
+                    help="block-ownership mode to tune under; recipes do not "
+                         "transfer across modes")
     ap.add_argument("--seeds", type=int, nargs="+", default=[20, 21, 22],
                     help="tuning seed indices; must not overlap evaluation seeds 0-19")
     ap.add_argument("--transfer-seeds", type=int, nargs="+", default=[23, 24])
@@ -385,9 +394,11 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    global TUNE_K, TUNE_R_COMM, TUNE_CAPACITY
+    global TUNE_K, TUNE_R_COMM, TUNE_CAPACITY, TUNE_FUSION_OWNER
     TUNE_K, TUNE_R_COMM, TUNE_CAPACITY = args.k_uavs, args.r_comm, args.capacity
-    print(f"tuning regime: K={TUNE_K} R_comm={TUNE_R_COMM} capacity={TUNE_CAPACITY}")
+    TUNE_FUSION_OWNER = args.fusion_owner
+    print(f"tuning regime: K={TUNE_K} R_comm={TUNE_R_COMM} "
+          f"capacity={TUNE_CAPACITY} fusion_owner={TUNE_FUSION_OWNER}")
 
     leaked = sorted(set(args.seeds) & set(RESERVED_EVAL_SEEDS))
     if leaked:
