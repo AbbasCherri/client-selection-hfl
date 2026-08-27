@@ -456,3 +456,73 @@ average UAV pooling 1-4 clients, making the UAV tier a lossy aggregation hop
 rather than a pooling layer. The radius sweep (-0.165 at 500 m rising
 monotonically to -0.019 at 5000 m) is the quantitative backbone, and that single
 mechanism explains every negative result recorded above.
+
+## 8. Reopened: `client_full` ownership, and the decision rule for R2
+
+STOP-EXHAUSTED was declared at §7 on the basis that no arm could close the
+deficit. That conclusion was reached under ONE architecture, `fusion_owner: uav`,
+in which **clients train only `struct_branch`** and the entire image pathway is
+trained on a UAV shard pooling 1.2-3.8 clients. R1 itself showed `flat_fl` beats
+that while leaving `img_proj` at random initialisation — a frozen random
+projection outperforming a trained pathway. That points at the OWNERSHIP SPLIT,
+not at the hierarchy, and the split had never been varied except by H1, which
+moved fusion alone and collapsed.
+
+`client_full` (commit `11dba5865`) gives clients the whole model and demotes the
+UAV tier to a pure aggregator, still doing placement and selection: textbook
+hierarchical FedAvg. Guarded by `check_fusion_owner.py`, 8 checks, including two
+asserting the UAV trains nothing and that clients train `img_proj` where
+`flat_fl` does not.
+
+### Development evidence (NOT a result)
+
+`results/dev_client_full`, seeds **20-24**, deliberately disjoint from the
+evaluation seeds 0-9, which remain untouched. Variants tried: **1**.
+
+    proposed_hfl - fedcs    +0.0434 / +0.0509   (N=50 / N=100)
+    proposed_hfl - oort     +0.0327 / +0.0271
+    proposed_hfl - flat_fl  -0.0204 / -0.0216
+
+The flat_fl deficit falls from R1's -0.196/-0.150 to -0.020/-0.022. At n=5 the
+minimum two-sided Wilcoxon p is 0.0625, so p=0.062 means all five seeds agreed —
+the strongest signal available at that size, and NOT significance. Dev seeds are
+also easier in absolute terms (flat_fl 0.471 here vs 0.393 elsewhere), so only
+within-run contrasts are meaningful.
+
+### R2 — the confirmatory arm
+
+Recipes re-tuned under `client_full` by P1b for proposed_hfl, fedcs and oort
+(flat_fl is unaffected by the mode). Adoption is recipe-params only, symmetric,
+per the `tuned_weights.yaml` rule. Evaluation seeds 0-9, 100 rounds, full data,
+4 N values.
+
+**Criteria, unchanged from H5 and R1 — the bar does not move with the
+architecture:**
+
+  1. proposed_hfl Holm-beats fedcs at >= 3 of 4 N
+  2. proposed_hfl Holm-beats oort  at >= 3 of 4 N
+  3. proposed_hfl NOT significantly worse than flat_fl at >= 3 of 4 N
+
+### The decision rule, fixed BEFORE R2 runs
+
+**If R2 PASSES — Path A.** This is still only gate 1 of §2. It then requires:
+replication on seeds **10-19** (untouched by development, which used 20-24, and
+by R2, which uses 0-9); expansion to the full method set for the paper table;
+and regeneration of `paper_coverage_v5` (radius sweep) and `paper_uav_count`
+(fleet sweep) under `client_full`. Those two are NOT optional: both measure
+quantities that depend on what the UAV tier trains, and reporting a main table
+under `client_full` beside sweeps under `uav` would make the paper internally
+inconsistent. Estimated ~20 h VM.
+
+**If R2 FAILS — Path B.** STOP-EXHAUSTED at §7 stands as written. The existing
+`uav` corpus is complete and internally consistent, and the crossover
+characterisation is the paper. `client_full` is then reported honestly as a
+development variant that looked promising on 5 dev seeds and did not confirm —
+which is precisely the outcome the dev/evaluation split exists to detect, and
+the second time this project has caught one (see the C2 K=10 collapse).
+
+**Superseded either way:** `roster_control`, `capacity12`, `selectors_k10` and
+`fusion_owner` probe a UAV tier that does not train under `client_full`. Under
+Path A they describe the old architecture and must not be cited as evidence
+about the new one. The four `tier1_*` runs and the MCLP reference are pure
+placement and survive under both paths.
