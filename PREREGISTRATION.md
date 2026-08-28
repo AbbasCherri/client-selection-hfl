@@ -559,3 +559,63 @@ requires a proper re-tune under `client_full` (§3 P1 is not waived). That tune
 must use a horizon long enough to discriminate — the 20-round proxy is
 demonstrably unfit for this architecture — which is itself a finding worth
 reporting. Confirm the effect first, then perfect the tuning; not the reverse.
+
+### R2 verdict — FAILS the criteria, and FALSIFIES §7's stated conclusion (2026-08-28)
+
+`results/r2_client_full_verdict.txt`. Criteria fixed in
+`configs/r2_client_full.yaml` at `d2a30fc7c` with zero result files existing;
+the amendment explaining the recipe choice at `068f1068e`, also beforehand.
+Evaluation seeds 0-9, untouched by development (which used 20-24).
+**All 16 method/cell combinations cleared the collapse gate.**
+
+    proposed_hfl - fedcs    -0.0122 / +0.0217 / +0.0481 / +0.0512   -> 3/4 PASS
+    proposed_hfl - oort     +0.0082 / +0.0147 / +0.0361 / +0.0512   -> 2/4 FAIL
+    proposed_hfl - flat_fl  -0.0962 / -0.0225 / -0.0055 / +0.0124   -> 3/4 PASS
+
+**VERDICT: FAIL.** All three criteria were required. Criterion 2 needed
+Holm-significant wins over oort at >= 3 of 4 N and delivered 2. A marginal
+result is a failure under the bar as written, and is recorded as one.
+
+**No Path A.** No regeneration of the sweeps, no expansion of the method set,
+no claim of a win. The dev signal (n=5, seeds 20-24) did not fully confirm.
+
+#### But §7's conclusion is now FALSE and is retracted here
+
+§7 stated: "The proposed client-selection method does not beat the literature
+selectors, and the hierarchy does not beat flat FL, at a physically coherent
+radius." R2 falsifies both halves.
+
+* It beats fedcs at 3 of 4 N, Holm-significant.
+* It is positive against oort at **all four** N (Holm-significant at 2).
+* It is statistically indistinguishable from flat_fl at 3 of 4 N, having been
+  -0.14 to -0.20 against it under `uav`.
+
+Across the three families, 8 of 12 cells are positive and 5 are
+Holm-significant positive, against 1 Holm-significant negative.
+
+**The mechanism behind every negative result in §7 was the BLOCK-OWNERSHIP
+SPLIT, not the hierarchy.** Under `uav`, clients trained only `struct_branch`
+while the whole image pathway was trained on a UAV shard pooling 1.2-3.8
+clients. That is why `flat_fl` — which never trains `img_proj` at all — beat
+every hierarchical arm. Give clients the full model and the deficit closes.
+
+H1/H3/H5/R1 were therefore all measured inside a design defect. They remain
+valid statements ABOUT THAT DESIGN and must be reported as such, but they do
+not support the general claim §7 drew from them.
+
+#### What R2 does and does not license
+
+DOES: reporting that the ownership split, not the hierarchy, caused the deficit;
+that the proposed selector beats fedcs at scale; that its advantage GROWS
+monotonically with N in every family (-0.012 -> +0.051 vs fedcs;
++0.008 -> +0.051 vs oort), tracking `mean_shard_clients` 1.18 -> 3.79 and
+replicating the documented selection-isolation scaling result.
+
+DOES NOT: any claim of beating the literature selectors generally. Criterion 2
+failed. The shortfall is concentrated at N=30, the thinnest-shard cell, where
+proposed_hfl also takes its only Holm-significant loss to flat_fl (-0.096).
+
+**Seeds 10-19 remain untouched** by development and by R2, so a §2 gate-2
+replication is still available if a NEW pre-registration is written. None is
+written here: continuing to iterate after a pre-committed stop, without a new
+registration, is the optional stopping §1 forbids.
