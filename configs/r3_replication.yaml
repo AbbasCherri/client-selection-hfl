@@ -1,0 +1,77 @@
+# R3 — §2 GATE-2 REPLICATION of R2 on seeds 10-19.
+#
+# PRE-REGISTERED. Criteria fixed before any seed of this arm exists.
+#
+# Why this runs even though R2 FAILED its composite bar
+# ------------------------------------------------------
+# R2 failed (criterion 2 gave 2/4 against oort, needed 3/4) and no win is
+# claimed. But it also produced 5 Holm-significant POSITIVE cells against 1
+# negative, and closed the flat_fl deficit from -0.14/-0.20 to statistical
+# indistinguishability at 3 of 4 N. That is a discovery, and §2 gate 2 requires
+# discoveries to replicate on seeds never used to find them — whether or not
+# they cleared a composite threshold.
+#
+# This is NOT a second attempt at the bar. It is the check that decides whether
+# R2's numbers were real. A replication that fails is the MORE informative
+# outcome, and this project has already had one (C2's K=10 cell went +0.033 ->
+# -0.0045 on fresh seeds).
+#
+# Seed hygiene, the reason this arm is legitimate at all:
+#   development  seeds 20-24  (results/dev_client_full)
+#   R2 discovery seeds  0-9   (results/r2_client_full)
+#   R3 THIS ARM  seeds 10-19  -- touched by NOTHING before now
+#
+# Identical to configs/r2_client_full.yaml in every respect except the seed
+# window. Same recipes, same methods, same N grid, same rounds. A replication
+# that changes anything else is not a replication.
+#
+# Criteria, fixed before the seeds exist
+# --------------------------------------
+# PRIMARY (decisive), evaluated on seeds 10-19 ALONE:
+#   R-1. Sign agreement with R2 in >= 3 of 4 N for each of the three families.
+#   R-2. proposed_hfl Holm-beats fedcs at >= 3 of 4 N   (R2 gave 3/4)
+#   R-3. proposed_hfl NOT significantly worse than flat_fl at >= 3 of 4 N
+#        (R2 gave 3/4)
+#   R-4. The monotone-in-N pattern survives: the proposed_hfl - fedcs and
+#        proposed_hfl - oort differences both increase from N=30 to N=200.
+#
+# NOTE that "beat oort at >= 3 of 4 N" is deliberately NOT a primary criterion
+# here. R2 failed it at 2/4, and re-testing a failed criterion on fresh data and
+# claiming a pass would be exactly the optional stopping §1 forbids. It is
+# reported for completeness and cannot rescue R2's verdict.
+#
+# SECONDARY (pre-specified, NOT decisive): pooled n=20 over seeds 0-19 for
+# effect-size precision only. Pooling raises power (MDE ~0.034 -> ~0.024) but a
+# pooled significance cannot un-fail R2, and will not be reported as doing so.
+#
+# What each outcome means, fixed now
+# -----------------------------------
+#   * R-1..R-4 hold -> the architecture finding is REAL and replicated. The
+#     paper reports: the block-ownership split, not the hierarchy, caused the
+#     deficit; the proposed selector beats fedcs at scale; its advantage grows
+#     with N; and it does NOT meet the stricter bar against oort. That is an
+#     honest, complete result and needs no further arm.
+#   * R-1..R-4 fail -> R2 was seed noise. The §7 retraction stands (the
+#     ownership finding would still need re-examining), but no claim about the
+#     selector survives, and STOP applies.
+#
+# Stopping rule: 10 seeds (10-19), no optional stopping, no post-hoc choice of N
+# or baseline. Variants tried: still 1 — this is the same variant, new seeds.
+#
+# 4 methods x 4 N x 10 seeds = 160 jobs, ~3.5 h on 12 vCPU.
+extends: paper_full.yaml
+
+name: r3_replication
+results_dir: results/r3_replication
+
+seed_offset: 10     # the untouched window; dev used 20-24, R2 used 0-9
+n_seeds: 10
+
+fl:
+  fusion_owner: client_full
+
+methods:
+  - proposed_hfl
+  - fedcs
+  - oort
+  - flat_fl
