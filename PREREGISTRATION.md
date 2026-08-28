@@ -526,3 +526,36 @@ the second time this project has caught one (see the C2 K=10 collapse).
 Path A they describe the old architecture and must not be cited as evidence
 about the new one. The four `tier1_*` runs and the MCLP reference are pure
 placement and survive under both paths.
+
+### §8 AMENDMENT, recorded BEFORE R2 runs: R2 does NOT adopt P1b's recipes
+
+§8 above said R2 would use the recipes P1b tuned under `client_full`. That is
+being changed, and the reason is recorded here before any R2 seed exists.
+
+**P1b's proxy cannot discriminate under this architecture.** Best pooled val:
+
+    fedcs 0.3437   oort 0.3444   proposed_hfl 0.3436     spread 0.0008
+    (under `uav` the same proxy spread was 0.009: 0.3467 / 0.3497 / 0.3555)
+
+A 0.0008 spread across three methods is noise. The proxy is 20 rounds at 0.2
+subsample; `client_full` trains far more parameters at the client tier and so
+converges later, which the proxy scores as worse. It is measuring convergence
+SPEED, not final quality. Adopting near-randomly-selected recipes would inject
+noise into the confirmation without making it fairer.
+
+**The stronger reason: a confirmatory run must replicate the development
+configuration on held-out data.** The dev result was produced with the recipes
+inherited from `tuned_weights.yaml`, applied symmetrically to every arm
+including flat_fl. Changing the recipes between development and confirmation
+would mean R2 tests something other than what dev found, and a null could not
+be attributed.
+
+**R2 is therefore an exact replication of `configs/dev_client_full.yaml` on
+evaluation seeds 0-9 with the full N grid.** Same recipes, same symmetry, new
+data. Criteria unchanged.
+
+**Consequence for Path A, stated now:** if R2 passes, the SHIPPED table still
+requires a proper re-tune under `client_full` (§3 P1 is not waived). That tune
+must use a horizon long enough to discriminate — the 20-round proxy is
+demonstrably unfit for this architecture — which is itself a finding worth
+reporting. Confirm the effect first, then perfect the tuning; not the reverse.
