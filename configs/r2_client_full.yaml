@@ -1,0 +1,71 @@
+# R2 — CONFIRMATORY. Exact replication of the dev configuration on the
+# EVALUATION seeds. Criteria fixed before any seed of this arm exists.
+#
+# This is `configs/dev_client_full.yaml` with the dev split removed and the full
+# N grid restored. Everything else is identical BY DESIGN: a confirmatory run
+# must replicate the development configuration on held-out data, or a null
+# cannot be attributed to the method rather than to the change in setup.
+#
+#   dev  : seeds 20-24, N in {50, 100}      -> results/dev_client_full
+#   R2   : seeds 0-9,   N in {30,50,100,200} -> here
+#
+# Seeds 0-9 have not been touched by any part of this development effort.
+# Development used 20-24. Seeds 10-19 are reserved for §2 gate 2 replication and
+# are still untouched by both.
+#
+# Recipes are inherited from tuned_weights.yaml and applied symmetrically to
+# every arm including flat_fl. They are NOT P1b's client_full recipes: see the
+# §8 amendment in PREREGISTRATION.md, committed at `068f1068e` before this ran.
+# P1b's 20-round proxy separated the three methods by 0.0008 — noise — because
+# client_full trains many more client-side parameters and converges later than
+# that horizon can see.
+#
+# The change under test
+# ---------------------
+# `fusion_owner: client_full`: clients train the WHOLE model
+# (struct_branch + img_proj + fusion); the UAV tier trains nothing and acts as a
+# pure aggregator, still doing placement and selection. Textbook hierarchical
+# FedAvg. Under the previous `uav` ownership clients trained ONLY struct_branch
+# and the entire image pathway was trained on a UAV shard pooling 1.2-3.8
+# clients — which flat_fl beat while leaving img_proj at random initialisation.
+#
+# Development evidence (n=5, seeds 20-24, NOT a result):
+#   vs fedcs   +0.0434 / +0.0509
+#   vs oort    +0.0327 / +0.0271
+#   vs flat_fl -0.0204 / -0.0216   (was -0.196 / -0.150 under `uav`)
+#
+# Criteria — ALL THREE required, unchanged from H5 and R1
+# --------------------------------------------------------
+#   1. proposed_hfl Holm-beats fedcs at >= 3 of 4 N
+#   2. proposed_hfl Holm-beats oort  at >= 3 of 4 N
+#   3. proposed_hfl NOT significantly worse than flat_fl at >= 3 of 4 N
+#
+# The bar does not move with the architecture. Criterion 3 exists because a
+# selector that wins its own comparison while losing to no-hierarchy-at-all has
+# not earned a hierarchical framing.
+#
+# A pass is gate 1 of three (PREREGISTRATION.md §2). It then requires
+# replication on seeds 10-19, expansion to the full method set, a proper
+# re-tune at a horizon that can discriminate, and regeneration of the radius
+# and fleet sweeps under this architecture. A pass is NOT a claim.
+#
+# A fail means the dev signal did not confirm, and STOP-EXHAUSTED at §7 stands.
+# No further variant is licensed without a new pre-registration.
+#
+# Stopping rule: 10 seeds (0-9), no optional stopping, no post-hoc choice of N
+# or of which baseline to report. Variants tried before this: 1.
+#
+# 4 methods x 4 N x 10 seeds = 160 jobs, ~3.5 h on 12 vCPU.
+extends: paper_full.yaml
+
+name: r2_client_full
+results_dir: results/r2_client_full
+
+fl:
+  fusion_owner: client_full
+
+methods:
+  - proposed_hfl
+  - fedcs
+  - oort
+  - flat_fl
