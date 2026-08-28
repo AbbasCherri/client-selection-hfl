@@ -1,0 +1,51 @@
+# Main table completion under `client_full` — REGENERATION, not a hypothesis.
+#
+# No criteria attach to this config and it tests nothing. R3 confirmed the
+# architecture finding on independent seeds (PREREGISTRATION.md, `b1cb483a7`),
+# so the paper's system is `client_full` and the main table must be produced
+# under it. Reporting a headline table under one architecture beside sweeps and
+# ablations under another would make the paper internally inconsistent.
+#
+# STOP applies to ARMS. Completing a table adds no test and consumes no alpha.
+#
+# `proposed_hfl`, `fedcs`, `oort` and `flat_fl` already exist under
+# `client_full` at these exact seeds in `results/r2_client_full` and are NOT
+# recomputed — same seed stream, so the two trees concatenate exactly. This
+# config runs only the nine methods R2 did not cover:
+#
+#   references : centralized, mozaffari2016, alzenad2017
+#   ablations  : hfl_no_selection, hfl_static, hfl_no_reputation
+#   literature : rep_cap, fair_mab, power_of_choice
+#
+# The ablations matter most. Under `uav` they were measured against a proposed
+# system whose client tier trained only `struct_branch`, so they could not
+# isolate what the selection rule contributes. Under `client_full` they finally
+# can: `hfl_no_selection` now differs from `proposed_hfl` in the selection rule
+# alone, with both training the same blocks.
+#
+# Recipes inherited from tuned_weights.yaml, applied symmetrically, exactly as
+# in R2 and R3. See the §8 amendment (`068f1068e`) for why P1b's client_full
+# recipes are not used: its 20-round proxy separated three methods by 0.0008.
+#
+# Evaluation seeds 0-9, matching R2. Seeds 10-19 hold R3's replication and are
+# not touched here.
+#
+# 9 methods x 4 N x 10 seeds = 360 jobs, ~8 h on 12 vCPU.
+extends: paper_full.yaml
+
+name: paper_full_cf
+results_dir: results/paper_full_cf
+
+fl:
+  fusion_owner: client_full
+
+methods:
+  - centralized
+  - hfl_no_selection
+  - hfl_static
+  - hfl_no_reputation
+  - rep_cap
+  - fair_mab
+  - power_of_choice
+  - mozaffari2016
+  - alzenad2017
