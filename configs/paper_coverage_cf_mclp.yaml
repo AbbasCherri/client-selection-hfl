@@ -1,0 +1,38 @@
+# Radius sweep under `client_full` WITH THE MAIN TABLE'S PLACEMENT. Regeneration.
+#
+# `configs/paper_coverage.yaml` sets `placement_method: pso` while
+# `configs/paper_full.yaml` sets `placement_method: mclp_ls`. So every radius
+# sweep this project has produced — including `paper_coverage_v5`, whose
+# crossover the scope-condition framing rested on — characterised a DIFFERENT
+# placement method from the one the main table reports. That mismatch is
+# pre-existing and was not introduced by the client_full work.
+#
+# Both are re-run under client_full for comparability:
+#   results/paper_coverage_cf       pso      (matches the historical sweep)
+#   results/paper_coverage_cf_mclp  mclp_ls  (matches the main table)  <- this
+#
+# Only the mclp_ls curve may be cited beside the main table. The pso curve is
+# kept because it is the like-for-like successor to v5 and isolates how much of
+# the crossover's disappearance is the ownership fix versus the placement
+# method.
+#
+# link_model is path_loss in both (it is the code default, so paper_full gets it
+# implicitly). `uniform_coverage_radius` in the coverage config is INERT —
+# federated.py forces it False whenever link_model is path_loss.
+#
+# 5 methods x 6 radii x 10 seeds = 300 jobs, ~7 h.
+extends: paper_coverage.yaml
+
+name: paper_coverage_cf_mclp
+results_dir: results/paper_coverage_cf_mclp
+
+fl:
+  fusion_owner: client_full
+  placement_method: mclp_ls   # the ONLY change from paper_coverage_cf
+
+methods:
+  - proposed_hfl
+  - flat_fl
+  - hfl_no_selection
+  - fedcs
+  - oort
