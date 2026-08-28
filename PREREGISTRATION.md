@@ -681,3 +681,67 @@ the sweeps and the ablations must be regenerated under `client_full` before the
 paper ships, or it will report a headline system that differs between tables.
 STOP applies to ARMS, not to this: no new hypothesis is licensed, and
 regeneration adds no test.
+
+### Main table under `client_full` — complete, and it reframes the claim (2026-08-28)
+
+`results/r2_client_full` (4 methods) + `results/paper_full_cf` (9 methods),
+seeds 0-9, identical seed streams so the trees concatenate exactly.
+**All 36 method/cell combinations cleared the collapse gate.**
+
+proposed_hfl minus X, Holm within each opponent row across the 4 N:
+
+    fedcs             -0.0122   +0.0217*  +0.0481*  +0.0512*
+    oort              +0.0082   +0.0147   +0.0361*  +0.0512*
+    rep_cap           +0.0380*  +0.0093   +0.0275*  +0.0266*
+    fair_mab          +0.0453*  +0.0427*  +0.0508*  +0.0432*
+    power_of_choice   +0.0193   +0.0291*  +0.0398*  +0.0395*
+    mozaffari2016     +0.0681*  +0.0657*  +0.0759*  +0.0576*
+    alzenad2017       +0.0895*  +0.0947*  +0.0798*  +0.0724*
+    ---------------------------------------------------------
+    flat_fl           -0.0962*  -0.0225   -0.0055   +0.0124
+    hfl_no_selection  -0.0798*  -0.0428*  -0.0351*  -0.0201*
+    hfl_static        +0.0074   -0.0026   -0.0036   -0.0164
+    hfl_no_reputation +0.0046   -0.0129   +0.0038   +0.0012
+    centralized       -0.1808*  -0.1729*  -0.1700*  -0.1907*
+
+#### The finding that changes the claim
+
+**`hfl_no_selection` — the ablation that REMOVES the selection rule — beats
+`proposed_hfl` at ALL FOUR N, Holm-significant.** Selecting at all costs
+accuracy; using every reachable client is better. The proposed rule loses less
+accuracy than the other selectors do, but it does not beat not-selecting.
+
+**`hfl_static` and `hfl_no_reputation` are statistically indistinguishable from
+`proposed_hfl` at every N.** Repositioning contributes nothing measurable
+(consistent with the coverage-sweep negative result) and neither does
+reputation. Of the three components, only selection has a measurable effect,
+and its effect on accuracy is NEGATIVE relative to no selection.
+
+#### What the paper may therefore claim, and what it may not
+
+MAY: among methods operating under a participation constraint, the proposed
+rule beats **all five literature selectors** — fedcs, oort, rep_cap, fair_mab,
+power_of_choice — Holm-significant at 3-4 of 4 N for each, and beats both
+placement baselines at every N. Replicated for fedcs/oort on independent seeds
+(R3). And it attains the **best accuracy-per-MB of any method at every N**
+(0.117/0.063/0.031/0.016 vs hfl_no_selection's 0.104/0.057/0.030/0.015), at
+5-26% less communication per round.
+
+MAY NOT: that it improves accuracy over the state of the art in absolute terms.
+It does not beat its own no-selection ablation, and it does not beat flat FL at
+N=30. Selection is a CONSTRAINT imposed by bandwidth and energy, not an
+accuracy improvement, and the paper must say so.
+
+MAY NOT: claim repositioning or reputation contribute. Both ablations are null.
+Reporting them as components of a working system would be unsupported.
+
+**Accuracy-per-MB is a DERIVED metric constructed after seeing the accuracy
+result.** It is reported as secondary and clearly labelled post-hoc. The primary
+accuracy comparison stands unmodified; the ratio does not rescue it.
+
+#### Remaining corpus gap
+
+`paper_coverage_v5` (radius sweep) and `paper_uav_count` (fleet sweep) are still
+under `uav`. The radius sweep's crossover was measured inside the ownership
+defect and is expected to flatten under `client_full`; it cannot be cited until
+re-measured.
