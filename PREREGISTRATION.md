@@ -619,3 +619,65 @@ proposed_hfl also takes its only Holm-significant loss to flat_fl (-0.096).
 replication is still available if a NEW pre-registration is written. None is
 written here: continuing to iterate after a pre-committed stop, without a new
 registration, is the optional stopping §1 forbids.
+
+### R3 verdict — REPLICATION CONFIRMED (2026-08-28)
+
+`results/r3_replication`. Criteria fixed in `configs/r3_replication.yaml` at
+`9106b6540` with zero result files existing. Seeds **10-19**, verified before
+launch as untouched by development (20-24) and by R2 (0-9). Identical to R2 in
+every respect except the seed window. **All 16 cells cleared the collapse gate.**
+
+    R-1 sign agreement >= 3/4 in every family    PASS  (11 of 12 cells agree)
+    R-2 beats fedcs >= 3/4, Holm                 PASS  (3/4)
+    R-3 not worse than flat_fl >= 3/4            PASS  (3/4)
+    R-4 monotone N=30 -> N=200 (fedcs & oort)    PASS
+
+                         R2 (0-9)              R3 (10-19)
+    minus fedcs    -0.012/+0.022/+0.048/+0.051  +0.007/+0.034*/+0.053*/+0.062*
+    minus oort     +0.008/+0.015/+0.036/+0.051  +0.018/+0.031*/+0.044*/+0.056*
+    minus flat_fl  -0.096/-0.023/-0.006/+0.012  -0.088*/-0.014/-0.006/+0.009
+                                                 (* Holm-significant in R3)
+
+#### R2's FAIL STANDS. It is not converted by R3.
+
+R3 gives 3/4 Holm-significant wins over oort where R2 gave 2/4. **Combining
+them to declare the composite bar passed would be optional stopping**, and
+`configs/r3_replication.yaml` excluded the oort criterion from R3's primary
+set precisely so this could not happen. R2 failed its bar; that verdict is
+final. What R3 establishes is that R2's EFFECTS are real, not that R2 passed.
+
+Both statements are true and neither cancels the other.
+
+#### What is now supported, with independent replication
+
+1. **The block-ownership split, not the hierarchy, caused the deficit.** Under
+   `uav` clients trained only `struct_branch` while the whole image pathway was
+   trained on a UAV shard pooling 1.2-3.8 clients. `client_full` closes a
+   -0.14/-0.20 gap against flat_fl to indistinguishability at N>=50, twice, on
+   independent seeds.
+2. **The proposed selector beats fedcs and oort at N >= 50**, Holm-significant
+   in R3 at 3/4 for both, positive in sign in 7 of 8 cells across both runs.
+3. **The advantage grows monotonically with N** in both runs, tracking
+   `mean_shard_clients` 1.18 -> 3.79, replicating
+   the documented selection-isolation scaling result.
+4. **N=30 is a genuine failure case** and must be reported: the only
+   Holm-significant loss to flat_fl in either run (-0.096, -0.088), and the
+   thinnest-shard cell.
+
+#### What is NOT supported
+
+Any claim of beating the baselines across all N. The composite pre-registered
+bar was failed. The honest sentence is: *at N >= 50 the method beats both
+literature selectors with independent replication, and at N = 30 it does not
+and is beaten by flat FL.*
+
+#### Consequence for the corpus — now unavoidable
+
+The paper's system is `client_full`. Every other FL result
+(`paper_full`, `paper_coverage_v5` radius sweep, `paper_uav_count` fleet sweep,
+all ablations) was produced under `uav` and therefore describes the defective
+design. They remain valid AS the design-defect evidence, but the main table,
+the sweeps and the ablations must be regenerated under `client_full` before the
+paper ships, or it will report a headline system that differs between tables.
+STOP applies to ARMS, not to this: no new hypothesis is licensed, and
+regeneration adds no test.
