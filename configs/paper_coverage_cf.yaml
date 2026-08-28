@@ -1,0 +1,48 @@
+# Radius sweep under `client_full` — REGENERATION, not a hypothesis.
+#
+# No criteria attach and this tests nothing new. It re-measures a quantity the
+# paper already cites, under the architecture the paper now uses.
+#
+# Why it is not optional
+# ----------------------
+# `results/paper_coverage_v5` produced the crossover the STOP-EXHAUSTED framing
+# rested on: proposed_hfl minus flat_fl running -0.165 at R=500 m and rising
+# monotonically to -0.019 at R=5000 m. Every point of that curve was measured
+# under `fusion_owner: uav`, where clients trained ONLY `struct_branch` and the
+# whole image pathway was trained on a UAV shard pooling 1-4 clients.
+#
+# R2/R3 showed that split was the defect. At R=5000 m the flat_fl deficit is
+# already near zero under `client_full`, so the curve is EXPECTED to flatten and
+# the crossover may not exist at all. Citing the old curve beside a main table
+# produced under `client_full` would be reporting two different systems as one.
+#
+# Whichever way it comes out is reportable:
+#   * curve flattens  -> the crossover was an artefact of the ownership split,
+#     which strengthens the architecture finding and retires the scope-condition
+#     framing entirely.
+#   * curve survives  -> reach genuinely limits hierarchical FL independently of
+#     block ownership, and both findings stand side by side.
+#
+# Method set is reduced to the five that carry the claim. The original sweep ran
+# 17, but 12 of those are PLACEMENT variants whose comparison is unaffected by
+# what the client tier trains and which are already reported from v5.
+# `hfl_no_selection` is added because the main table showed it, not flat_fl, is
+# the binding comparator for the proposed rule.
+#
+# Seeds 0-9, matching the main table. N fixed at 200; only R_comm sweeps.
+#
+# 5 methods x 6 radii x 10 seeds = 300 jobs, ~7 h on 12 vCPU.
+extends: paper_coverage.yaml
+
+name: paper_coverage_cf
+results_dir: results/paper_coverage_cf
+
+fl:
+  fusion_owner: client_full
+
+methods:
+  - proposed_hfl
+  - flat_fl
+  - hfl_no_selection
+  - fedcs
+  - oort
