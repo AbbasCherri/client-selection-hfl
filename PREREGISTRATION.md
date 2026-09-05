@@ -826,3 +826,98 @@ quantity: early-round convergence speed, which this method trades away.
 HPO and P1/P1b used 20 and are therefore unreliable for ranking, though they
 remain symmetric across methods and so do not bias the DIRECTION of any
 reported comparison.
+
+### Final radius sweep — verdict (2026-09-05, `results/paper_coverage_final`)
+
+`client_full` + `mclp_ls` + per-method recipes actually applied. 30 000 rows,
+6 radii x 5 methods x 10 seeds x 100 rounds, 0 errors, all 30 cells cleared the
+collapse gate. Reduction = mean macro-F1 over the last 10 rounds; paired
+Wilcoxon over seeds; Holm within each comparator family of 6 radii.
+
+    proposed_hfl - flat_fl            -0.1017* -0.0415* +0.0133  +0.0219  +0.0062  +0.0121
+    proposed_hfl - hfl_no_selection   -0.0470* -0.0531* -0.0255* -0.0272* -0.0370* -0.0206*
+    proposed_hfl - fedcs              -0.0356* +0.0065  +0.0531* +0.0630* +0.0472* +0.0521*
+    proposed_hfl - oort               -0.0204  +0.0123  +0.0499* +0.0632* +0.0488* +0.0520*
+                                       R=500    1000     2000     3000     4000     5000
+
+Mechanism, proposed_hfl, mean over seeds and last 10 rounds:
+
+    R_comm             500    1000    2000    3000    4000    5000
+    coverage_pct     12.30   23.35   43.25   56.05   69.70   80.50
+    mean_shard_clients 1.038  1.184   1.646   1.966   2.357   2.824
+
+The crossover against `flat_fl` survives and now actually crosses: significant
+losses below 1 km, non-negative from 2 km, never a significant win. The wins
+against `fedcs` and `oort` switch on at the same radius. Both transitions sit at
+`mean_shard_clients` ~ 1.65, the same mediator and the same threshold as the
+N-scaling result (1.18/1.48/2.31/3.79 at N=30/50/100/200). Two independent axes
+acting through one measured quantity.
+
+`hfl_no_selection` Holm-beats `proposed_hfl` at ALL SIX radii. This replicates
+the main table, where it beats proposed at all four N. It is the most robust
+negative in the programme and must be reported as such.
+
+### The recipe-regime confound — the headline result is not currently defensible
+
+Scoring `paper_coverage_final` against `paper_coverage_cf_mclp` isolates one
+variable: whether each method runs its own 2026-08-05 recipe (per-method) or
+every method runs `proposed_hfl`'s (shared). Nothing else differs.
+
+Per-method delta relative to the shared regime, by method:
+
+    proposed_hfl      0.0000 at every radius   (bit-identical)
+    flat_fl           0.0000 at every radius   (bit-identical)
+    hfl_no_selection  0.0000 at every radius   (bit-identical)
+    fedcs            -0.0119 -0.0642 -0.0818 -0.0897 -0.0812 -0.0761
+    oort             +0.0153 -0.0101 -0.0488 -0.0553 -0.0538 -0.0550
+
+The three methods with no per-method entry reproduce exactly, which is a clean
+determinism check. The two that have one are made WORSE by up to 0.09 by being
+given their own tuned recipe.
+
+Consequently the headline comparison inverts with the regime:
+
+    vs fedcs   per-method: -0.0356* +0.0065  +0.0531* +0.0630* +0.0472* +0.0521*
+    vs fedcs   shared    : -0.0475* -0.0577* -0.0287* -0.0267* -0.0339* -0.0239*
+    vs oort    per-method: -0.0204  +0.0123  +0.0499* +0.0632* +0.0488* +0.0520*
+    vs oort    shared    : -0.0051  +0.0022  +0.0011  +0.0079  -0.0049  -0.0031
+
+Under the shared regime `proposed_hfl` LOSES to fedcs at every radius, all
+Holm-significant, and ties oort everywhere. Under the per-method regime it wins
+both by ~0.05 from 2 km up. **The sign of the paper's main claim is decided by
+which of two tuning regimes is used, not by the method.**
+
+This is not "the baselines got lucky." The shared recipe is `proposed_hfl`'s own
+tuned recipe; if it biased anything it should bias toward `proposed_hfl`. It
+does not.
+
+Root cause: every recipe in `configs/tuned_weights.yaml` comes from the
+2026-08-05 search, which ran at **20 rounds under `fusion_owner: uav`**. The
+horizon analysis above measured rank correlation with final ordering at
+rho = +0.22 for rounds 11-20. So the per-method recipes were selected by a proxy
+that barely correlates with the quantity being compared, under an architecture
+the paper no longer uses. For fedcs and oort that proxy picked recipes that are
+actively worse at 100 rounds than no per-method tuning at all.
+
+`results/r2_client_full`, `results/r3_replication` and `results/paper_full_cf`
+all carry `per_method` in their resolved configs with the same fedcs entry
+(`lr: 0.019217`, `lr_decay: sqrt`). **The entire main table has this defect.**
+The wins over fedcs, oort, rep_cap, fair_mab and power_of_choice cannot be
+defended against the first reviewer who asks how the baselines were tuned.
+
+Neither regime is publishable. The shared regime imposes one method's recipe on
+all; the per-method regime uses recipes from an invalid horizon. The comparison
+is unanchored either way.
+
+**Required remedy, and it is not optional:** re-tune every compared method at
+>= 60 rounds under `client_full`, symmetrically, on the tuning seeds, then
+regenerate the main table. This is the work deprioritised on 2026-09-05 as
+"full 7-method re-tune, ~7 h, low value". That judgement was wrong and this
+sweep is the evidence. Scope: `proposed_hfl`, `fedcs`, `oort`, `flat_fl`
+(already running), `hfl_no_selection`, `rep_cap`, `fair_mab`,
+`power_of_choice`. The ablations `hfl_static` and `hfl_no_reputation` continue
+to inherit `proposed_hfl`'s recipe by design — they ablate that system, and
+tuning them separately would ablate the recipe too.
+
+No criteria attach to the regeneration itself; it tests nothing and consumes no
+alpha. What it does is make the existing pre-registered criteria answerable.
