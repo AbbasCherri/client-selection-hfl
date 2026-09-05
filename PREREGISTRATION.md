@@ -802,3 +802,27 @@ split accounted for most of the deficit, and a genuine reach-dependence remains
 at small radii. Placement method also interacts strongly with radius — pso and
 mclp_ls disagree by 0.11 at R=500 — which is itself worth reporting and was
 never visible while the two harnesses used different placement.
+
+### Tuning horizon, derived from data (2026-09-05)
+
+Why P1b could not discriminate, measured rather than guessed. Spearman
+correlation between the 7-method ranking in a given round window and the final
+ranking (r91-100), averaged over N=30/50/100/200, from the client_full main
+table:
+
+    rounds  1-10   rho = -0.54    ANTI-predictive
+    rounds 11-20   rho = +0.22    <- the horizon P1/P1b tuned at
+    rounds 21-30   rho = +0.60
+    rounds 31-40   rho = +0.74
+    rounds 41-50   rho = +0.85
+    rounds 51-60   rho = +0.97
+    rounds 81-90   rho = +1.00
+
+proposed_hfl ranks 4th-5th of 7 in rounds 1-10 and 1st-3rd from round 21 on.
+A short-horizon proxy does not merely add noise here, it measures a different
+quantity: early-round convergence speed, which this method trades away.
+
+**Consequence:** any future tuning must use >= 60 rounds. Both the 2026-08-05
+HPO and P1/P1b used 20 and are therefore unreliable for ranking, though they
+remain symmetric across methods and so do not bias the DIRECTION of any
+reported comparison.
