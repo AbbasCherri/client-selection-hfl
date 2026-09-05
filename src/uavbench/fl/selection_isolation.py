@@ -723,6 +723,12 @@ def _selection_job(N: int, mode: str, seed_idx: int, cfg: dict) -> pd.DataFrame:
     # so the selection rule is the only cross-mode difference. (Contrast with
     # sweep._paper_job, where run_full_hfl folds in a method hash.)
     job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
+    # Per-method recipe. Applied here for the same reason as in _paper_job:
+    # without it EVERY method in this sweep runs the BASE recipe, which is
+    # proposed_hfl's own — the exact single-arm tuning defect the main table
+    # was fixed to remove. Popped so it never enters the resume signature.
+    _per_method = job_cfg["fl"].pop("per_method", None) or {}
+    job_cfg["fl"].update(_per_method.get(method, {}))
     job_cfg["_pipeline_version"] = PIPELINE_VERSION
     job_results_dir = Path(cfg["results_dir"]) / f"N{N}" / f"seed{seed_idx}" / mode
     job_cfg["results_dir"] = str(job_results_dir)

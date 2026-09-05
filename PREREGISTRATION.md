@@ -745,3 +745,60 @@ accuracy comparison stands unmodified; the ratio does not rescue it.
 under `uav`. The radius sweep's crossover was measured inside the ownership
 defect and is expected to flatten under `client_full`; it cannot be cited until
 re-measured.
+
+### CORPUS DEFECT found 2026-09-05: sweeps never applied per-method recipes
+
+Found by cross-checking the SAME cell between two harnesses. At N=200, R=5000,
+`client_full`, `mclp_ls` placement, `proposed_hfl - fedcs` read **+0.051** in the
+main table and **-0.024** in the radius sweep. `proposed_hfl` itself reproduced
+almost exactly (0.4046 vs 0.4049); `fedcs` did not (0.3534 vs 0.4289).
+
+**Cause.** `fl.per_method` — the per-method tuned recipes — was applied in
+`_paper_job` ONLY. `_job`, `_coverage_job`, `_uav_job` and `_selection_job` all
+ignored it, so every method in those sweeps ran the BASE recipe, which is
+`proposed_hfl`'s own. That is exactly the single-arm tuning defect the main
+table was fixed to remove ([[baseline-lr-tuning-fairness]]), still live in every
+other harness for the whole life of the project.
+
+It is invisible within a sweep — each looks internally consistent. Only a
+cross-harness comparison of the same cell exposes it.
+
+**Fixed 2026-09-05** in all four builders, guarded by
+`tests/sanity_checks/check_permethod.py` (3 checks, AST-level: these builders
+run a full FL job, so there is no cheap behavioural test).
+
+#### Which results this invalidates, and which survive
+
+`flat_fl` has **no** `per_method` entry in `configs/tuned_weights.yaml`, so it
+inherits the base recipe in EVERY harness. Any `proposed_hfl` vs `flat_fl`
+comparison is therefore unaffected.
+
+SURVIVES:
+* the radius-sweep crossover (proposed vs flat_fl), all versions
+* the fleet-sweep K / shard-width analysis (proposed vs flat_fl)
+* the entire main table, R2 and R3 — all produced by `_paper_job`
+
+INVALID and must not be cited:
+* any radius- or fleet-sweep comparison of `proposed_hfl` against `fedcs`,
+  `oort`, `rep_cap`, `fair_mab` or `power_of_choice` — i.e. the method columns
+  of `paper_coverage_v5`, `paper_coverage_cf`, `paper_coverage_cf_mclp`,
+  `paper_uav_count`, and every `selection_isolation*` / `selection_scaling*` run
+* `probe_topology` and `probe_coverage_vs_k` cross-method readings
+
+#### The crossover, re-measured under the citable configuration
+
+`proposed_hfl - flat_fl` across R_comm (valid, flat_fl has no per-method entry):
+
+    v5   uav + pso           -0.1651 -0.1376 -0.0890 -0.0573 -0.0466 -0.0189
+    client_full + pso        +0.0061 +0.0139 +0.0500*+0.0405*+0.0329*+0.0342*
+    client_full + mclp_ls    -0.1017*-0.0415*+0.0133 +0.0219 +0.0062 +0.0121
+
+Under the configuration that matches the main table (`mclp_ls`), the crossover
+SURVIVES but weakens sharply and now actually crosses: negative and significant
+below ~1 km, positive from ~2 km. Under `uav` it never crossed at all.
+
+So the honest statement is narrower than either earlier version: the ownership
+split accounted for most of the deficit, and a genuine reach-dependence remains
+at small radii. Placement method also interacts strongly with radius — pso and
+mclp_ls disagree by 0.11 at R=500 — which is itself worth reporting and was
+never visible while the two harnesses used different placement.

@@ -207,6 +207,12 @@ def _job(N: int, method: str, cfg: dict) -> pd.DataFrame:
     job_cfg = copy.deepcopy(cfg)
     job_cfg["data"]["N_clients"] = N
     job_cfg["methods"] = [method]
+    # Per-method recipe. Applied here for the same reason as in _paper_job:
+    # without it EVERY method in this sweep runs the BASE recipe, which is
+    # proposed_hfl's own — the exact single-arm tuning defect the main table
+    # was fixed to remove. Popped so it never enters the resume signature.
+    _per_method = job_cfg["fl"].pop("per_method", None) or {}
+    job_cfg["fl"].update(_per_method.get(method, {}))
     job_cfg["_pipeline_version"] = PIPELINE_VERSION
     job_results_dir = Path(cfg["results_dir"]) / f"N{N}" / method
     job_cfg["results_dir"] = str(job_results_dir)
@@ -520,6 +526,12 @@ def _coverage_job(r_comm: float, method: str, seed_idx: int, cfg: dict) -> pd.Da
     job_cfg["data"]["N_clients"] = N
     job_cfg["data"]["partition_seed"] = partition_seed_for(seed_idx)
     job_cfg["methods"] = [method]
+    # Per-method recipe. Applied here for the same reason as in _paper_job:
+    # without it EVERY method in this sweep runs the BASE recipe, which is
+    # proposed_hfl's own — the exact single-arm tuning defect the main table
+    # was fixed to remove. Popped so it never enters the resume signature.
+    _per_method = job_cfg["fl"].pop("per_method", None) or {}
+    job_cfg["fl"].update(_per_method.get(method, {}))
     job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
     job_cfg["fl"]["R_comm"] = float(r_comm)
 
@@ -603,6 +615,12 @@ def _uav_job(k: int, capacity: int, method: str, seed_idx: int, cfg: dict) -> pd
     job_cfg["data"]["N_clients"] = N
     job_cfg["data"]["partition_seed"] = partition_seed_for(seed_idx)
     job_cfg["methods"] = [method]
+    # Per-method recipe. Applied here for the same reason as in _paper_job:
+    # without it EVERY method in this sweep runs the BASE recipe, which is
+    # proposed_hfl's own — the exact single-arm tuning defect the main table
+    # was fixed to remove. Popped so it never enters the resume signature.
+    _per_method = job_cfg["fl"].pop("per_method", None) or {}
+    job_cfg["fl"].update(_per_method.get(method, {}))
     job_cfg["fl"]["seed"] = sweep_job_seed(cfg.get("optimizer_seed", 9876), seed_idx, N)
     job_cfg["fl"]["K"] = int(k)
     job_cfg["fl"]["capacity"] = int(capacity)
