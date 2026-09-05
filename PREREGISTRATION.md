@@ -921,3 +921,74 @@ tuning them separately would ablate the recipe too.
 
 No criteria attach to the regeneration itself; it tests nothing and consumes no
 alpha. What it does is make the existing pre-registered criteria answerable.
+
+### Recipe-regime triangulation (2026-09-05, `scripts/score_recipe_regimes.py`)
+
+Three independent recipe sets, same architecture (`client_full`), same
+reduction. A and B sweep R_comm at N=200 (n=10); C sweeps N at R=5000 (n=5,
+seeds 20-24, where the minimum two-sided Wilcoxon p is 0.0625 and no cell can
+reach significance — sign check only).
+
+    A shared      every method on proposed_hfl's recipe   results/paper_coverage_cf_mclp
+    B per-method  each on its own 2026-08-05 recipe       results/paper_coverage_final
+    C alt         P1's 5 km recipes                       results/robustness_alt_recipes
+
+`proposed_hfl` minus comparator (* = raw Wilcoxon p < 0.05):
+
+    A  fedcs             -0.0475* -0.0577* -0.0287* -0.0267* -0.0339* -0.0239*
+    B  fedcs             -0.0356* +0.0065  +0.0531* +0.0630* +0.0472* +0.0521*
+    A  oort              -0.0051  +0.0022  +0.0011  +0.0079  -0.0049  -0.0031
+    B  oort              -0.0204* +0.0123* +0.0499* +0.0632* +0.0488* +0.0520*
+    A  flat_fl           -0.1017* -0.0415* +0.0133  +0.0219* +0.0062  +0.0121
+    B  flat_fl           -0.1017* -0.0415* +0.0133  +0.0219* +0.0062  +0.0121
+    A  hfl_no_selection  -0.0470* -0.0531* -0.0255* -0.0272* -0.0370* -0.0206*
+    B  hfl_no_selection  -0.0470* -0.0531* -0.0255* -0.0272* -0.0370* -0.0206*
+                          R=500    1000     2000     3000     4000     5000
+
+Sign agreement A vs B, on identical cells:
+
+    vs fedcs             1/6   ORDERING IS RECIPE-DEPENDENT
+    vs oort              4/6   ORDERING IS RECIPE-DEPENDENT
+    vs flat_fl           6/6
+    vs hfl_no_selection  6/6
+
+Regime C, ranked by mean macro-F1 over the last 10 rounds:
+
+    N=50    flat_fl 0.5232  fedcs 0.4909  proposed_hfl 0.4662  oort 0.4471
+    N=100   flat_fl 0.5064  fedcs 0.4396  oort 0.4275  proposed_hfl 0.4227
+
+    proposed_hfl - fedcs    -0.0247  -0.0169
+    proposed_hfl - oort     +0.0191  -0.0048
+    proposed_hfl - flat_fl  -0.0570  -0.0838
+
+#### What triangulates and what does not
+
+**Regime B is the outlier.** `proposed_hfl` beats `fedcs` and `oort` in exactly
+one of three recipe regimes — the one built from the 20-round proxy measured at
+rho = +0.22 against the final ordering, and the one that demonstrably degrades
+fedcs by up to 0.09 and oort by up to 0.055 relative to no per-method tuning at
+all. In regime A it loses to fedcs at all six radii and ties oort. In regime C
+it ranks 3rd of 4 at N=50 and 4th of 4 at N=100.
+
+The main table (`r2_client_full`, `r3_replication`, `paper_full_cf`) was
+produced under regime B. **The selector claim rests on the least defensible of
+the three regimes and does not survive either alternative.**
+
+**Recipe-invariant, and therefore reportable now:**
+
+* `hfl_no_selection` beats `proposed_hfl` in 6/6 cells under both A and B, and
+  at all four N in the main table. Using every reachable client beats selecting
+  among them. This is the most robust finding in the programme and it is
+  negative for the selection rule.
+* The `flat_fl` curve is bit-identical across A and B (neither method has a
+  per-method entry). The crossover at ~2 km and the shard-width threshold at
+  `mean_shard_clients` ~ 1.65 are recipe-independent.
+* The block-ownership effect (0.14-0.20, `uav` -> `client_full`) is an order of
+  magnitude larger than any recipe difference observed here and is replicated on
+  independent seeds (R3). It is not at risk from this confound.
+
+The symmetric 60-round retune (`scripts/retune60.sh`, launched 15:30 UTC) is the
+decisive test. Regime C is the closest existing approximation to a fair regime
+and `proposed_hfl` loses there, so the prior going in should be that the
+selector claim does not survive. That prediction is recorded here BEFORE the
+retune completes, so the outcome cannot be re-narrated afterwards.

@@ -1,0 +1,33 @@
+# recipe-regime triangulation — does the ordering depend on the recipes?
+# reduction: mean macro-F1 over last 10 rounds; * = raw Wilcoxon p < 0.05
+
+=== REGIME A - shared recipe (proposed_hfl's), R_comm sweep, n=10 ===
+  proposed_hfl minus   R_comm=500  R_comm=1000  R_comm=2000  R_comm=3000  R_comm=4000  R_comm=5000
+               fedcs     -0.0475*     -0.0577*     -0.0287*     -0.0267*     -0.0339*     -0.0239*
+                oort     -0.0051      +0.0022      +0.0011      +0.0079      -0.0049      -0.0031 
+             flat_fl     -0.1017*     -0.0415*     +0.0133      +0.0219*     +0.0062      +0.0121 
+    hfl_no_selection     -0.0470*     -0.0531*     -0.0255*     -0.0272*     -0.0370*     -0.0206*
+
+=== REGIME B - per-method 2026-08-05 recipes, R_comm sweep, n=10 ===
+  proposed_hfl minus   R_comm=500  R_comm=1000  R_comm=2000  R_comm=3000  R_comm=4000  R_comm=5000
+               fedcs     -0.0356*     +0.0065      +0.0531*     +0.0630*     +0.0472*     +0.0521*
+                oort     -0.0204*     +0.0123*     +0.0499*     +0.0632*     +0.0488*     +0.0520*
+             flat_fl     -0.1017*     -0.0415*     +0.0133      +0.0219*     +0.0062      +0.0121 
+    hfl_no_selection     -0.0470*     -0.0531*     -0.0255*     -0.0272*     -0.0370*     -0.0206*
+
+=== REGIME C - P1 5km recipes, N sweep, n=5 ===
+    seeds [np.int64(20), np.int64(21), np.int64(22), np.int64(23), np.int64(24)]; min two-sided Wilcoxon p at n=5 is 0.0625, so no cell here can reach 0.05 - sign check only
+  proposed_hfl minus         N=50        N=100
+               fedcs     -0.0247      -0.0169 
+                oort     +0.0191      -0.0048 
+             flat_fl     -0.0570      -0.0838 
+
+    ranking by mean macro-F1:
+      N=50   flat_fl=0.5232  fedcs=0.4909  proposed_hfl=0.4662  oort=0.4471
+      N=100  flat_fl=0.5064  fedcs=0.4396  oort=0.4275  proposed_hfl=0.4227
+
+=== sign agreement between regimes A and B (same cells) ===
+  vs fedcs              1/6 radii agree   <-- ORDERING IS RECIPE-DEPENDENT
+  vs oort               4/6 radii agree   <-- ORDERING IS RECIPE-DEPENDENT
+  vs flat_fl            6/6 radii agree
+  vs hfl_no_selection   6/6 radii agree
