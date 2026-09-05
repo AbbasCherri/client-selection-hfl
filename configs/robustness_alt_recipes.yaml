@@ -1,0 +1,36 @@
+# Recipe-robustness check. NOT a hypothesis, NOT a result to report as a win.
+#
+# Question: is the main table's ranking an artefact of WHICH tuned recipe set
+# was used? All project tuning used a 20-round horizon, measured at Spearman
+# 0.22 against the true ranking, so "recipe luck" is a live objection that
+# seed-level replication (R3) does not answer.
+#
+# This runs the headline contrasts under a SECOND, independently-produced recipe
+# set — P1's 5 km per-method recipes (configs/paper_full_5km.yaml) — instead of
+# the 20 km set the main table uses. Same architecture, same seeds, same grid.
+# If the ranking holds across two independent recipe sets, the result is robust
+# to the tuning; if it flips, the main table is a tuning artefact and must be
+# reported as such.
+#
+# Dev seeds 20-24. Evaluation seeds 0-9 and replication seeds 10-19 are NOT
+# touched: this is a robustness diagnostic, not a re-test of the claim.
+#
+# 4 methods x 2 N x 5 seeds = 40 jobs, ~1 h.
+extends: paper_full_5km.yaml
+
+name: robustness_alt_recipes
+results_dir: results/robustness_alt_recipes
+
+seed_offset: 20
+n_seeds: 5
+
+fl:
+  fusion_owner: client_full
+
+N_values: [50, 100]
+
+methods:
+  - proposed_hfl
+  - fedcs
+  - oort
+  - flat_fl
