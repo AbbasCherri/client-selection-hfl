@@ -1,0 +1,37 @@
+# FINAL radius sweep — client_full + mclp_ls + per-method recipes actually applied.
+#
+# Regeneration, not a hypothesis. No criteria attach.
+#
+# Supersedes results/paper_coverage_cf_mclp, which ran before the per-method
+# defect was found (PREREGISTRATION.md, 2026-09-05): `_coverage_job` ignored
+# `fl.per_method`, so every method there ran proposed_hfl's base recipe. That
+# tree is KEPT as the record of the defect and must not be cited for any
+# cross-method reading.
+#
+# Three things had to line up before this sweep could sit beside the main table:
+#   1. `fusion_owner: client_full`  — the architecture R2/R3 established
+#   2. `placement_method: mclp_ls`  — what paper_full uses; paper_coverage used
+#                                     pso for the entire life of the project
+#   3. per-method recipes applied   — fixed at `f02b436fd`, guarded by
+#                                     tests/sanity_checks/check_permethod.py
+#
+# Only proposed_hfl-vs-flat_fl was ever valid before, because flat_fl has no
+# per_method entry and so inherited the base recipe in both harnesses. Every
+# other method column in every previous sweep was invalid.
+#
+# 5 methods x 6 radii x 10 seeds = 300 jobs, ~7 h.
+extends: paper_coverage.yaml
+
+name: paper_coverage_final
+results_dir: results/paper_coverage_final
+
+fl:
+  fusion_owner: client_full
+  placement_method: mclp_ls
+
+methods:
+  - proposed_hfl
+  - flat_fl
+  - hfl_no_selection
+  - fedcs
+  - oort
