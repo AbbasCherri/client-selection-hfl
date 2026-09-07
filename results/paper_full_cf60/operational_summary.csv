@@ -1,0 +1,6 @@
+method,coverage_pct,participation_pct,comm_mb_round,cumulative_energy_j,round_time_s,placement_fitness,jain_fairness,rounds_to_target
+fedcs,93.2958,29.3417,14.004,3806827.6133,7.3993,0.7805,0.8455,74.9091
+flat_fl,100.0,30.4042,15.0729,0.0,5.6903,1.0,0.8873,71.3913
+hfl_no_selection,92.3375,30.0417,14.5993,2373202.3149,6.6828,0.7798,0.826,70.4706
+oort,93.2708,25.2083,13.0162,2886278.9937,6.1551,0.7805,0.7042,
+proposed_hfl,92.9917,25.3708,13.0974,2611506.948,6.3582,0.7805,0.7002,
