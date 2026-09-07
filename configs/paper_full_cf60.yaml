@@ -1,0 +1,67 @@
+# THE decisive table — symmetric 60-round recipes under `client_full`.
+#
+# This is the run the whole 2026-09-05 programme exists to make possible. It is
+# a REGENERATION under corrected tuning, not a new hypothesis, and no new
+# criteria attach to it. What it does is make the EXISTING pre-registered
+# criteria answerable, which they currently are not.
+#
+# What was wrong with the table it replaces
+# ------------------------------------------
+# `r2_client_full`, `r3_replication` and `paper_full_cf` all applied per-method
+# recipes from the 2026-08-05 search: 20 rounds, under `fusion_owner: uav`.
+# Two measurements (PREREGISTRATION.md, 2026-09-05) show that is fatal:
+#
+#   * a 20-round ordering correlates with the final ordering at rho = +0.22;
+#     60 rounds reaches +0.97
+#   * those recipes made fedcs WORSE by up to 0.09 and oort by up to 0.055 than
+#     giving them no per-method recipe at all, and the SIGN of the headline
+#     comparison flipped between recipe regimes (1/6 radii agreed for fedcs)
+#
+# So the previous table's wins over fedcs and oort rest on baselines handicapped
+# by an invalid tuning horizon. Every method here instead carries a recipe from
+# an identical search: 25 trials, 60 rounds, recipe space, seeds 20-22, adopted
+# at tune-rank 1. See configs/tuned_weights_cf60.yaml.
+#
+# The prediction, recorded BEFORE this runs
+# ------------------------------------------
+# PREREGISTRATION.md states the expectation that the selector claim does NOT
+# survive: under the shared-recipe regime proposed_hfl lost to fedcs at all six
+# radii, and under P1's recipes it ranked 3rd of 4 at N=50 and 4th of 4 at
+# N=100. flat_fl's 60-round tuning also gained +0.063 on the val proxy against
+# a current margin of +0.012. That prediction is on record so this run's outcome
+# cannot be re-narrated after the fact.
+#
+# Scope
+# -----
+# Five methods, the ones that carry the claim:
+#   proposed_hfl      the method under test
+#   fedcs, oort       the literature selectors it must beat
+#   flat_fl           no hierarchy at all — criterion 3's comparator
+#   hfl_no_selection  same hierarchy, no selection rule — isolates what the
+#                     selector itself contributes, and currently beats it at
+#                     every N and every radius
+#
+# rep_cap, fair_mab and power_of_choice are tuned and ready but are NOT run
+# here. If the five below do not survive, the claim they would support does not
+# exist and regenerating their columns buys nothing. That is sequencing, not
+# selective reporting: their recipes are committed and the config to run them is
+# a three-line edit.
+#
+# Evaluation seeds 0-9, matching R2 and every table this replaces. Seeds 10-19
+# hold R3's replication and are untouched. Tuning used 20-22, transfer 23-24.
+#
+# 5 methods x 4 N x 10 seeds = 200 jobs, ~4.5 h on 12 vCPU.
+extends: tuned_weights_cf60.yaml
+
+name: paper_full_cf60
+results_dir: results/paper_full_cf60
+
+fl:
+  fusion_owner: client_full
+
+methods:
+  - proposed_hfl
+  - fedcs
+  - oort
+  - flat_fl
+  - hfl_no_selection

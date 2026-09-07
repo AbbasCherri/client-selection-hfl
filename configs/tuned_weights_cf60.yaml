@@ -1,0 +1,114 @@
+# Validation-tuned recipes — 60 ROUNDS, `fusion_owner: client_full`.
+#
+# Supersedes configs/tuned_weights.yaml FOR client_full experiments only.
+# Inherit with `extends: tuned_weights_cf60.yaml`; never copy these values.
+#
+# Why this file exists
+# --------------------
+# The 2026-08-05 recipes in tuned_weights.yaml were searched at 20 rounds
+# under `fusion_owner: uav`. Two measurements invalidate them for the
+# client_full table (both recorded in PREREGISTRATION.md, 2026-09-05):
+#
+#   1. Rank correlation between a 20-round ordering and the final
+#      ordering is rho = +0.22. At 60 rounds it is +0.97.
+#   2. Applying those per-method recipes made fedcs WORSE by up to 0.09
+#      and oort by up to 0.055 versus not tuning per method at all, and
+#      the sign of the headline comparison flipped with the regime.
+#
+# Search, identical for every method: --space recipe, 25 trials, 60 rounds,
+# tuning seeds 20-22, N in {30,50}, R_comm 5000, K=20, capacity 6,
+# subsample 0.2, objective val_macro_f1. Equal budget, equal space, equal
+# horizon, equal seeds — an asymmetric budget is the confound this replaces.
+#
+# proposed_hfl was searched on the RECIPE space only, like everyone else;
+# its fitness weights are held at their existing values. That is
+# conservative for our claim, not favourable to it.
+#
+# Adoption: tune-rank 1 on the 3 tuning seeds, for every method. The 2
+# transfer seeds are reported and never used to select, so the transfer
+# check still answers the question it exists to answer. Applied by script
+# (scripts/adopt_cf60.py) to all eight studies, not by hand.
+#
+# tuned_weights.yaml used POOLED val (3*tune + 2*transfer)/5 for two
+# methods. That rule is declined here: over these eight studies it moves
+# the pick for exactly one method — proposed_hfl, the method under test,
+# in its own favour by +0.0046 pooled. Tune-rank 1 costs us that 0.0046,
+# which is the correct direction for a contested claim.
+#
+#      method          trial  tune-rank    tune    xfer  pooled
+#         proposed_hfl     23          1  0.3727  0.3788  0.3751
+#                fedcs     23          1  0.3784  0.3754  0.3772
+#                 oort     20          1  0.3670  0.3601  0.3643
+#              flat_fl     24          1  0.4264  0.4181  0.4231
+#     hfl_no_selection     24          1  0.3601  0.3772  0.3669
+#              rep_cap     19          1  0.3779  0.3725  0.3757
+#             fair_mab     14          1  0.3790  0.3799  0.3794
+#      power_of_choice      6          1  0.3865  0.3823  0.3848
+#
+# The declined pooled rule would have differed for: proposed_hfl.
+# Stated plainly because it is the kind of detail that decides whether a
+# reviewer trusts the table.
+
+extends: paper_full.yaml
+
+fl:
+  # Base recipe = proposed_hfl's adopted recipe. hfl_static and
+  # hfl_no_reputation inherit it so they ablate one component, not the
+  # recipe as well. centralized and mozaffari/alzenad also inherit it.
+  lr: 3.033591e-02
+  uav_lr: 3.033591e-02
+  lr_decay: sqrt
+  logit_adjust_tau: 0.708534
+  server_momentum: 0.581572
+  ema_decay: 0.153632
+
+  per_method:
+    fedcs:   # trial 23, tune-rank 1, pooled 0.3772
+      lr: 2.628821e-02
+      uav_lr: 2.628821e-02
+      lr_decay: cosine
+      logit_adjust_tau: 0.693124
+      server_momentum: 0.105109
+      ema_decay: 0.338801
+    oort:   # trial 20, tune-rank 1, pooled 0.3643
+      lr: 1.473217e-02
+      uav_lr: 1.473217e-02
+      lr_decay: none
+      logit_adjust_tau: 0.587747
+      server_momentum: 0.153644
+      ema_decay: 0.514746
+    flat_fl:   # trial 24, tune-rank 1, pooled 0.4231
+      lr: 4.934245e-02
+      uav_lr: 4.934245e-02
+      lr_decay: cosine
+      logit_adjust_tau: 0.613154
+      server_momentum: 0.694822
+      ema_decay: 0.404814
+    hfl_no_selection:   # trial 24, tune-rank 1, pooled 0.3669
+      lr: 1.287133e-02
+      uav_lr: 1.287133e-02
+      lr_decay: none
+      logit_adjust_tau: 0.607083
+      server_momentum: 0.656043
+      ema_decay: 0.881903
+    rep_cap:   # trial 19, tune-rank 1, pooled 0.3757
+      lr: 2.792679e-02
+      uav_lr: 2.792679e-02
+      lr_decay: cosine
+      logit_adjust_tau: 0.668174
+      server_momentum: 0.072089
+      ema_decay: 0.640899
+    fair_mab:   # trial 14, tune-rank 1, pooled 0.3794
+      lr: 1.427423e-02
+      uav_lr: 1.427423e-02
+      lr_decay: sqrt
+      logit_adjust_tau: 0.757174
+      server_momentum: 0.751858
+      ema_decay: 0.495230
+    power_of_choice:   # trial 6, tune-rank 1, pooled 0.3848
+      lr: 1.439166e-02
+      uav_lr: 1.439166e-02
+      lr_decay: cosine
+      logit_adjust_tau: 0.742022
+      server_momentum: 0.654568
+      ema_decay: 0.507306
