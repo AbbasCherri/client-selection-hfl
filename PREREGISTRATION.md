@@ -992,3 +992,102 @@ decisive test. Regime C is the closest existing approximation to a fair regime
 and `proposed_hfl` loses there, so the prior going in should be that the
 selector claim does not survive. That prediction is recorded here BEFORE the
 retune completes, so the outcome cannot be re-narrated afterwards.
+
+## VERDICT — the decisive table (2026-09-07, `results/paper_full_cf60`)
+
+Symmetric 60-round recipes, `client_full`, evaluation seeds 0-9, 200 jobs,
+0 errors, all 20 method/cell combinations cleared the collapse gate.
+
+`proposed_hfl` minus comparator, mean macro-F1 over the last 10 rounds, paired
+Wilcoxon over seeds 0-9, Holm within each family of 4 N (* = Holm-significant).
+The previous table's row, produced under the 20-round `uav` recipes, is printed
+beneath each for comparison.
+
+    vs fedcs             -0.0612* -0.0336* -0.0084* -0.0085*
+      previous           -0.0122  +0.0217* +0.0481* +0.0512*
+
+    vs oort              +0.0031  -0.0047  +0.0097  +0.0045
+      previous           +0.0082  +0.0147  +0.0361* +0.0512*
+
+    vs flat_fl           -0.1350* -0.0755* -0.0586* -0.0430*
+      previous           -0.0962* -0.0225  -0.0055  +0.0124
+
+    vs hfl_no_selection  -0.0790* -0.0542* -0.0338* -0.0309*
+                          N=30     N=50     N=100    N=200
+
+### Pre-registered criteria
+
+    1. Holm-beats fedcs at >= 3 of 4 N          0/4   FAIL
+    2. Holm-beats oort  at >= 3 of 4 N          0/4   FAIL
+    3. Not sig. worse than flat_fl at >= 3 of 4 0/4   FAIL
+
+    COMPOSITE: FAIL, 0 of 3.
+
+Ranking by mean macro-F1 over the last 10 rounds:
+
+    N=30    flat_fl .5366  hfl_no_selection .4806  fedcs .4628  proposed_hfl .4016  oort .3985
+    N=50    flat_fl .4773  hfl_no_selection .4561  fedcs .4355  oort .4066  proposed_hfl .4018
+    N=100   flat_fl .4519  hfl_no_selection .4270  fedcs .4016  proposed_hfl .3932  oort .3836
+    N=200   flat_fl .4035  hfl_no_selection .3913  fedcs .3690  proposed_hfl .3604  oort .3559
+
+`proposed_hfl` ranks 4th or 5th of 5 at every N.
+
+### This confirms the prediction recorded before the run
+
+The entry of 2026-09-05 stated: "the prior going in should be that the selector
+claim does not survive. That prediction is recorded here BEFORE the retune
+completes, so the outcome cannot be re-narrated afterwards." It did not survive.
+
+The apparent wins over fedcs (+0.022/+0.048/+0.051) and oort (+0.036/+0.051)
+in `r2_client_full`, `r3_replication` and `paper_full_cf` were artefacts of
+baselines handicapped by recipes searched at a 20-round horizon under a
+different architecture. Given equal search budget, equal space, equal horizon
+and equal seeds, `proposed_hfl` Holm-LOSES to fedcs at all four N and is
+statistically indistinguishable from oort at all four.
+
+**R3's replication does not rescue this.** R3 replicated R2 faithfully — same
+seeds discipline, same criteria, independent seeds — and both are invalidated by
+the same defect, because both used the same handicapped baseline recipes. A
+replication inherits its comparison's confounds. That is the lesson, and it is
+worth more than the result it retracts.
+
+### STOP
+
+§5's stopping rules apply. The composite failed on fresh evaluation seeds under
+the fairest configuration the project can construct. No further variant of the
+selection rule is licensed without a new pre-registration, and no such
+pre-registration is contemplated: the mechanism evidence below explains WHY the
+rule cannot win here, so further search would be search against a known cause.
+
+### What survives, and it is not nothing
+
+1. **Block ownership is the dominant design variable.** Moving `img_proj` and
+   `fusion` from the UAV tier to the clients is worth 0.14-0.20 macro-F1, an
+   order of magnitude more than any selection rule, recipe, or placement effect
+   measured in this project. Replicated on independent seeds (R3). The contrast
+   holds recipes constant across the two ownerships, so the retune does not
+   disturb it.
+
+2. **The deficit is governed by shard width, and it is monotone.** Against
+   `flat_fl` the gap closes steadily as clients per shard rises:
+   -0.1350 / -0.0755 / -0.0586 / -0.0430 at N=30/50/100/200, tracking
+   `mean_shard_clients` 1.18/1.48/2.31/3.79. The radius sweep gives the same
+   mechanism on an independent axis. It never crosses zero within the tested
+   range, so the honest statement is a rate and a direction, not a crossover.
+
+3. **Client selection does not pay for itself.** `hfl_no_selection` — identical
+   hierarchy, no selector — Holm-beats `proposed_hfl` at all four N here, at all
+   six radii in `paper_coverage_final`, and under every recipe regime tested.
+   Using every reachable client beats choosing among them. This is the most
+   robust finding in the programme and it is negative.
+
+4. **Tuning horizon is a first-order confound in FL benchmarking.** A 20-round
+   proxy correlates with the 100-round ordering at rho = +0.22; 60 rounds
+   reaches +0.97. Recipes adopted at the short horizon made fedcs worse by up to
+   0.09 than no per-method tuning at all, and flipped the sign of the headline
+   comparison. Any FL paper that tunes at a short horizon and reports at a long
+   one is exposed to exactly this. That is a methodological result worth
+   reporting on its own.
+
+The paper this data supports is a mechanism-and-negative-result paper, not a
+new-selector paper. The selector claim is retracted.

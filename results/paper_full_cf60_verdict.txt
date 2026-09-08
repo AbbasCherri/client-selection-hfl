@@ -1,0 +1,55 @@
+# DECISIVE TABLE — results/paper_full_cf60
+# symmetric 60-round recipes (configs/tuned_weights_cf60.yaml),
+# fusion_owner=client_full, evaluation seeds 0-9
+# 20000 rows, methods ['fedcs', 'flat_fl', 'hfl_no_selection', 'oort', 'proposed_hfl']
+
+=== proposed_hfl - fedcs ===
+    N       diff          p    Holm    n  note
+   30    -0.0612     0.0039    True   10  
+   50    -0.0336     0.0020    True   10  
+  100    -0.0084     0.0488    True   10  
+  200    -0.0085     0.0195    True   10  
+  previous table (20-round uav recipes): -0.0122   +0.0217*  +0.0481*  +0.0512*
+
+=== proposed_hfl - oort ===
+    N       diff          p    Holm    n  note
+   30    +0.0031     0.8457   False   10  below MDE - uninformative
+   50    -0.0047     0.3750   False   10  below MDE - uninformative
+  100    +0.0097     0.0273   False   10  below MDE - uninformative
+  200    +0.0045     0.2324   False   10  below MDE - uninformative
+  previous table (20-round uav recipes): +0.0082   +0.0147   +0.0361*  +0.0512*
+
+=== proposed_hfl - flat_fl ===
+    N       diff          p    Holm    n  note
+   30    -0.1350     0.0020    True   10  
+   50    -0.0755     0.0020    True   10  
+  100    -0.0586     0.0020    True   10  
+  200    -0.0430     0.0020    True   10  
+  previous table (20-round uav recipes): -0.0962*  -0.0225   -0.0055   +0.0124 
+
+=== proposed_hfl - hfl_no_selection ===
+    N       diff          p    Holm    n  note
+   30    -0.0790     0.0020    True   10  
+   50    -0.0542     0.0020    True   10  
+  100    -0.0338     0.0039    True   10  
+  200    -0.0309     0.0020    True   10  
+  previous table (20-round uav recipes): +nan   +nan   +nan   +nan 
+
+==============================================================
+PRE-REGISTERED CRITERIA
+==============================================================
+  1. Holm-beats fedcs at >=3 of 4 N        : 0/4  FAIL
+  2. Holm-beats oort at >=3 of 4 N         : 0/4  FAIL
+  3. Not sig. worse than flat_fl at >=3 of 4: 0/4  FAIL
+
+  COMPOSITE: FAIL (0/3 criteria met)
+
+  hfl_no_selection (not a criterion): proposed_hfl is Holm-WORSE at 4/4 N
+  This is the ablation that isolates the selection rule: same hierarchy,
+  no selector. Losing to it means the rule does not pay for itself.
+
+=== ranking by mean macro-F1 (last 10 rounds, pooled over seeds) ===
+  N=30   (proposed_hfl ranks 4/5): flat_fl=0.5366  hfl_no_selection=0.4806  fedcs=0.4628  proposed_hfl=0.4016  oort=0.3985
+  N=50   (proposed_hfl ranks 5/5): flat_fl=0.4773  hfl_no_selection=0.4561  fedcs=0.4355  oort=0.4066  proposed_hfl=0.4018
+  N=100  (proposed_hfl ranks 4/5): flat_fl=0.4519  hfl_no_selection=0.4270  fedcs=0.4016  proposed_hfl=0.3932  oort=0.3836
+  N=200  (proposed_hfl ranks 4/5): flat_fl=0.4035  hfl_no_selection=0.3913  fedcs=0.3690  proposed_hfl=0.3604  oort=0.3559
