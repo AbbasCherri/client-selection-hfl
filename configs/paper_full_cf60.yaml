@@ -51,7 +51,7 @@
 # hold R3's replication and are untouched. Tuning used 20-22, transfer 23-24.
 #
 # 5 methods x 4 N x 10 seeds = 200 jobs, ~4.5 h on 12 vCPU.
-extends: tuned_weights_cf60.yaml
+extends: [paper_full.yaml, tuned_weights_cf60.yaml]
 
 name: paper_full_cf60
 results_dir: results/paper_full_cf60

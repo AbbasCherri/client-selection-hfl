@@ -53,6 +53,11 @@ def load_config(path: str | Path) -> dict:
     file first and deep-merges this config over it, so shared values — notably
     the Optuna-tuned training weights in ``configs/tuned_weights.yaml`` — live
     in exactly one place. Chains are followed recursively; cycles raise.
+
+    ``extends`` also accepts a LIST of parents, merged left to right with the
+    child merged last, for a config that needs two independent bases (a domain
+    config and a recipe file). Without it such a config has to inline one of
+    them, and an inlined recipe silently drifts from its source.
     """
     return _load_config_inner(Path(path), _seen=())
 
@@ -69,10 +74,15 @@ def _load_config_inner(path: Path, _seen: tuple[Path, ...]) -> dict:
     if parent is None:
         return cfg
 
-    parent_path = path.parent / parent
-    if not parent_path.exists():
-        raise FileNotFoundError(f"{path}: 'extends' target not found: {parent_path}")
-    base = _load_config_inner(parent_path, _seen=(*_seen, resolved))
+    parents = [parent] if isinstance(parent, str) else list(parent)
+    base: dict = {}
+    for entry in parents:
+        parent_path = path.parent / entry
+        if not parent_path.exists():
+            raise FileNotFoundError(
+                f"{path}: 'extends' target not found: {parent_path}")
+        base = _deep_merge(
+            base, _load_config_inner(parent_path, _seen=(*_seen, resolved)))
     return _deep_merge(base, cfg)
 
 

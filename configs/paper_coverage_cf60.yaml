@@ -1,0 +1,53 @@
+# Radius sweep under the SAME symmetric 60-round recipes as the decisive table.
+#
+# REGENERATION, not a hypothesis. No criteria attach. STOP applies to arms; this
+# adds no test and consumes no alpha.
+#
+# Why it is not optional
+# ----------------------
+# `results/paper_coverage_final` is the radius sweep the paper would otherwise
+# cite, and it was produced under the recipe regime the decisive table just
+# invalidated: fedcs and oort carried 20-round `uav` recipes that cost them up
+# to 0.09 macro-F1, while proposed_hfl, flat_fl and hfl_no_selection all ran on
+# proposed_hfl's own recipe. Citing that curve beside a table produced under
+# tuned_weights_cf60.yaml would be reporting two different systems as one — the
+# exact error that made paper_coverage_v5 uncitable.
+#
+# What it is for
+# --------------
+# The decisive table established the mechanism on the N axis: the deficit
+# against flat_fl shrinks monotonically as clients-per-shard rises
+# (-0.1350/-0.0755/-0.0586/-0.0430 at N=30/50/100/200, tracking
+# mean_shard_clients 1.18/1.48/2.31/3.79). R_comm moves the same mediator
+# independently of N, from 1.04 clients per shard at 500 m to 2.82 at 5000 m.
+#
+# Two independent axes driving one measured quantity is the difference between
+# "we observed a trend in N" and "shard width governs the deficit". That is the
+# paper's central mechanism claim now that the selector claim is retracted, so
+# it is worth the 7 h.
+#
+# The prediction, recorded before the run: the deficit against flat_fl shrinks
+# with R_comm and does NOT cross zero, mirroring the N axis. Under the old
+# recipes it appeared to cross at ~2 km; that crossover was measured with
+# flat_fl on proposed_hfl's recipe and is expected to disappear now that flat_fl
+# carries its own, which gained +0.063 on the val proxy.
+#
+# `mclp_ls` matches the main table's placement, as in paper_coverage_final.
+# Same five methods, same evaluation seeds 0-9, N fixed at 200.
+#
+# 5 methods x 6 radii x 10 seeds = 300 jobs, ~7 h on 12 vCPU.
+extends: [paper_coverage.yaml, tuned_weights_cf60.yaml]
+
+name: paper_coverage_cf60
+results_dir: results/paper_coverage_cf60
+
+fl:
+  fusion_owner: client_full
+  placement_method: mclp_ls
+
+methods:
+  - proposed_hfl
+  - flat_fl
+  - hfl_no_selection
+  - fedcs
+  - oort

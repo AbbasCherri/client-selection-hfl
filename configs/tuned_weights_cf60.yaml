@@ -49,7 +49,9 @@
 # Stated plainly because it is the kind of detail that decides whether a
 # reviewer trusts the table.
 
-extends: paper_full.yaml
+# No `extends:` — this file is recipes ONLY. Inherit it alongside a domain
+# base, e.g. `extends: [paper_full.yaml, tuned_weights_cf60.yaml]`, so the
+# recipes win on conflict (later parent wins; see runner.load_config).
 
 fl:
   # Base recipe = proposed_hfl's adopted recipe. hfl_static and
