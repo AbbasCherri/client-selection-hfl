@@ -1,6 +1,6 @@
 # C3 — redundancy-discounted placement coverage.
 #
-# Criteria are fixed in REPORTS/preregistration_v6_c3.md §4, and the exact
+# Criteria are fixed in the v6/C3 pre-registration §4, and the exact
 # operationalisation in §5a, both committed (c02625c9, 099fda45) before this
 # arm's code existed. Read those first; this file only says how the arm is run.
 #

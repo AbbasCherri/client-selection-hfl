@@ -21,7 +21,7 @@
 #     both the observational slope and the intervention
 #
 # WHAT THIS SCRIPT DELIBERATELY DOES NOT RUN, and why (see
-# REPORTS/paper_data_manifest.md §5):
+# the paper data manifest §5):
 #   * selection-isolation sweep — `paper_full` already isolates selection, since
 #     every selector there runs on identical placement. Regenerating a 45 h
 #     experiment to re-answer that would change no claim.
@@ -30,7 +30,7 @@
 #     paper rather than silently omitted.
 #
 # Everything reported in the paper must trace to a row in
-# REPORTS/results_provenance.md.
+# the results provenance record.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."

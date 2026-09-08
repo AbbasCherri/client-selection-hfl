@@ -109,7 +109,7 @@ def both_cover_devices():
     Tier-1 scores every method through the shared channel now, so a baseline
     that only covers devices under its own derived radius would be reported at
     zero coverage and look far worse than published — the mirror image of the
-    618-vs-500 m advantage recorded in REPORTS/results_provenance.md.
+    618-vs-500 m advantage recorded in the results provenance record.
     """
     inst = _instance(seed=7, N=100, K=6)
     fitness = Fitness(inst)

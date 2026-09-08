@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Score the v6 arms against the criteria fixed in the pre-registration.
 
-REPORTS/preregistration_v6_method.md was committed (9729a1ce) before any v6 code
+The v6 method pre-registration was committed (9729a1ce) before any v6 code
 existed. This script applies its §4 mechanically so the verdict is not a matter
 of which comparison gets quoted afterwards.
 

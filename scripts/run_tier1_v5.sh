@@ -19,7 +19,7 @@
 # Side effect worth stating in the paper: the literature baselines no longer
 # carry a private coverage radius. Every method is gated by the same function of
 # the altitude it chose, which is the structural fix for the unequal-radius
-# comparison recorded in REPORTS/results_provenance.md.
+# comparison recorded in the results provenance record.
 #
 # SEPARATE from scripts/run_rebuild_v5.sh on purpose. bash reads a script
 # lazily from disk, so appending to a running one can corrupt its execution

@@ -46,7 +46,7 @@ class AssignmentResult:
         a many-round objective is why the v5 placement stopped within a few
         clients of the slot budget while a literature baseline that ignored the
         objective covered 2x as many and won downstream — see
-        REPORTS/preregistration_v6_method.md §2.
+        the v6 method pre-registration §2.
     n_reachable:
         Count of those devices.
     f_cover_disjoint:
@@ -66,7 +66,7 @@ class AssignmentResult:
         fitness-optimising method downstream, while `mclp_ls` manages 60% and
         double-covers at multiplicity 1.53. Redundancy is not free — two aircraft
         over the same clients spend the same ``K*capacity`` slots on fewer
-        distinct ones. See REPORTS/preregistration_v6_c3.md §5a.
+        distinct ones. See the v6/C3 pre-registration §5a.
     """
 
     assignment: np.ndarray

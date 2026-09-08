@@ -1,6 +1,6 @@
 # v6 CONTROL — both switches OFF. Must reproduce v5 exactly.
 #
-# Criteria and rationale are fixed in REPORTS/preregistration_v6_method.md,
+# Criteria and rationale are fixed in the v6 method pre-registration,
 # committed (9729a1ce) before any v6 code existed. Read that first; this file
 # only says how the arm is run.
 #

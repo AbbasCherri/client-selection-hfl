@@ -32,7 +32,7 @@ Selection modes
              hand it a free upper bound (and made it invariant to the
              dropout/SNR stress knobs — the 2026-07-18 fix).
 
-Literature baselines (Algorithms B1-B5, REPORTS/master_implementation_reference.md Appendix C)
+Literature baselines (Algorithms B1-B5, the implementation reference Appendix C)
 ------------------------------------------------------------------------
 "fedcs"    — B1: FedCS greedy deadline selection per UAV, purely time-driven
              (Nishio & Yonetani, ICC 2019)
@@ -425,7 +425,7 @@ class ClientSelector:
             # Comparing `ucb` against `ucb_balanced` holds the scoring rule
             # fixed and varies only the roster construction, which is the one
             # contrast that answers it. See the roster-construction confound in
-            # REPORTS/results_provenance.md.
+            # the results provenance record.
             selected = self._greedy_assign(
                 eligible_ids, eligible, static, uav_capacity,
                 client_coords, uav_coords_latlon, R_comm,

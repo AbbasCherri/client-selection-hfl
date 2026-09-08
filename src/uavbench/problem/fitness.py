@@ -89,7 +89,7 @@ class Fitness:
         # point "assigned" is flat and stops rewarding extra coverage, which is
         # why v5's fitness-optimising placements all halted within a few clients
         # of the slot budget while a non-optimising baseline covered twice as
-        # many and beat them downstream (REPORTS/preregistration_v6_method.md).
+        # many and beat them downstream (the v6 method pre-registration).
         # "disjoint"  — reachable value with a redundancy discount:
         #               sum(V_i / m_i) over reached devices, m_i = how many live
         #               UAVs reach device i. Equals "reachable" iff the layout is
@@ -97,7 +97,7 @@ class Fitness:
         #               only one of the three that creates pressure AWAY from
         #               double-covering. Parameter-free by construction — there is
         #               no penalty coefficient to tune, which matters because
-        #               REPORTS/preregistration_v6_c3.md §5 bans searching.
+        #               the v6/C3 pre-registration §5 bans searching.
         #
         #               Motivated by measurement, not taste: at K=20 `moon2022`
         #               reaches 85% of its covered devices with exactly one

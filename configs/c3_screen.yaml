@@ -1,7 +1,7 @@
 # C3 screening — placement geometry only, at the shipped weights.
 #
 # Criteria, hypotheses and falsification conditions are fixed in
-# REPORTS/preregistration_v6_c3.md, committed (c02625c9) before any C3 code
+# the v6/C3 pre-registration, committed (c02625c9) before any C3 code
 # existed. Read that first; this file only says how the screen is run.
 #
 # What this measures and why it is one round

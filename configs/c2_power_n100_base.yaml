@@ -1,6 +1,6 @@
 # C2 power run — BASELINE arm, client-count generalisation at N=100.
 #
-# Grid (b) of REPORTS/preregistration_c2_power.md §3. Every C2 number before
+# Grid (b) of the C2 power pre-registration §3. Every C2 number before
 # this run sat at N=200, where K*capacity=120 BINDS. At N=100 the slots are
 # SLACK, which is the regime that changes shard composition — the thing C2 acts
 # on — so an effect measured only at N=200 may be an effect of the binding

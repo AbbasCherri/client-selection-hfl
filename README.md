@@ -4,8 +4,8 @@ Research code for post-earthquake building-damage classification via
 hierarchical federated learning over UAV-relayed IoT clients, with
 metaheuristic 3-D UAV placement and reputation-aware client selection.
 Design rationale and implementation details:
-`REPORTS/master_implementation_reference.md`. Which config produced which
-result: `REPORTS/results_provenance.md`.
+the implementation reference. Which config produced which
+result: the results provenance record.
 
 ## Install
 
@@ -80,4 +80,4 @@ Runs write into `results/<name>/`: a resolved config YAML, a
 `seed_manifest.csv` (exact seeds, written before the run starts),
 per-round/per-run parquet tables, `confusion.parquet`, and figures.
 Every number destined for the paper must have a row in
-`REPORTS/results_provenance.md`.
+the results provenance record.

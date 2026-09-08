@@ -1,6 +1,6 @@
 # v6 arm C1 — reachability-maximizing placement, alone.
 #
-# Criteria and rationale are fixed in REPORTS/preregistration_v6_method.md,
+# Criteria and rationale are fixed in the v6 method pre-registration,
 # written and committed (9729a1ce) before any v6 code existed. Read that first;
 # this file only says how the arm is run.
 #

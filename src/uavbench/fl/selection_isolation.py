@@ -1,7 +1,7 @@
 """Selection-isolation benchmark: client-selection rules head-to-head.
 
 Compares the client-selection algorithms (proposed UCB, random, and the
-literature baselines B1-B3 from REPORTS/master_implementation_reference.md Appendix C) under
+literature baselines B1-B3 from the implementation reference Appendix C) under
 conditions where the selection rule is the *only* experimental variable:
 
 - **Static UAVs.** UAV positions are the K-means cluster centres of the
@@ -116,7 +116,7 @@ ARM_SPECS: dict[str, dict] = {
     # baseline is reported at its BEST setting, so the comparison is against a
     # fairly-configured opponent rather than an arbitrary one.
     #
-    # Provenance rule (REPORTS/rigor_plan_2026-08.md §0.3): where the source
+    # Provenance rule (the 2026-08 rigor plan §0.3): where the source
     # paper fixes a value we keep it and cite it; where the source SWEEPS the
     # value we sweep it as they did; where the constant exists only because of
     # our adaptation we give it a search budget.

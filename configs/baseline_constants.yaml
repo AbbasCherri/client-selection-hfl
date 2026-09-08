@@ -7,7 +7,7 @@
 # those papers. A reviewer comparing a tuned method against untuned opponents is
 # entitled to discount the result entirely.
 #
-# The rule is by provenance, not blanket tuning (REPORTS/rigor_plan_2026-08.md
+# The rule is by provenance, not blanket tuning (the 2026-08 rigor plan
 # §0.3):
 #   source fixes it      -> keep and cite      (Oort alpha = 2)
 #   source sweeps it     -> sweep as they did  (PoC d; FedCS deadline -> Phase 6)

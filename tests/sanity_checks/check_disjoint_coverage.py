@@ -10,7 +10,7 @@ the same two paths, so it gets the same treatment.
 
 Also guarded: the defining property. `disjoint` must equal `reachable` on a
 tiling and be strictly below it under overlap, because that difference IS the
-mechanism — see REPORTS/preregistration_v6_c3.md §5a. An implementation that
+mechanism — see the v6/C3 pre-registration §5a. An implementation that
 merely tracked `reachable` would pass a naive smoke test and measure nothing.
 """
 

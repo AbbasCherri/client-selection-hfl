@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Score the C2 power run against REPORTS/preregistration_c2_power.md §4.
+"""Score the C2 power run against the C2 power pre-registration §4.
 
 Three criteria, all required:
   1. Holm-significant wins over mclp_place at >= 2 of the 5 fleet sizes, grid (a)

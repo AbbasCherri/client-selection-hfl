@@ -224,7 +224,7 @@ def _shard_effective_class_fraction(
 ) -> dict[int, float]:
     """Per-UAV ``exp(H) / C`` — the effective class count, normalised to (0, 1].
 
-    This is the C2 aggregation weight (REPORTS/preregistration_v6_method.md).
+    This is the C2 aggregation weight (the v6 method pre-registration).
     A shard holding one class scores ``1/C``; a class-balanced one scores 1, so
     a healthy fleet is unaffected and only narrow shards are pulled down.
 
@@ -508,7 +508,7 @@ def _placement_geometry(
     *residual* device set, so its discs are pushed apart by construction, while
     the fitness optimisers may cluster freely. These columns make that
     difference measurable instead of arguable; see
-    REPORTS/preregistration_v6_c3.md, hypothesis H-A.
+    the v6/C3 pre-registration, hypothesis H-A.
 
     Distances use the same Haversine gate as :func:`_covered_clients` so the
     numbers refer to the coverage that actually happened, not to a second
@@ -873,7 +873,7 @@ def run_tier2(cfg: dict) -> dict:
     z_max_m: float = float(cfg["fl"].get("z_max_m", Z_MAX_M_DEFAULT))
     # Placement objective: "assigned" (capacity-capped, historical) or
     # "reachable" (capacity-free max-covering). See Fitness.coverage_mode and
-    # REPORTS/preregistration_v6_method.md. In fl.* so it enters the resume
+    # the v6 method pre-registration. In fl.* so it enters the resume
     # signature — changing the objective must invalidate checkpointed placements.
     coverage_mode: str = str(cfg["fl"].get("coverage_mode", "assigned"))
     uniform_coverage_radius: bool = bool(cfg["fl"].get("uniform_coverage_radius", False))
@@ -1145,7 +1145,7 @@ _METHOD_CFG: dict[str, tuple] = {
     # roster, same shard sizes as proposed_hfl in the capacity-binding
     # regime, only which UAV each client feeds differs.
     "hfl_diverse_roster": ("pso", "ucb_diversity", True, True),
-    # Literature baselines (Algorithms B1-B3, REPORTS/master_implementation_reference.md Appendix C):
+    # Literature baselines (Algorithms B1-B3, the implementation reference Appendix C):
     # identical PSO placement, reputation FedAvg, and T_sel cadence as
     # proposed_hfl — only the client-selection rule differs, isolating it as
     # the experimental variable.
@@ -1436,7 +1436,7 @@ def run_full_hfl(cfg: dict) -> dict:
     z_max_m = float(fl.get("z_max_m", Z_MAX_M_DEFAULT))
     # Placement objective: "assigned" (capacity-capped, historical) or
     # "reachable" (capacity-free max-covering). See Fitness.coverage_mode and
-    # REPORTS/preregistration_v6_method.md. In fl.* so it enters the resume
+    # the v6 method pre-registration. In fl.* so it enters the resume
     # signature — changing the objective must invalidate checkpointed placements.
     coverage_mode = str(fl.get("coverage_mode", "assigned"))
     # Edge-aggregation weighting: "samples" (data-size FedAvg, historical) or
@@ -1449,13 +1449,13 @@ def run_full_hfl(cfg: dict) -> dict:
         )
     # Placement fitness weights (w1 coverage, w2 energy, w3 imbalance). None
     # keeps Fitness's shipped defaults, so omitting this reproduces every
-    # earlier run exactly. Present so REPORTS/preregistration_v6_c3.md's H-B —
+    # earlier run exactly. Present so the v6/C3 pre-registration's H-B —
     # that the Optuna weights, fitted in the pre-2026-08-08 regime that Defect 1
     # voided, now make the optimizers buy movement energy out of their coverage
     # budget — can be tested at ONE fixed alternative. It is not a search knob:
     # the pre-registration forbids searching over w, because the baselines were
     # never re-tuned and tuning only the proposed method is the asymmetry
-    # REPORTS/rigor_plan_2026-08.md already documents.
+    # the 2026-08 rigor plan already documents.
     # In fl.* so it enters the resume signature: changing the objective must
     # invalidate checkpointed placements.
     placement_weights = fl.get("placement_weights")
@@ -2182,7 +2182,7 @@ def run_full_hfl(cfg: dict) -> dict:
                     "mean_shard_clients": _mean_shard_clients,
                     "n_active_uavs": _n_active_uavs,
                     # Placement geometry — see _placement_geometry and
-                    # REPORTS/preregistration_v6_c3.md.
+                    # the v6/C3 pre-registration.
                     **_place_geom,
                     **{f"f1_{cls}": v for cls, v in metrics["f1_per_class"].items()},
                     # val_* mirrors the reported metrics on the validation

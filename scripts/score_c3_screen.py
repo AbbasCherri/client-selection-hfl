@@ -1,4 +1,4 @@
-"""Apply REPORTS/preregistration_v6_c3.md's falsification conditions to the screen.
+"""Apply the v6/C3 pre-registration's falsification conditions to the screen.
 
 The pre-registration names two hypotheses and says, in advance, what would kill
 each. This script is the arithmetic of that, kept separate from the runner so the
@@ -134,4 +134,4 @@ else:
         surviving.append("H-A (dispersion)")
     print("Surviving: " + "; ".join(surviving))
     print("Run the corresponding C3 arm on the full fleet grid and judge it")
-    print("against the four criteria in REPORTS/preregistration_v6_c3.md §4.")
+    print("against the four criteria in the v6/C3 pre-registration §4.")

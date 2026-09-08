@@ -155,7 +155,7 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
     # physics the rest of the benchmark has retired.
     #
     # It also dissolves the scoring-fairness problem recorded in
-    # REPORTS/results_provenance.md: the literature baselines (mozaffari2016,
+    # the results provenance record: the literature baselines (mozaffari2016,
     # alzenad2017) derive their own radius from altitude and were previously
     # scored at a larger radius than PSO's flat 500 m. Under a shared channel
     # nobody has a private radius left — every method is gated by the same
@@ -197,7 +197,7 @@ def _run_one(cfg: dict, method: str, method_idx: int, scenario_idx: int, seed_i:
         # explicit `radii` override the link, so forwarding a baseline's own
         # meta["radii"] here would score mozaffari/alzenad on their derived
         # radius while every other method is gated by the channel — the exact
-        # 618-vs-500 m unfairness recorded in REPORTS/results_provenance.md,
+        # 618-vs-500 m unfairness recorded in the results provenance record,
         # reintroduced through the back door. The link already derives a radius
         # from whatever altitude each method chose, which is the fair version of
         # the same idea. Only the legacy flat gate still needs the override.

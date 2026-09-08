@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Score the C3 arm against REPORTS/preregistration_v6_c3.md §4.
+"""Score the C3 arm against the v6/C3 pre-registration §4.
 
 §4 was committed (c02625c9) before any C3 code existed and its criteria are NOT
 the same as v6's — C3 is judged on how much of the `moon2022` gap it closes at

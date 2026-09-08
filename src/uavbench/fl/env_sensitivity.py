@@ -10,7 +10,7 @@ end up with a simulator that flatters the proposed method. The response is to
 show the **sign of the proposed-vs-baseline gap is invariant** across a wide
 perturbation of each one, and to report openly any constant where it is not.
 
-Constants are classified in REPORTS/rigor_plan_2026-08.md §Phase 6:
+Constants are classified in the 2026-08 rigor plan §Phase 6:
   Class E   — environment/physics: screened here, never tuned.
   Class M   — a method's own knobs: tuned, with equal budget per method.
   Class T   — shared training recipe: tuned per method.

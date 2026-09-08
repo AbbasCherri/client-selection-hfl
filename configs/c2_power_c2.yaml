@@ -6,7 +6,7 @@
 # seed_idx, and the method hash is the same), so the pairing is exact even
 # though the arms run as separate configs.
 #
-# Criteria: REPORTS/preregistration_c2_power.md §4.
+# Criteria: the C2 power pre-registration §4.
 extends: c2_power_base.yaml
 
 name: c2_power_c2

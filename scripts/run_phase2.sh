@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 2 — the paper's headline sweep, re-run at validation-selected recipes.
 #
-# Why this re-run exists (REPORTS/rigor_plan_2026-08.md §0.2 / §0.3b):
+# Why this re-run exists (the 2026-08 rigor plan §0.2 / §0.3b):
 #   * every hyperparameter behind the previous numbers was chosen by maximising
 #     macro_f1 on the reported TEST split;
 #   * that one recipe was fit to proposed_hfl and imposed on all five

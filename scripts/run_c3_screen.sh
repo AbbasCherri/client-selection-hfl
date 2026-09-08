@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # C3 screening — two one-round sweeps, then the pre-registered verdict.
 #
-# READ FIRST: REPORTS/preregistration_v6_c3.md, committed c02625c9 before any
+# READ FIRST: the v6/C3 pre-registration, committed c02625c9 before any
 # C3 code existed. It names both hypotheses and states, in advance, what kills
 # each. This script only runs the screen; scripts/score_c3_screen.py applies the
 # conditions.

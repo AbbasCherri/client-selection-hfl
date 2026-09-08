@@ -1,6 +1,6 @@
 """Placement-geometry columns and the `placement_weights` override.
 
-Both are new for REPORTS/preregistration_v6_c3.md and both are the kind of
+Both are new for the v6/C3 pre-registration and both are the kind of
 change that can be silently wrong: a geometry statistic that looks plausible
 while measuring the wrong thing, and a weights knob that is applied to the
 optimizer's fitness but not to the canonical re-score (or vice versa), which

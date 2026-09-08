@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # C2 at higher power, plus the client-count generalisation it never had.
 #
-# READ FIRST: REPORTS/preregistration_c2_power.md, committed 0bb7abec before any
+# READ FIRST: the C2 power pre-registration, committed 0bb7abec before any
 # of these seeds were computed. It fixes n=25 with NO optional stopping, the
 # three criteria, and the fact that C2 was selected for extension after seeing
 # v6 — which must be disclosed wherever this is reported.
@@ -64,7 +64,7 @@ if [[ -n "$FAILED" ]]; then
     exit 1
 fi
 
-say "--- scoring against REPORTS/preregistration_c2_power.md §4 ---"
+say "--- scoring against the C2 power pre-registration §4 ---"
 python scripts/score_c2_power.py | tee results/c2_power_verdict.txt
 git add -A -- results || true
 git diff --cached --quiet || \

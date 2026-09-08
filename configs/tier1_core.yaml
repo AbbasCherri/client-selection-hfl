@@ -1,7 +1,7 @@
 # Tier-1 core config: the headline placement comparison (PSO vs GA vs the
 # physics/greedy baselines).
 #
-# Three design decisions define this benchmark (see REPORTS/results_provenance.md):
+# Three design decisions define this benchmark (see the results provenance record):
 #   1. EQUAL-RADIUS SCORING (fairness). Every method is scored at the same ~500 m
 #      coverage radius. The physics baselines are constrained to max_path_loss_db=95
 #      so their derived radius r*≈499 m matches the R_comm=500 m gate PSO/GA use;

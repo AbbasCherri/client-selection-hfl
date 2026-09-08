@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 1 of the August 2026 rigor plan (REPORTS/rigor_plan_2026-08.md):
+# Phase 1 of the August 2026 rigor plan (the 2026-08 rigor plan):
 # the class-awareness / oracle-degradation experiment.
 #
 # This is the block that can change what the paper claims, so it runs BEFORE

@@ -2,7 +2,7 @@
 """Optuna hyperparameter search — scored on VALIDATION data, per method.
 
 This script had two flaws that a reviewer would treat as disqualifying, both
-fixed here (REPORTS/rigor_plan_2026-08.md §0.2 / §0.3b):
+fixed here (the 2026-08 rigor plan §0.2 / §0.3b):
 
 **F1 — the objective read the reported test set.** 22 hyperparameters were
 chosen by maximising `macro_f1`, which is the held-out *test* column. That is

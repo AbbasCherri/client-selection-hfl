@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # C3 — the confirmatory arm, then the pre-registered verdict.
 #
-# READ FIRST: REPORTS/preregistration_v6_c3.md — §4 for the criteria (committed
+# READ FIRST: the v6/C3 pre-registration — §4 for the criteria (committed
 # c02625c9, before any C3 code) and §5a for the exact operationalisation
 # (committed 099fda45, after the screen but before this arm's code).
 #
@@ -50,7 +50,7 @@ git add -A -- results || true
 git diff --cached --quiet || \
     git -c user.email=vm@local -c user.name=vm commit -q -m "Add C3 results $(date -Is)"
 
-say "--- scoring against REPORTS/preregistration_v6_c3.md §4 ---"
+say "--- scoring against the v6/C3 pre-registration §4 ---"
 python scripts/score_c3.py | tee results/c3_verdict.txt
 git add -A -- results || true
 git diff --cached --quiet || \

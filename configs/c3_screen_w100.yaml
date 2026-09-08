@@ -1,6 +1,6 @@
 # C3 screening — the same placement with the energy/imbalance terms removed.
 #
-# Criteria and falsification conditions: REPORTS/preregistration_v6_c3.md
+# Criteria and falsification conditions: the v6/C3 pre-registration
 # (committed c02625c9, before any C3 code existed), hypothesis H-B.
 #
 # The one change: `placement_weights: [1, 0, 0]`. `mclp_ls` normally maximises
@@ -13,7 +13,7 @@
 #
 # This is ONE fixed alternative, not a search. The pre-registration forbids
 # searching over w: the baselines were never re-tuned, so tuning only the
-# proposed method is exactly the asymmetry REPORTS/rigor_plan_2026-08.md
+# proposed method is exactly the asymmetry the 2026-08 rigor plan
 # documents. (1, 0, 0) is chosen because it removes the trade entirely, not
 # because it scored well — nothing had been scored when this file was written.
 #

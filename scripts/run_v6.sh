@@ -2,7 +2,7 @@
 # v6 method evaluation — the 2x2 of C1 (reachable placement) and C2 (diversity-
 # weighted edge aggregation), judged against criteria fixed in advance.
 #
-# READ FIRST: REPORTS/preregistration_v6_method.md, committed 9729a1ce before
+# READ FIRST: the v6 method pre-registration, committed 9729a1ce before
 # any v6 code existed. It names the comparators, the endpoint, the four
 # conditions for declaring an improvement, and what is not allowed (no
 # re-tuning, no post-hoc operating point, no reporting a subset of K).
@@ -78,7 +78,7 @@ for arm in v6_c1_reachable v6_c2_diversity v6_both; do
 done
 
 # ---- 2. judgement against the pre-registered criteria --------------------
-say "--- scoring against REPORTS/preregistration_v6_method.md ---"
+say "--- scoring against the v6 method pre-registration ---"
 python scripts/score_v6.py | tee results/v6_verdict.txt
 git add -A -- results || true
 git diff --cached --quiet || \

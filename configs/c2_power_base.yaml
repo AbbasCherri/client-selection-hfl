@@ -1,6 +1,6 @@
 # C2 power run — BASELINE arm (v5 default aggregation), fleet grid.
 #
-# Design, criteria and what is not allowed: REPORTS/preregistration_c2_power.md,
+# Design, criteria and what is not allowed: the C2 power pre-registration,
 # committed 0bb7abec before any of these seeds were computed. Read that first.
 #
 # This is grid (a): the fleet replication. K ∈ {5,10,15,20,30} at N=200, 25
