@@ -1091,3 +1091,95 @@ rule cannot win here, so further search would be search against a known cause.
 
 The paper this data supports is a mechanism-and-negative-result paper, not a
 new-selector paper. The selector claim is retracted.
+
+## Radius sweep under cf60 recipes (2026-09-08, `results/paper_coverage_cf60`)
+
+300 jobs, 0 errors, all 30 method/cell combinations cleared the collapse gate.
+Same recipes as the decisive table, `mclp_ls`, `client_full`, seeds 0-9, N=200.
+Holm within each comparator family of 6 radii.
+
+    proposed_hfl - flat_fl            -0.0932* -0.0567* -0.0362* -0.0412* -0.0417* -0.0430*
+    proposed_hfl - hfl_no_selection   -0.0543* -0.0555* -0.0356* -0.0373* -0.0315* -0.0317*
+    proposed_hfl - fedcs              -0.0325* -0.0239* -0.0030  -0.0073  -0.0078  -0.0086
+    proposed_hfl - oort               -0.0010  +0.0006  +0.0056  +0.0024  +0.0062  +0.0051
+                                       R=500    1000     2000     3000     4000     5000
+
+### The crossover does not exist
+
+Under the cf60 recipes `proposed_hfl` is Holm-WORSE than `flat_fl` at **all six
+radii** and the difference never turns non-negative. The ~2 km crossover
+reported from `paper_coverage_final` was an artefact of `flat_fl` running on
+`proposed_hfl`'s recipe, because it had no per-method entry in
+`tuned_weights.yaml`. Given its own 60-round recipe it is ahead everywhere.
+
+Against `fedcs` the picture also collapses: significant losses at 500 m and
+1000 m, and four nulls below the MDE above that. Against `oort`, six nulls. No
+comparator on this axis supports a claim for the selection rule.
+
+`hfl_no_selection` beats `proposed_hfl` at all six radii. That is now the third
+independent replication of this result (main table 4/4 N, `paper_coverage_final`
+6/6 radii, here 6/6 radii), across two harnesses and three recipe regimes.
+
+### Cross-harness reproduction
+
+The cell N=200 / R_comm=5000 is present in BOTH `paper_full_cf60` (via
+`_paper_job`) and `paper_coverage_cf60` (via `_coverage_job`) — different code
+paths, separate runs, same seeds. Both give `proposed_hfl - flat_fl = -0.0430`,
+agreeing to 0.0001. That is the strongest end-to-end determinism check the
+project has produced and it validates both harnesses against each other.
+
+### The mediator is real but NOT sufficient — correcting the earlier claim
+
+The 2026-09-05 entry described shard width as the mechanism, with "two
+independent axes driving one measured quantity". That was too strong, and this
+sweep is what shows it. Deficit against `flat_fl` versus `mean_shard_clients`:
+
+    N axis (R=5000)          R_comm axis (N=200)
+    N=30   1.119  -0.1350    R=500   1.039  -0.0932
+    N=50   1.273  -0.0755    R=1000  1.183  -0.0567
+    N=100  1.787  -0.0586    R=2000  1.647  -0.0362
+    N=200  2.867  -0.0430    R=3000  1.925  -0.0412
+                             R=4000  2.387  -0.0417
+                             R=5000  2.867  -0.0430
+
+Matched on shard width, the two axes should agree if shard width mediates:
+
+    shard ~1.12   N=30  -0.1350   vs  R=1000 (1.18)  -0.0567   gap 0.0783
+    shard ~1.27   N=50  -0.0755   vs  R=1000 (1.18)  -0.0567   gap 0.0188
+    shard ~1.79   N=100 -0.0586   vs  R=3000 (1.93)  -0.0412   gap 0.0174
+    shard ~2.87   N=200 -0.0430   vs  R=5000 (2.87)  -0.0430   gap 0.0001
+
+    correlation(shard, deficit): pooled r = +0.657
+                                 within N r = +0.782, within R r = +0.652
+
+They agree exactly at the top and diverge by 0.078 at the bottom — a gap larger
+than most effects this paper reports. Shard width is a genuine correlate, not a
+sufficient cause. Two further differences travel with N and are not controlled
+by it: the total client population, and per-client data volume (~4 300 samples
+per client at N=30 versus ~640 at N=200). At N=30 flat FedAvg over 30 data-rich
+clients is close to centralised training, which is the hardest case for any
+hierarchy — and it is where the deficit is worst.
+
+The R axis also **plateaus**: it improves from -0.093 to -0.036 by 2 km and then
+flattens at about -0.04 out to 5 km, while the N axis keeps improving. Reach
+saturates; population does not.
+
+**Supportable statement:** the hierarchical deficit shrinks as shards widen,
+strongly along the client-population axis and only up to ~2 km along the reach
+axis, and it does not close within any configuration tested. It is a rate and a
+bound, not a single-mediator mechanism and not a crossover.
+
+### The ownership comparison against v5 is confounded
+
+`score_radius.py` prints `paper_coverage_v5` for reference, but v5 differs from
+this run in BOTH block ownership and recipes. It cannot be read as an ownership
+contrast. The clean ownership evidence remains R2/R3, where recipes were held
+fixed across the two ownerships.
+
+### Programme complete
+
+This was the last run. §5 STOP stands, no arm is licensed, and the compute is
+finished. What remains is writing, against `paper_full_cf60` and
+`paper_coverage_cf60`; `main.tex`, `scripts/paper_figures.py` and every table
+sourced from `r2_client_full`, `r3_replication` or `paper_full_cf` still cite
+retracted numbers and must be rewritten before the paper is coherent.

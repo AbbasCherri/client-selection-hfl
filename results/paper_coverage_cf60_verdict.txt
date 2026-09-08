@@ -1,0 +1,63 @@
+# radius sweep verdict — paper_coverage_cf60
+# 30000 rows, radii [np.float64(500.0), np.float64(1000.0), np.float64(2000.0), np.float64(3000.0), np.float64(4000.0), np.float64(5000.0)], methods ['fedcs', 'flat_fl', 'hfl_no_selection', 'oort', 'proposed_hfl']
+# reduction: mean macro_f1 over last 10 rounds; paired Wilcoxon over seeds;
+# Holm applied within each comparator family (6 radii)
+
+=== proposed_hfl - flat_fl ===
+  R_comm       diff          p    Holm    n  note
+     500    -0.0932     0.0020    True   10  
+    1000    -0.0567     0.0020    True   10  
+    2000    -0.0362     0.0039    True   10  
+    3000    -0.0412     0.0020    True   10  
+    4000    -0.0417     0.0020    True   10  
+    5000    -0.0430     0.0020    True   10  
+  v5 (fusion_owner=uav) for reference:
+     500    -0.2099     0.0020           10  v5
+    1000    -0.1485     0.0020           10  v5
+    2000    -0.1128     0.0020           10  v5
+    3000    -0.0765     0.0039           10  v5
+    4000    -0.0511     0.0020           10  v5
+    5000    -0.0376     0.0840           10  v5
+
+=== proposed_hfl - hfl_no_selection ===
+  R_comm       diff          p    Holm    n  note
+     500    -0.0543     0.0020    True   10  
+    1000    -0.0555     0.0020    True   10  
+    2000    -0.0356     0.0020    True   10  
+    3000    -0.0373     0.0020    True   10  
+    4000    -0.0315     0.0020    True   10  
+    5000    -0.0317     0.0020    True   10  
+
+=== proposed_hfl - fedcs ===
+  R_comm       diff          p    Holm    n  note
+     500    -0.0325     0.0039    True   10  
+    1000    -0.0239     0.0020    True   10  
+    2000    -0.0030     0.3750   False   10  below MDE - uninformative
+    3000    -0.0073     0.0273   False   10  below MDE - uninformative
+    4000    -0.0078     0.0645   False   10  below MDE - uninformative
+    5000    -0.0086     0.0137   False   10  below MDE - uninformative
+
+=== proposed_hfl - oort ===
+  R_comm       diff          p    Holm    n  note
+     500    -0.0010     0.6953   False   10  below MDE - uninformative
+    1000    +0.0006     0.4316   False   10  below MDE - uninformative
+    2000    +0.0056     0.1055   False   10  below MDE - uninformative
+    3000    +0.0024     0.3750   False   10  below MDE - uninformative
+    4000    +0.0062     0.0371   False   10  below MDE - uninformative
+    5000    +0.0051     0.2754   False   10  below MDE - uninformative
+
+=== crossover vs flat_fl ===
+  sign flips non-negative at R_comm = None
+  Holm-significant LOSSES at : [500, 1000, 2000, 3000, 4000, 5000]
+  Holm-significant WINS at   : none
+  monotone increasing in R_comm: False
+
+=== mechanism (mean over seeds, last 10 rounds) ===
+        coverage_pct  mean_shard_clients  participation_pct  n_unique_selected
+R_comm                                                                        
+500.0          12.20               1.039              2.910               16.9
+1000.0         23.20               1.183              5.635               35.1
+2000.0         42.75               1.647             11.290               67.5
+3000.0         55.90               1.925             15.170               92.0
+4000.0         69.40               2.387             19.995              118.7
+5000.0         79.30               2.867             23.815              140.3
