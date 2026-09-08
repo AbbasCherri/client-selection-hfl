@@ -25,7 +25,7 @@ dist/
 nohup.out
 
 # Data is re-fetched from the pinned HF dataset / GSI tiles — never tracked
-# (see REPORTS/data_availability.md for licensing: tiles are not redistributed)
+# (tiles are licensed and not redistributed; see the data availability note)
 # Leading slash anchors this to the repo root: unanchored "data/" also matched
 # src/hflsim/data/, so editing the loader tripped "paths are ignored" on every
 # `git add` even though the file was tracked.
@@ -35,3 +35,33 @@ nohup.out
 # dataset) by compute_feature_cache; at subsample 1.0 they exceed GitHub's
 # 100 MB file limit, so the VM's auto-commit must never stage them.
 img_features.npy
+
+# Working notes. Kept locally, never tracked: they are drafts and scratch
+# reasoning, not results, and a public repo should carry the evidence rather
+# than the deliberation. PREREGISTRATION.md at the root IS tracked — it is the
+# audit trail and belongs with the results it adjudicates.
+REPORTS/
+
+# Paper workspace. The manuscript and its rendered figures are the deliverable,
+# not the artifact this repo exists to provide: the repo holds the code,
+# configs, results and pre-registration that let someone reproduce and check the
+# numbers. Keeping the manuscript out also means a draft in progress is never
+# published by an ordinary `git push`.
+main.tex
+ref.bib
+Figures/
+scripts/paper_figures.py
+scripts/system_figures.py
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.out
+*.synctex.gz
+*.toc
+main.pdf
