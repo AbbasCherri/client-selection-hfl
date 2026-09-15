@@ -1,0 +1,32 @@
+# The eight arms of the main grid that were tuned under the symmetric 60-round
+# protocol but never run under it. REGENERATION, not a hypothesis; no criteria
+# attach and no alpha is consumed.
+#
+# Why a sibling tree rather than extending paper_full_cf60.yaml's method list:
+# `methods` is part of sweep._RESUME_SIG_KEYS, so appending to that list marks all
+# 200 finished jobs stale and reruns them. The jobs themselves do not depend on
+# which other methods share the list, so a second tree with an identical
+# configuration apart from `methods` concatenates exactly with the first: same
+# seeds 0-9, same partitions, same placements, same recipes file.
+#
+# Readers combine the two trees; scripts/main_grid_report.py does so and asserts
+# that the resolved configurations differ only in name, results_dir and methods.
+#
+# 8 methods x 4 N x 10 seeds = 320 jobs, ~4 h on 12 vCPU.
+extends: [paper_full.yaml, tuned_weights_cf60.yaml]
+
+name: paper_full_cf60b
+results_dir: results/paper_full_cf60b
+
+fl:
+  fusion_owner: client_full
+
+methods:
+  - rep_cap
+  - fair_mab
+  - power_of_choice
+  - centralized
+  - mozaffari2016
+  - alzenad2017
+  - hfl_static
+  - hfl_no_reputation
